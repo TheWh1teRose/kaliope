@@ -1,0 +1,86 @@
+[project]
+name = "kalliope"
+version = "0.1.0"
+description = "Kalliope — turns long-form learning documents into grounded podcast scripts."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "argon2-cffi>=23.1",
+    "pymupdf>=1.24",
+    "typer>=0.13",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "anthropic>=0.40",
+    "openai>=1.55",
+    "google-genai>=0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+kalliope = "app.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# The stopword lists are data, not code. Wrapping them to 100 columns makes
+# them harder to audit against the language they describe.
+"app/lang/resources.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "."
+explicit_package_bases = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["app.ingestion.*", "app.pipeline.*"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["pymupdf", "pymupdf.*", "anthropic.*", "openai.*", "google.*", "alembic.*"]
+ignore_missing_imports = true
+
+# PyMuPDF ships partial, untyped stubs. The two modules that touch it directly
+# stay strict in every other respect; only the untyped-call rule is relaxed,
+# because the alternative is wrapping a third-party library in casts.
+[[tool.mypy.overrides]]
+module = ["app.ingestion.extract", "app.ingestion.tables"]
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "corpus: tests parameterised over the discovered corpus",
+    "holdout: tests that open the holdout corpus (final acceptance only)",
+    "llm: tests that require live LLM credentials",
+]

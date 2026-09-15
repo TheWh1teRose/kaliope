@@ -1,0 +1,173 @@
+/*
+ * Kalliope design tokens.
+ *
+ * Direction: pre-press proofing. The reviewer's job is to hold a generated
+ * claim and its source rectangle in register with each other, which is exactly
+ * what checking a proof is. So the chrome is a cool press-room grey, a rendered
+ * PDF page is the only pure white surface on screen, and the one saturated
+ * colour is reserved for the citation link itself. Red is never decorative —
+ * it means a gate failed.
+ *
+ * Three type roles, each tied to a kind of content:
+ *   serif  — spoken and source text (the human language being judged)
+ *   sans   — chrome, navigation, controls
+ *   mono   — measured facts: ids, offsets, hashes, costs, gate codes
+ *
+ * No webfonts: the container runs with no external services, so personality
+ * comes from setting rather than from a downloaded face.
+ */
+
+:root {
+  /* --- surfaces ------------------------------------------------------ */
+  --press: #f1f0ec;
+  --chrome: #f7f6f3;
+  --card: #fffefb;
+  --page: #ffffff;
+  --sunk: #e9e7e1;
+
+  /* --- ink ----------------------------------------------------------- */
+  --ink: #17233d;
+  --ink-2: #46536e;
+  --ink-3: #78849c;
+  --ink-4: #a5aec0;
+  --rule: #ddd9d0;
+  --rule-strong: #c6c1b5;
+
+  /* --- the one accent: the citation link ----------------------------- */
+  --mark: #2d5bff;
+  --mark-soft: #e6ecff;
+  --mark-deep: #1b3ec4;
+
+  /* --- semantic status ----------------------------------------------- */
+  --pass: #1a7f52;
+  --pass-soft: #e2f2ea;
+  --warn: #9a6207;
+  --warn-soft: #fbf0d9;
+  --fail: #c02b1e;
+  --fail-soft: #fbe6e3;
+  --idle: #78849c;
+  --idle-soft: #eceff4;
+
+  /* --- zone plates ---------------------------------------------------
+   * Cool hues are narratable, warm hues are not. A reviewer learns the
+   * rule without reading the legend, which is the point of encoding it
+   * in the palette rather than in a caption.
+   */
+  --zone-body: #3b82f6;
+  --zone-emphasis_callout: #0d9488;
+  --zone-objective: #6366f1;
+  --zone-caption: #38bdf8;
+  --zone-data_table: #0891b2;
+  --zone-heading: #64748b;
+  --zone-exercise: #db6a1e;
+  --zone-answer_space: #b45309;
+  --zone-reference: #a3562f;
+  --zone-navigation: #8b6f47;
+  --zone-metadata: #9a3f6a;
+  --zone-other: #8b8b8b;
+
+  /* --- type ---------------------------------------------------------- */
+  --serif: Charter, 'Bitstream Charter', 'Iowan Old Style', 'Source Serif Pro', Georgia,
+    'Times New Roman', serif;
+  --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas,
+    monospace;
+
+  --t-xs: 0.6875rem;
+  --t-sm: 0.8125rem;
+  --t-md: 0.9375rem;
+  --t-lg: 1.125rem;
+  --t-xl: 1.5rem;
+  --t-2xl: 2.125rem;
+  --t-3xl: 3rem;
+
+  /* --- space, on a 4px grid ------------------------------------------ */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+
+  --r-sm: 4px;
+  --r-md: 7px;
+  --r-lg: 12px;
+
+  --shadow-sm: 0 1px 2px rgb(23 35 61 / 0.06), 0 1px 1px rgb(23 35 61 / 0.04);
+  --shadow-md: 0 2px 6px rgb(23 35 61 / 0.07), 0 8px 24px -12px rgb(23 35 61 / 0.18);
+  --shadow-lg: 0 4px 12px rgb(23 35 61 / 0.1), 0 24px 48px -20px rgb(23 35 61 / 0.28);
+
+  --rail: 52px;
+  --sidebar: 268px;
+  --fast: 120ms cubic-bezier(0.2, 0, 0.2, 1);
+  --slow: 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --press: #0f1523;
+    --chrome: #141b2c;
+    --card: #1a2235;
+    --page: #ffffff;
+    --sunk: #0b101b;
+
+    --ink: #e8ecf4;
+    --ink-2: #b3bdd1;
+    --ink-3: #8390aa;
+    --ink-4: #5d6a85;
+    --rule: #26304a;
+    --rule-strong: #38445f;
+
+    --mark: #7b9bff;
+    --mark-soft: #1d2b52;
+    --mark-deep: #a7bcff;
+
+    --pass: #4ec78d;
+    --pass-soft: #12301f;
+    --warn: #e0a63a;
+    --warn-soft: #33260b;
+    --fail: #ff7a6b;
+    --fail-soft: #3a1512;
+    --idle: #8390aa;
+    --idle-soft: #1d2537;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 2px 8px rgb(0 0 0 / 0.45);
+    --shadow-lg: 0 12px 40px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme='dark'] {
+  --press: #0f1523;
+  --chrome: #141b2c;
+  --card: #1a2235;
+  --page: #ffffff;
+  --sunk: #0b101b;
+
+  --ink: #e8ecf4;
+  --ink-2: #b3bdd1;
+  --ink-3: #8390aa;
+  --ink-4: #5d6a85;
+  --rule: #26304a;
+  --rule-strong: #38445f;
+
+  --mark: #7b9bff;
+  --mark-soft: #1d2b52;
+  --mark-deep: #a7bcff;
+
+  --pass: #4ec78d;
+  --pass-soft: #12301f;
+  --warn: #e0a63a;
+  --warn-soft: #33260b;
+  --fail: #ff7a6b;
+  --fail-soft: #3a1512;
+  --idle: #8390aa;
+  --idle-soft: #1d2537;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 2px 8px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 0.5);
+}
