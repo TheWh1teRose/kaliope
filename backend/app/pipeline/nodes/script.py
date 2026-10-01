@@ -27,7 +27,8 @@ from app.schemas.pipeline import AudienceSpec, FormatSpec, Outline, Script, Segm
 #: Shortest quote worth trying to locate; below this, matches are coincidental.
 MIN_QUOTE_CHARS = 12
 
-_SYSTEM = """\
+_SYSTEM = (
+    """\
 You write one beat of a grounded audio episode.
 
 Groundedness policy — this is the part that matters:
@@ -41,8 +42,10 @@ Groundedness policy — this is the part that matters:
   the passages. If the passages do not support something, leave it out.
 
 Style:
-- Write speech, not prose: it will be heard once, not read twice.
-  No bullet points, no headings, no markdown, no stage directions.
+"""
+    "- Write speech, not prose: it will be heard once, not read twice. "
+    "No bullet points, no headings, no markdown, no stage directions.\n"
+    """\
 - Keep it conversational, the speakers can interrupt, the conversation should feel human like.
 - Use only the speakers you are given, by their exact names.
 - Write in the document's language.
@@ -50,6 +53,7 @@ Style:
 
 Return JSON only.
 """
+)
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
