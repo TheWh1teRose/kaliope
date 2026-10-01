@@ -48,13 +48,46 @@ MODELS: dict[str, ModelSpec] = {
     spec.id: spec
     for spec in [
         # --- Anthropic -------------------------------------------------
+        # Prices are USD per million tokens (Claude API reference, 2026-09-25).
+        # Ids have no date suffix. Max output is 128K on these frontier models.
+        ModelSpec(
+            id="claude-fable-5-1",
+            provider="anthropic",
+            input_usd_per_mtok=10.0,
+            output_usd_per_mtok=50.0,
+            # Cache read is $0.25/MTok, not the usual 0.1× input rate ($1.00).
+            cache_read_multiplier=0.025,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
+        ),
+        ModelSpec(
+            id="claude-fable-5",
+            provider="anthropic",
+            input_usd_per_mtok=10.0,
+            output_usd_per_mtok=50.0,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
+        ),
+        ModelSpec(
+            id="claude-opus-5-5",
+            provider="anthropic",
+            input_usd_per_mtok=4.0,
+            output_usd_per_mtok=20.0,
+            # Cache read is $0.20/MTok, not the usual 0.1× input rate ($0.40).
+            cache_read_multiplier=0.05,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
+        ),
         ModelSpec(
             id="claude-opus-5",
             provider="anthropic",
             input_usd_per_mtok=5.0,
             output_usd_per_mtok=25.0,
             context_window=1_000_000,
-            max_output_tokens=64_000,
+            max_output_tokens=128_000,
             supports_sampling=False,
         ),
         ModelSpec(
@@ -63,7 +96,16 @@ MODELS: dict[str, ModelSpec] = {
             input_usd_per_mtok=5.0,
             output_usd_per_mtok=25.0,
             context_window=1_000_000,
-            max_output_tokens=64_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
+        ),
+        ModelSpec(
+            id="claude-opus-4-7",
+            provider="anthropic",
+            input_usd_per_mtok=5.0,
+            output_usd_per_mtok=25.0,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
             supports_sampling=False,
         ),
         ModelSpec(
@@ -72,15 +114,24 @@ MODELS: dict[str, ModelSpec] = {
             input_usd_per_mtok=5.0,
             output_usd_per_mtok=25.0,
             context_window=1_000_000,
-            max_output_tokens=64_000,
+            max_output_tokens=128_000,
+        ),
+        ModelSpec(
+            id="claude-sonnet-5-5",
+            provider="anthropic",
+            input_usd_per_mtok=2.0,
+            output_usd_per_mtok=10.0,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
         ),
         ModelSpec(
             id="claude-sonnet-5",
             provider="anthropic",
-            input_usd_per_mtok=3.0,
-            output_usd_per_mtok=15.0,
+            input_usd_per_mtok=2.0,
+            output_usd_per_mtok=10.0,
             context_window=1_000_000,
-            max_output_tokens=64_000,
+            max_output_tokens=128_000,
             supports_sampling=False,
         ),
         ModelSpec(
@@ -89,7 +140,7 @@ MODELS: dict[str, ModelSpec] = {
             input_usd_per_mtok=3.0,
             output_usd_per_mtok=15.0,
             context_window=1_000_000,
-            max_output_tokens=64_000,
+            max_output_tokens=128_000,
         ),
         ModelSpec(
             id="claude-haiku-4-5",
