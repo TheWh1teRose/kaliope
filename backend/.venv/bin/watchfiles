@@ -1,6 +1,0 @@
-#!/home/felix/.no-mistakes/worktrees/78707f4e109e/01M3VZ17KSFJFTPKDNQVKVBGNQ/backend/.venv/bin/python3
-import sys
-from watchfiles.cli import cli
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(cli())
