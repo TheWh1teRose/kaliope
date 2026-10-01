@@ -326,16 +326,29 @@ def test_parse_json_drops_an_unfinished_last_item() -> None:
     }
 
 
-def test_json_payload_names_a_max_tokens_cutoff() -> None:
+@pytest.mark.parametrize("stop_reason", ["max_tokens", "length", "MAX_TOKENS"])
+def test_json_payload_names_a_cutoff(stop_reason: str) -> None:
     completion = Completion(
         text="kein JSON",
         model_id="claude-opus-5",
         usage=Usage(),
         latency_ms=1,
-        stop_reason="max_tokens",
+        stop_reason=stop_reason,
     )
     with pytest.raises(Exception, match="hit max_tokens"):
         completion.json_payload()
+
+
+def test_google_records_max_tokens() -> None:
+    from types import SimpleNamespace
+
+    from app.llm.google import _stop_reason
+
+    response = SimpleNamespace(
+        candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name="MAX_TOKENS"))]
+    )
+    assert _stop_reason(response) == "MAX_TOKENS"
+    assert _stop_reason(SimpleNamespace(candidates=[])) is None
 
 
 def test_llm_client_keeps_the_prompt_it_sent() -> None:

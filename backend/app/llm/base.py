@@ -68,7 +68,7 @@ class Completion(BaseModel):
         try:
             return parse_json(self.text)
         except LLMError:
-            if self.stop_reason == "max_tokens":
+            if self.stop_reason in {"max_tokens", "length", "MAX_TOKENS"}:
                 raise LLMError(
                     "model response was cut off (hit max_tokens) and was not "
                     f"valid JSON: {self.text[:400]!r}"

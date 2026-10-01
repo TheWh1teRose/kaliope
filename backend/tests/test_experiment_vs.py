@@ -56,8 +56,20 @@ def _answer(probabilities: list[object]) -> dict[str, object]:
     }
 
 
-def _completion(text: str, stop_reason: str) -> Completion:
+def _completion(text: str, stop_reason: str | None) -> Completion:
     return Completion(text=text, model_id="m", usage=Usage(), latency_ms=1, stop_reason=stop_reason)
+
+
+def _schema_keys(node: object) -> set[str]:
+    found: set[str] = set()
+    if isinstance(node, dict):
+        found.update(node)
+        for value in node.values():
+            found |= _schema_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _schema_keys(item)
+    return found
 
 
 # ------------------------------------------------------------------- prompts
@@ -122,9 +134,9 @@ def test_vs_schema_reuses_the_script_segments_unchanged() -> None:
     assert list(schema["properties"]) == ["responses"]
     assert baseline_schema() == SCRIPT_SCHEMA
     assert baseline_schema() is not SCRIPT_SCHEMA
-    # No range or length constraints: providers reject most of them.
-    assert "minimum" not in json.dumps(schema)
-    assert "minItems" not in json.dumps(schema)
+    keys = _schema_keys(schema)
+    assert "minimum" not in keys
+    assert "minItems" not in keys
 
 
 # --------------------------------------------------------------------- parse
@@ -147,44 +159,51 @@ def test_parse_fenced_completion_and_truncation() -> None:
     parsed = parse_completion(fenced, VSOptions(k=2))
     assert len(parsed.candidates) == 2 and parsed.warnings == []
 
-    # Cut off inside the third version. A fence or a preamble uses the same rule.
     cut = json.dumps(_answer([0.5, 0.3, 0.2]))
     cut = cut[: cut.rindex('"probability": 0.2') - 30]
-    for prefix in ("", "```json\n", "Hier ist das Ergebnis:\n"):
-        parsed = parse_completion(_completion(prefix + cut, "max_tokens"), VSOptions(k=3))
-        assert [c.probability for c in parsed.candidates] == [0.5, 0.3]
-        assert all(len(c.segments) == 2 for c in parsed.candidates)
-        assert any("unvollständige" in w for w in parsed.warnings)
-        assert any("2 Fassungen statt 3" in w for w in parsed.warnings)
+    for stop in ("max_tokens", "length", None):
+        for prefix in ("", "```json\n", "Hier ist das Ergebnis:\n"):
+            parsed = parse_completion(_completion(prefix + cut, stop), VSOptions(k=3))
+            assert [c.probability for c in parsed.candidates] == [0.5, 0.3]
+            assert all(len(c.segments) == 2 for c in parsed.candidates)
+            assert parsed.warnings == ["2 Fassungen statt 3."]
 
-    # Cut off after finished objects: those versions are complete and stay.
     finished = json.dumps(_answer([0.5, 0.3, 0.2]))
+    cutoff = "Die Antwort wurde abgeschnitten. Max. Ausgabetokens erhöhen oder k senken."
     for tail in (",", ", {"):
         for prefix in ("", "```json\n"):
             parsed = parse_completion(
                 _completion(prefix + finished[:-2] + tail, "max_tokens"), VSOptions(k=3)
             )
             assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
-            assert parsed.warnings == []
+            assert parsed.warnings == [cutoff]
 
-    # A finished JSON body that still stops at max_tokens keeps every version.
-    parsed = parse_completion(_completion(finished, "max_tokens"), VSOptions(k=3))
-    assert len(parsed.candidates) == 3
-    assert parsed.warnings == []
+    parsed = parse_completion(_completion(finished, "MAX_TOKENS"), VSOptions(k=3))
+    assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
+    assert parsed.warnings == [cutoff]
 
-    # A cut in a later field is outside the drafts.
     noted = finished[:-1] + ', "note": "this was cut'
     parsed = parse_completion(_completion(noted, "max_tokens"), VSOptions(k=3))
     assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
+    assert parsed.warnings == [cutoff]
+
+    lead = 'Hinweis: {"ok": true}\n```json\n' + cut
+    parsed = parse_completion(_completion(lead, "length"), VSOptions(k=3))
+    assert [c.probability for c in parsed.candidates] == [0.5, 0.3]
+
+    example = json.dumps(_answer([0.9]))
+    parsed = parse_completion(
+        _completion(f"Beispiel: {example}\n{finished}", "end"), VSOptions(k=3)
+    )
+    assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
     assert parsed.warnings == []
 
-    # Cut off inside the first version: nothing complete, and the error says why.
     first = json.dumps(_answer([0.5]))
     first = first[: first.index("Antwort 0")]
-    with pytest.raises(VSParseError, match="abgeschnitten"):
+    with pytest.raises(VSParseError, match="keine verwertbare Fassung"):
         parse_completion(_completion(first, "max_tokens"), VSOptions(k=3))
-    with pytest.raises(VSParseError, match="abgeschnitten"):
-        parse_completion(_completion("```json\n" + first, "max_tokens"), VSOptions(k=3))
+    with pytest.raises(VSParseError, match="keine verwertbare Fassung"):
+        parse_completion(_completion("```json\n" + first, "length"), VSOptions(k=3))
 
 
 def test_percentages_strings_and_missing_probabilities() -> None:
@@ -204,6 +223,17 @@ def test_percentages_strings_and_missing_probabilities() -> None:
     parsed = parse_payload(_answer([0.6, 1.05]), VSOptions(k=2))
     assert [c.probability for c in parsed.candidates] == [0.6, 1.0]
     assert any("begrenzt" in w for w in parsed.warnings)
+    assert not any("Prozent" in w for w in parsed.warnings)
+
+    parsed = parse_payload(_answer(["60%", 1.05]), VSOptions(k=2))
+    assert [c.probability for c in parsed.candidates] == [0.6, 1.0]
+
+    parsed = parse_payload(_answer([1.05, 1.2, 1.1]), VSOptions(k=3))
+    assert [c.probability for c in parsed.candidates] == [1.0, 1.0, 1.0]
+    assert not any("Prozent" in w for w in parsed.warnings)
+
+    parsed = parse_payload(_answer([1.5, 0.2]), VSOptions(k=2))
+    assert [c.probability for c in parsed.candidates] == [1.0, 0.2]
     assert not any("Prozent" in w for w in parsed.warnings)
 
     parsed = parse_payload(_answer(["0,3", None, "viel"]), VSOptions(k=3))
@@ -227,19 +257,25 @@ def test_duplicates_are_flagged() -> None:
     assert parsed.candidates[1].flags == ["doppelt"]
 
 
-def test_tolerated_shapes() -> None:
-    bare = [
-        {"segments": _segments(1), "probability": 0.5},
-        {"text": "Nur Text.", "probability": 0.5},
-    ]
-    parsed = parse_payload(bare, VSOptions(k=2))
-    assert len(parsed.candidates) == 2
-    assert parsed.candidates[1].segments[0].speaker == "?"
-    assert any("bloße Liste" in w for w in parsed.warnings)
-    assert any("bloßer Text" in w for w in parsed.warnings)
+def test_items_without_segments_are_dropped() -> None:
+    answer = {
+        "responses": [
+            {"segments": _segments(1), "probability": 0.5},
+            {"text": "Nur Text.", "probability": 0.5},
+            "Nur ein Satz.",
+        ]
+    }
+    parsed = parse_payload(answer, VSOptions(k=3))
+    assert len(parsed.candidates) == 1
+    assert any("ohne verwertbaren Text" in w for w in parsed.warnings)
+    assert any("1 Fassungen statt 3" in w for w in parsed.warnings)
 
-    parsed = parse_payload({"versions": [{"segments": _segments(1)}]}, VSOptions(k=1 + 1))
-    assert any('"versions"' in w for w in parsed.warnings)
+
+def test_only_responses_is_accepted() -> None:
+    with pytest.raises(VSParseError, match="responses"):
+        parse_payload({"versions": [{"segments": _segments(1), "probability": 0.5}]}, VSOptions())
+    with pytest.raises(VSParseError, match="responses"):
+        parse_payload([{"segments": _segments(1), "probability": 0.5}], VSOptions())
 
 
 def test_nothing_usable_raises() -> None:

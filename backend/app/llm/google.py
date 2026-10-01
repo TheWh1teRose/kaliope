@@ -61,16 +61,32 @@ class GoogleProvider:
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         text = getattr(response, "text", "") or ""
+        stop_reason = _stop_reason(response)
         if not text.strip():
-            raise LLMError("empty completion")
+            raise LLMError(f"empty completion (stop_reason={stop_reason})")
 
         return Completion(
             text=text,
             model_id=request.model,
             usage=_usage(response),
             latency_ms=latency_ms,
+            stop_reason=stop_reason,
             warnings=warnings,
         )
+
+
+def _stop_reason(response: Any) -> str | None:
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return None
+    reason = getattr(candidates[0], "finish_reason", None)
+    if reason is None:
+        return None
+    name = getattr(reason, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    text = str(reason)
+    return text.rsplit(".", 1)[-1] or None
 
 
 def _usage(response: Any) -> Usage:

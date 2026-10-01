@@ -16,14 +16,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.experiments.verbalized_sampling.options import VSOptions
-from app.llm.base import Completion, LLMError
+from app.llm.base import Completion, LLMError, parse_json
 from app.pipeline.nodes.script import _closest_speaker
 
 #: Sum of probabilities above which the answer is flagged. The paper's
 #: definition is relative to the full distribution, so sums below 1 are fine.
 PROBABILITY_SUM_LIMIT = 1.05
 
-_LIST_KEYS = ("responses", "candidates", "versions")
+_CUTOFF_STOPS = frozenset({"max_tokens", "length", "MAX_TOKENS"})
 _WS = re.compile(r"\s+")
 
 
@@ -65,15 +65,14 @@ def parse_completion(
 ) -> ParsedAnswer:
     """Parse one VS call's completion. Raises :class:`VSParseError` on nothing usable."""
     try:
-        payload = completion.json_payload()
+        payload = _responses_payload(completion.text)
     except LLMError as exc:
         raise VSParseError(f"Die Antwort war kein gültiges JSON: {exc}") from exc
     return parse_payload(
         payload,
         options,
         speakers=speakers,
-        truncated=completion.stop_reason == "max_tokens",
-        source=completion.text,
+        cutoff=completion.stop_reason is None or completion.stop_reason in _CUTOFF_STOPS,
     )
 
 
@@ -82,56 +81,33 @@ def parse_payload(
     options: VSOptions,
     *,
     speakers: list[str] | None = None,
-    truncated: bool = False,
-    source: str | None = None,
+    cutoff: bool = False,
 ) -> ParsedAnswer:
     """Normalise an already-decoded answer from one call.
 
-    ``truncated`` is the call's stop reason. ``source`` is the raw completion,
-    used to drop a response only when the text ends inside that response.
+    A candidate counts only when it is an object with non-empty segments and a
+    ``probability`` field. ``cutoff`` is true when the call stopped for length.
     """
     warnings: list[str] = []
-
-    items: Any
-    if isinstance(payload, list):
-        items = payload
-        warnings.append('Antwort war eine bloße Liste statt {"responses": [...]}.')
-    elif isinstance(payload, dict):
-        items = None
-        for key in _LIST_KEYS:
-            if isinstance(payload.get(key), list):
-                items = payload[key]
-                if key != "responses":
-                    warnings.append(f'Fassungen standen unter "{key}" statt "responses".')
-                break
-    else:
-        items = None
+    items = payload.get("responses") if isinstance(payload, dict) else None
     if not isinstance(items, list):
         raise VSParseError('Die Antwort enthält keine Liste "responses".')
-    cut_off = False
-    if truncated and source is not None and items:
-        closed, inside = _response_closure(source)
-        if inside and len(items) > closed:
-            items = items[:closed]
-            cut_off = True
 
     candidates: list[Candidate] = []
     raw_probabilities: list[float | None] = []
     percent_tokens: list[bool] = []
     dropped = 0
     for item in items:
-        segments, text_only = _segments(item, speakers)
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        segments = _segments(item, speakers)
         if not segments:
             dropped += 1
             continue
-        if text_only:
-            warnings.append(
-                f"Fassung #{len(candidates) + 1} kam als bloßer Text ohne Sprecher; "
-                "sie steht als ein Abschnitt da."
-            )
-        value, marked_percent = _probability(
-            item.get("probability") if isinstance(item, dict) else None
-        )
+        if "probability" not in item:
+            continue
+        value, marked_percent = _probability(item.get("probability"))
         raw_probabilities.append(value)
         percent_tokens.append(marked_percent)
         candidates.append(Candidate(index=len(candidates), probability=None, segments=segments))
@@ -139,11 +115,6 @@ def parse_payload(
     if dropped:
         warnings.append(f"{dropped} Fassung(en) ohne verwertbaren Text verworfen.")
     if not candidates:
-        if truncated:
-            raise VSParseError(
-                "Die Antwort wurde bei Max. Ausgabetokens abgeschnitten, bevor eine Fassung "
-                "vollständig war. Max. Ausgabetokens erhöhen oder k senken."
-            )
         raise VSParseError("Die Antwort enthält keine verwertbare Fassung.")
 
     for candidate, value in zip(
@@ -153,11 +124,12 @@ def parse_payload(
     ):
         candidate.probability = value
 
-    _check(candidates, options, warnings)
-    if cut_off:
+    _check(candidates, warnings)
+    if len(candidates) < options.k:
+        warnings.append(f"{len(candidates)} Fassungen statt {options.k}.")
+    elif cutoff:
         warnings.append(
-            "Die Antwort wurde bei Max. Ausgabetokens abgeschnitten; die unvollständige letzte "
-            "Fassung ist verworfen. Max. Ausgabetokens erhöhen oder k senken."
+            "Die Antwort wurde abgeschnitten. Max. Ausgabetokens erhöhen oder k senken."
         )
     return ParsedAnswer(candidates=candidates, warnings=warnings)
 
@@ -165,118 +137,35 @@ def parse_payload(
 # ------------------------------------------------------------------ helpers
 
 
-def _response_closure(text: str) -> tuple[int, bool]:
-    """Closed response objects, and whether the text ends inside one of them."""
-    containers: list[dict[str, Any]] = []
-    closed = 0
-    depth = 0
-    i = 0
-    n = len(text)
-    while i < n:
-        char = text[i]
-        if char.isspace():
-            i += 1
-            continue
-        if char == '"':
-            i += 1
-            word: list[str] = []
-            while i < n:
-                if text[i] == "\\":
-                    if i + 1 >= n:
-                        return closed, depth > 0
-                    word.append(text[i + 1])
-                    i += 2
-                    continue
-                if text[i] == '"':
-                    break
-                word.append(text[i])
-                i += 1
-            if i >= n:
-                return closed, depth > 0
-            i += 1
-            frame = containers[-1] if containers else None
-            if frame is not None and frame["phase"] == "key":
-                frame["key"] = "".join(word)
-                frame["phase"] = "colon"
-            elif frame is not None and frame["phase"] == "value":
-                frame["phase"] = "next"
-            continue
-        if char == "{":
-            if (
-                containers
-                and containers[-1]["kind"] == "arr"
-                and containers[-1]["responses"]
-                and depth == 0
-            ):
-                depth = 1
-            elif depth:
-                depth += 1
-            containers.append({"kind": "obj", "responses": False, "phase": "key"})
-            i += 1
-            continue
-        if char == "}":
-            if depth:
-                depth -= 1
-                if depth == 0:
-                    closed += 1
-            if containers:
-                containers.pop()
-            if containers:
-                containers[-1]["phase"] = "next"
-            i += 1
-            continue
-        if char == "[":
-            key = containers[-1].get("key") if containers else None
-            responses = not containers or (
-                containers[-1]["kind"] == "obj"
-                and containers[-1]["phase"] == "value"
-                and key in _LIST_KEYS
-                and not any(container["responses"] for container in containers)
-            )
-            containers.append({"kind": "arr", "responses": responses, "phase": "value"})
-            i += 1
-            continue
-        if char == "]":
-            if containers:
-                containers.pop()
-            if containers:
-                containers[-1]["phase"] = "next"
-            i += 1
-            continue
-        if char == ":" and containers and containers[-1]["phase"] == "colon":
-            containers[-1]["phase"] = "value"
-            i += 1
-            continue
-        if char == ",":
-            if containers and containers[-1]["phase"] == "next":
-                kind = containers[-1]["kind"]
-                containers[-1]["phase"] = "key" if kind == "obj" else "value"
-            i += 1
-            continue
-        if containers and containers[-1]["phase"] == "value" and (
-            char in "-0123456789" or char in "tfn"
-        ):
-            i += 1
-            while i < n and (text[i].isalnum() or text[i] in "+-.eE"):
-                i += 1
-            containers[-1]["phase"] = "next"
-            continue
-        i += 1
-    return closed, depth > 0
+def _responses_payload(text: str) -> Any:
+    """The last JSON object in ``text`` that has a ``responses`` list."""
+    chosen: Any = None
+    marker = '"responses"'
+    start = 0
+    while True:
+        index = text.find(marker, start)
+        if index < 0:
+            break
+        brace = text.rfind("{", 0, index)
+        if brace >= 0:
+            try:
+                data = parse_json(text[brace:])
+            except LLMError:
+                data = None
+            if isinstance(data, dict) and isinstance(data.get("responses"), list):
+                chosen = data
+        start = index + len(marker)
+    if chosen is None:
+        raise VSParseError('Die Antwort enthält keine Liste "responses".')
+    return chosen
 
 
-def _segments(item: Any, speakers: list[str] | None) -> tuple[list[CandidateSegment], bool]:
-    if isinstance(item, str):
-        item = {"text": item}
+def _segments(item: Any, speakers: list[str] | None) -> list[CandidateSegment]:
     if not isinstance(item, dict):
-        return [], False
-
+        return []
     raw = item.get("segments")
     if not isinstance(raw, list):
-        text = item.get("text")
-        if isinstance(text, str) and text.strip():
-            return [CandidateSegment(speaker="?", text=text.strip(), kind="pedagogy")], True
-        return [], False
+        return []
 
     segments: list[CandidateSegment] = []
     for entry in raw:
@@ -296,7 +185,7 @@ def _segments(item: Any, speakers: list[str] | None) -> tuple[list[CandidateSegm
                 citations=_citations(entry.get("citations")),
             )
         )
-    return segments, False
+    return segments
 
 
 def _citations(raw: Any) -> list[Citation]:
@@ -332,7 +221,7 @@ def _normalise_probabilities(
     values: list[float | None], percent_tokens: list[bool], warnings: list[str]
 ) -> list[float | None]:
     present = [value for value in values if value is not None]
-    batch_percent = bool(present) and all(value > 1 for value in present)
+    batch_percent = bool(present) and all(value >= 2 for value in present)
     scaled: list[float | None] = []
     converted = False
     for value, marked_percent in zip(values, percent_tokens, strict=True):
@@ -360,10 +249,7 @@ def _normalise_probabilities(
     return out
 
 
-def _check(candidates: list[Candidate], options: VSOptions, warnings: list[str]) -> None:
-    if len(candidates) != options.k:
-        warnings.append(f"{len(candidates)} Fassungen statt {options.k}.")
-
+def _check(candidates: list[Candidate], warnings: list[str]) -> None:
     probabilities = [c.probability for c in candidates if c.probability is not None]
     missing = len(candidates) - len(probabilities)
     if missing:
