@@ -205,9 +205,7 @@ def submit_bench_feedback(
     stored = store.put("notes", notes)
     pause = (row.manifest_json or {}).get("pause") or {}
     node_name = str(pause.get("node") or "human_feedback")
-    persist_human_output(
-        db, kind="bench", run_id=bench_id, node_name=node_name, digest=stored.hash
-    )
+    persist_human_output(db, kind="bench", run_id=bench_id, node_name=node_name, digest=stored.hash)
     row.manifest_json = mark_submitted(row.manifest_json, stored.hash, notes)
     row.status = "queued"
     row.error = None

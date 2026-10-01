@@ -229,9 +229,7 @@ def compile_submission(
     return merge_notes(existing, incoming, subject=subject)
 
 
-def last_row_for_key(
-    session: Session, *, run_id: str, flow: Flow, key: str
-) -> RunNode | None:
+def last_row_for_key(session: Session, *, run_id: str, flow: Flow, key: str) -> RunNode | None:
     """The last node in the flow that published ``key`` and left an artifact."""
     names = [entry.node for entry in flow.nodes if get_node(entry.node).produces == key]
     rows = {

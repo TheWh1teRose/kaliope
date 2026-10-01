@@ -97,8 +97,7 @@ class AiCriticNode:
             "so a single hallucinated id does not fail the run.",
             "If an earlier node already published notes, this step appends to "
             "them rather than replacing them.",
-            "An empty list is a valid result: the model found nothing that "
-            "fails the criteria.",
+            "An empty list is a valid result: the model found nothing that fails the criteria.",
         ],
         inputs={
             "outline": "Beats the notes may point at. Optional when a script is present.",
@@ -241,9 +240,7 @@ def _prompt(inp: CriticInput, subject: str, criteria: str) -> str:
         parts.append("Segments:")
         for segment in inp.script.segments:
             preview = segment.text if len(segment.text) <= 280 else segment.text[:277] + "…"
-            parts.append(
-                f"- [{segment.id}] beat={segment.beat_id} {segment.speaker}: {preview}"
-            )
+            parts.append(f"- [{segment.id}] beat={segment.beat_id} {segment.speaker}: {preview}")
     return "\n".join(parts)
 
 

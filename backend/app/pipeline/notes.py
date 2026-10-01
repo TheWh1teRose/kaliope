@@ -76,9 +76,7 @@ def validate_note_targets(
                     f"note '{note.id}' targets a segment, but these notes are about an outline"
                 )
             if note.target.id not in segments:
-                raise ValueError(
-                    f"note '{note.id}' targets unknown segment '{note.target.id}'"
-                )
+                raise ValueError(f"note '{note.id}' targets unknown segment '{note.target.id}'")
             continue
         if note.target.id not in beats:
             raise ValueError(f"note '{note.id}' targets unknown beat '{note.target.id}'")
