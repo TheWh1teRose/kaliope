@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import type { BlockOut, DocumentSummary, StructureOut } from '@/api/types'
 import ConfidenceStrip from '@/components/ConfidenceStrip.vue'
+import DocumentActions from '@/components/DocumentActions.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import PageCanvas from '@/components/PageCanvas.vue'
 import { t } from '@/i18n'
@@ -25,11 +26,6 @@ const relabelTarget = ref<BlockOut | null>(null)
 const relabelZone = ref('')
 const relabelNote = ref('')
 const busy = ref(false)
-const renaming = ref(false)
-const draftTitle = ref('')
-const renameError = ref('')
-const renamed = ref(false)
-let renamedTimer: number | undefined
 
 const blocks = computed(() => {
   const all = structure.value?.blocks ?? []
@@ -85,44 +81,22 @@ async function saveRelabel(): Promise<void> {
   }
 }
 
-function startRename(): void {
-  if (!document.value) return
-  draftTitle.value = document.value.title || document.value.filename
-  renameError.value = ''
-  renaming.value = true
+async function refreshDocument(): Promise<void> {
+  const next = await documents.get(props.id)
+  document.value = next
+  structure.value = next.parse_status === 'parsed' ? await documents.structure(props.id) : null
 }
 
-function cancelRename(): void {
-  renaming.value = false
-  renameError.value = ''
-}
-
-async function saveRename(): Promise<void> {
-  const title = draftTitle.value.trim()
-  if (!document.value || !title || busy.value) return
-  busy.value = true
-  renameError.value = ''
+async function onDocumentChanged(): Promise<void> {
   try {
-    const updated = await documents.rename(props.id, title)
-    document.value.title = updated.title
-    renaming.value = false
-    renamed.value = true
-    window.clearTimeout(renamedTimer)
-    renamedTimer = window.setTimeout(() => (renamed.value = false), 4000)
-  } catch (exc) {
-    renameError.value = exc instanceof Error ? exc.message : t.documents.renameFailed
-  } finally {
-    busy.value = false
+    await refreshDocument()
+  } catch {
+    // The action already succeeded; leave the open document in place.
   }
 }
-
-onUnmounted(() => window.clearTimeout(renamedTimer))
 
 onMounted(async () => {
-  document.value = await documents.get(props.id)
-  if (document.value.parse_status === 'parsed') {
-    structure.value = await documents.structure(props.id)
-  }
+  await refreshDocument()
 })
 </script>
 
@@ -133,44 +107,13 @@ onMounted(async () => {
         <RouterLink :to="{ name: 'documents' }" class="eyebrow back">
           ← {{ t.documents.title }}
         </RouterLink>
-        <form v-if="renaming" class="rename" @submit.prevent="saveRename">
-          <label class="sr-only" for="detail-name">{{ t.documents.nameLabel }}</label>
-          <input
-            id="detail-name"
-            v-model="draftTitle"
-            class="input rename__input"
-            maxlength="200"
-            data-autofocus
-            @keydown.esc="cancelRename"
-          />
-          <button type="submit" class="btn btn--sm btn--mark" :disabled="busy || !draftTitle.trim()">
-            {{ t.common.save }}
-          </button>
-          <button type="button" class="btn btn--sm" @click="cancelRename">
-            {{ t.common.cancel }}
-          </button>
-        </form>
-        <div v-else class="rename">
-          <h1 class="h-page truncate">{{ document.title || document.filename }}</h1>
-          <button class="btn btn--sm btn--ghost" @click="startRename">{{ t.common.rename }}</button>
-        </div>
-        <p v-if="renameError" class="rename__msg rename__msg--fail" role="alert">
-          {{ renameError }}
-        </p>
-        <p v-else-if="renamed" class="rename__msg" role="status">{{ t.documents.renamed }}</p>
+        <h1 class="h-page truncate">{{ document.title || document.filename }}</h1>
         <p class="meta">
           {{ document.page_count }} {{ t.documents.pages }} · {{ document.language }} ·
           parse v{{ document.parse_version }}
         </p>
       </div>
-      <div v-if="document.parse_status === 'parsed'" class="row wrap">
-        <RouterLink class="btn" :to="{ name: 'bench', query: { document: document.id } }">
-          {{ t.documents.openBench }}
-        </RouterLink>
-        <RouterLink class="btn btn--mark" :to="{ name: 'new-run', params: { id: document.id } }">
-          {{ t.documents.newRun }}
-        </RouterLink>
-      </div>
+      <DocumentActions variant="bar" :document="document" @changed="onDocumentChanged" />
     </header>
 
     <section v-if="document.report" class="report sheet">
@@ -353,28 +296,9 @@ onMounted(async () => {
 .detail__head {
   display: flex;
   align-items: flex-end;
+  justify-content: space-between;
   gap: var(--s5);
-}
-
-.rename {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-}
-
-.rename__input {
-  flex: 1;
-  min-width: 0;
-}
-
-.rename__msg {
-  margin: var(--s2) 0 0;
-  font-size: var(--t-sm);
-  color: var(--pass);
-}
-
-.rename__msg--fail {
-  color: var(--fail);
+  flex-wrap: wrap;
 }
 
 .back {

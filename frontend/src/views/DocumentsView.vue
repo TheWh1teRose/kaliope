@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 
 import type { DocumentSummary, FolderOut } from '@/api/types'
 import ConfidenceStrip from '@/components/ConfidenceStrip.vue'
+import DocumentActions from '@/components/DocumentActions.vue'
 import FolderTree from '@/components/FolderTree.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -16,14 +17,6 @@ const folders = useFoldersStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const error = ref('')
-const notice = ref('')
-let noticeTimer: number | undefined
-
-function announce(message: string): void {
-  notice.value = message
-  window.clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => (notice.value = ''), 4000)
-}
 
 /** `null` shows everything, `'root'` the unfiled documents, else a folder id. */
 const selected = ref<string | null>(null)
@@ -35,8 +28,6 @@ type Prompt =
   | { kind: 'rename'; folder: FolderOut }
   | { kind: 'move'; folder: FolderOut }
   | { kind: 'remove'; folder: FolderOut }
-  | { kind: 'file'; document: DocumentSummary }
-  | { kind: 'rename-document'; document: DocumentSummary }
 
 const prompt = ref<Prompt | null>(null)
 const draftName = ref('')
@@ -72,10 +63,6 @@ const promptTitle = computed(() => {
       return t.folders.moveTitle
     case 'remove':
       return t.folders.deleteTitle
-    case 'file':
-      return t.folders.moveDocument
-    case 'rename-document':
-      return t.documents.renameTitle
     default:
       return ''
   }
@@ -118,21 +105,10 @@ async function fileDocument(documentId: string, folderId: string | null): Promis
 
 function openPrompt(next: Prompt): void {
   prompt.value = next
-  draftName.value =
-    next.kind === 'rename'
-      ? next.folder.name
-      : next.kind === 'rename-document'
-        ? next.document.title || next.document.filename
-        : ''
+  draftName.value = next.kind === 'rename' ? next.folder.name : ''
   error.value = ''
   draftParent.value =
-    next.kind === 'create'
-      ? next.parentId
-      : next.kind === 'move'
-        ? next.folder.parent_id
-        : next.kind === 'file'
-          ? next.document.folder_id
-          : null
+    next.kind === 'create' ? next.parentId : next.kind === 'move' ? next.folder.parent_id : null
 }
 
 async function confirmPrompt(): Promise<void> {
@@ -144,11 +120,6 @@ async function confirmPrompt(): Promise<void> {
     if (current.kind === 'create') await folders.create(draftName.value, draftParent.value)
     if (current.kind === 'rename') await folders.rename(current.folder.id, draftName.value)
     if (current.kind === 'move') await folders.move(current.folder.id, draftParent.value)
-    if (current.kind === 'rename-document') {
-      await documents.rename(current.document.id, draftName.value.trim())
-      announce(t.documents.renamed)
-    }
-    if (current.kind === 'file') await fileDocument(current.document.id, draftParent.value)
     if (current.kind === 'remove') {
       await folders.remove(current.folder.id, true)
       await documents.load()
@@ -181,10 +152,7 @@ function confidenceLabel(document: DocumentSummary): string {
 }
 
 onMounted(() => Promise.all([documents.load(), folders.load()]))
-onUnmounted(() => {
-  documents.stopPolling()
-  window.clearTimeout(noticeTimer)
-})
+onUnmounted(() => documents.stopPolling())
 </script>
 
 <template>
@@ -210,7 +178,6 @@ onUnmounted(() => {
     </header>
 
     <p v-if="error && !prompt" class="error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
 
     <div class="layout">
       <FolderTree
@@ -296,34 +263,7 @@ onUnmounted(() => {
             </p>
 
             <footer class="doc__foot">
-              <RouterLink
-                class="btn btn--sm"
-                :to="{ name: 'document', params: { id: document.id } }"
-              >
-                {{ t.documents.openDetail }}
-              </RouterLink>
-              <RouterLink
-                v-if="document.parse_status === 'parsed'"
-                class="btn btn--sm btn--mark"
-                :to="{ name: 'new-run', params: { id: document.id } }"
-              >
-                {{ t.documents.newRun }}
-              </RouterLink>
-              <button
-                class="btn btn--sm btn--ghost"
-                @click="openPrompt({ kind: 'file', document })"
-              >
-                {{ t.folders.inFolder }}
-              </button>
-              <button
-                class="btn btn--sm btn--ghost"
-                @click="openPrompt({ kind: 'rename-document', document })"
-              >
-                {{ t.common.rename }}
-              </button>
-              <button class="btn btn--sm btn--ghost" @click="documents.reparse(document.id)">
-                {{ t.documents.reparse }}
-              </button>
+              <DocumentActions variant="menu" :document="document" />
             </footer>
           </li>
         </ul>
@@ -333,15 +273,7 @@ onUnmounted(() => {
     <ModalDialog
       :open="Boolean(prompt)"
       :title="promptTitle"
-      :lead="
-        prompt?.kind === 'remove'
-          ? t.folders.deleteLead
-          : prompt?.kind === 'file'
-            ? t.folders.moveDocumentLead
-            : prompt?.kind === 'rename-document'
-              ? t.documents.renameLead
-              : ''
-      "
+      :lead="prompt?.kind === 'remove' ? t.folders.deleteLead : ''"
       @close="prompt = null"
     >
       <div class="stack">
@@ -352,28 +284,10 @@ onUnmounted(() => {
           <input id="folder-name" v-model="draftName" class="input" data-autofocus />
         </div>
 
-        <div v-if="prompt?.kind === 'rename-document'" class="field">
-          <label for="document-name">{{ t.documents.nameLabel }}</label>
-          <input
-            id="document-name"
-            v-model="draftName"
-            class="input"
-            maxlength="200"
-            data-autofocus
-            @keydown.enter="confirmPrompt"
-          />
-          <p class="meta">{{ t.documents.nameMax }}</p>
-        </div>
-
         <p v-if="error && prompt" class="error" role="alert">{{ error }}</p>
 
-        <div
-          v-if="prompt?.kind === 'create' || prompt?.kind === 'move' || prompt?.kind === 'file'"
-          class="field"
-        >
-          <label for="folder-parent">
-            {{ prompt.kind === 'file' ? t.folders.title : t.folders.parent }}
-          </label>
+        <div v-if="prompt?.kind === 'create' || prompt?.kind === 'move'" class="field">
+          <label for="folder-parent">{{ t.folders.parent }}</label>
           <select id="folder-parent" v-model="draftParent" class="select">
             <option :value="null">{{ t.folders.root }}</option>
             <option v-for="folder in destinations" :key="folder.id" :value="folder.id">
@@ -390,10 +304,7 @@ onUnmounted(() => {
           :class="prompt?.kind === 'remove' ? 'btn--danger' : 'btn--mark'"
           :disabled="
             busy ||
-            ((prompt?.kind === 'create' ||
-              prompt?.kind === 'rename' ||
-              prompt?.kind === 'rename-document') &&
-              !draftName.trim())
+            ((prompt?.kind === 'create' || prompt?.kind === 'rename') && !draftName.trim())
           "
           @click="confirmPrompt"
         >
@@ -488,6 +399,7 @@ onUnmounted(() => {
 }
 
 .doc {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--s4);
@@ -502,6 +414,10 @@ onUnmounted(() => {
   border-color: var(--rule-strong);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
+}
+
+.doc:has(.doc-actions--open) {
+  z-index: 4;
 }
 
 .doc__head {
@@ -541,15 +457,6 @@ onUnmounted(() => {
 .doc__facts dd {
   margin: 2px 0 0;
   font-size: var(--t-sm);
-}
-
-.notice {
-  margin: 0 0 var(--s3);
-  padding: var(--s2) var(--s3);
-  font-size: var(--t-sm);
-  color: var(--pass);
-  background: var(--pass-soft);
-  border-radius: var(--r-sm);
 }
 
 .doc__error {
