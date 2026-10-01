@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * One value in the bench bag: summary, preview, and an editable JSON body.
+ * One value in the bench bag: summary, and a text or JSON body.
  *
- * Large artifacts (a full parse) stay behind their hash until someone asks to
- * edit them, so opening the bench over a real document does not dump megabytes
- * into a textarea.
+ * Outline, beat, and script open as read-only text. JSON mode is the editable
+ * textarea. Large artifacts (a full parse) stay behind their hash until someone
+ * asks to edit them, so opening the bench over a real document does not dump
+ * megabytes into a textarea.
  */
 import { computed, ref, watch } from 'vue'
 
