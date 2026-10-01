@@ -49,7 +49,8 @@ MODELS: dict[str, ModelSpec] = {
     for spec in [
         # --- Anthropic -------------------------------------------------
         # Prices are USD per million tokens (Claude API reference, 2026-09-25).
-        # Ids have no date suffix. Max output is 128K on these frontier models.
+        # Frontier ids omit the date suffix and allow 128K output. The dated
+        # Haiku id stays so existing references keep resolving.
         ModelSpec(
             id="claude-fable-5-1",
             provider="anthropic",
