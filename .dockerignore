@@ -1,0 +1,52 @@
+# Keep the context to what the Dockerfile COPY lines need:
+#   frontend/package.json, frontend/package-lock.json, frontend source
+#   backend/pyproject.toml, backend/app, backend/alembic, backend/alembic.ini
+#   docker/entrypoint.sh
+# The image runs npm ci and npm run build itself, so a copied node_modules
+# would overlay that install.
+#
+# This Docker only matches a pattern in subdirectories when it starts with **/.
+
+.git
+**/.git
+.github
+
+# Dependencies and build output
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+
+# Python environment and caches
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.egg-info
+**/.eggs
+**/.coverage
+**/.coverage.*
+**/htmlcov
+**/coverage
+
+# Local data and secrets
+.data
+**/.data
+**/.env
+**/.env.*
+!**/.env.example
+
+# Editors and OS
+**/.idea
+**/.vscode
+**/*.swp
+**/*.swo
+**/.DS_Store
+
+# Not copied into the image.
+docs
+docs/**
+
+# backend/tests/corpus/holdout is only a .gitkeep today, so it is not excluded.
