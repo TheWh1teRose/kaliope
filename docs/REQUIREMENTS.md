@@ -646,7 +646,7 @@ edit_events(id, run_id, target_type[segment|selection|outline|block_zone],
 review_sessions(id, run_id, user_id, started_at, finished_at, summary_json)
 ```
 
-`PRAGMA journal_mode=WAL`, `foreign_keys=ON`. Alembic migrations.
+`PRAGMA journal_mode` from `SQLITE_JOURNAL_MODE` (default `WAL`), `foreign_keys=ON`. Alembic migrations.
 
 ---
 
@@ -692,6 +692,7 @@ magic bytes.
 ```
 APP_SECRET_KEY=            # required
 DATA_DIR=/data
+SQLITE_JOURNAL_MODE=WAL    # DELETE on Cloud Storage FUSE mounts (README)
 ANTHROPIC_API_KEY=  OPENAI_API_KEY=  GOOGLE_API_KEY=
 DEFAULT_MODEL=claude-opus-4-6
 ZONE_MODEL=                # cheap fast model for zone classification
