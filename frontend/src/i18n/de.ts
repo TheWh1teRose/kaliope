@@ -222,6 +222,13 @@ export default {
     newRun: 'Lauf starten',
     openBench: 'In der Werkbank öffnen',
     openDetail: 'Struktur ansehen',
+    renameTitle: 'Dokument umbenennen',
+    renameLead:
+      'Nur der angezeigte Name ändert sich. Datei, Einlesen und bisherige Läufe bleiben unberührt.',
+    renamed: 'Dokument umbenannt.',
+    renameFailed: 'Das Dokument konnte nicht umbenannt werden.',
+    nameLabel: 'Name',
+    nameMax: 'Höchstens 200 Zeichen.',
     parseStatus: {
       pending: 'Wartet',
       parsing: 'Wird eingelesen',

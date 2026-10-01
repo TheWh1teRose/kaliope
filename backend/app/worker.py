@@ -124,7 +124,8 @@ class Worker:
                 document.parse_version = parse_version
                 document.page_count = parsed.page_count
                 document.language = parsed.language
-                document.title = parsed.title
+                if not document.title_edited:
+                    document.title = parsed.title
                 document.report_json = parsed.report.model_dump(mode="json")
                 document.parsed_artifact_hash = stored.hash
                 _record_artifact(session, stored.hash, "parsed", stored.size_bytes)
