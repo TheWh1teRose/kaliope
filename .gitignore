@@ -1,1 +1,43 @@
+# Dependencies
+node_modules/
+
+# Frontend build (Vite outDir)
+dist/
+*.tsbuildinfo
+
+# Python environment and caches (Makefile install/clean, ruff, mypy, pytest)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+*.egg
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage/
+coverage.xml
+.nyc_output/
+
+# Local runtime data (make DATA / DATA_DIR) and secrets
+.data/
 .env
+.env.*
+!.env.example
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+

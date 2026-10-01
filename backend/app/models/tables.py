@@ -22,6 +22,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -88,6 +89,8 @@ class Document(Base):
     # Content hash of the ParsedDocument artifact for the current parse_version.
     parsed_artifact_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    #: Set when a reviewer renamed the document; a re-parse then keeps ``title``.
+    title_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     #: ``None`` is the root; deleting a folder clears it rather than the document.
     folder_id: Mapped[str | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True

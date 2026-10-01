@@ -746,3 +746,57 @@ def test_sse_stream_replays_a_finished_run(
         assert response.headers["content-type"].startswith("text/event-stream")
         chunk = next(response.iter_text())
         assert chunk.startswith(": connected")
+
+
+# ---------------------------------------------------------------- rename
+
+
+def test_rename_document_changes_only_the_display_name(
+    signed_in: TestClient, reviewed_run: tuple[str, str]
+) -> None:
+    document_id, run_id = reviewed_run
+    before = signed_in.get(f"/api/documents/{document_id}").json()
+
+    response = signed_in.patch(
+        f"/api/documents/{document_id}", json={"title": "  Lernfeld Größe – Übung 日本語  "}
+    )
+    assert response.status_code == 200
+    after = response.json()
+    assert after["title"] == "Lernfeld Größe – Übung 日本語"
+    assert after["filename"] == before["filename"]
+    assert after["sha256"] == before["sha256"]
+    assert after["parse_version"] == before["parse_version"]
+    assert signed_in.get(f"/api/documents/{document_id}").json()["title"] == after["title"]
+    assert signed_in.get(f"/api/runs/{run_id}").json()["document_title"] == after["title"]
+    export = signed_in.get(f"/api/runs/{run_id}/export", params={"format": "md"})
+    assert export.text.startswith(f"# {after['title']}")
+
+
+@pytest.mark.parametrize("title", ["", "   \t "])
+def test_rename_document_rejects_empty_name(
+    signed_in: TestClient, reviewed_run: tuple[str, str], title: str
+) -> None:
+    document_id, _ = reviewed_run
+    response = signed_in.patch(f"/api/documents/{document_id}", json={"title": title})
+    assert response.status_code == 422
+
+
+def test_rename_document_rejects_too_long_name(
+    signed_in: TestClient, reviewed_run: tuple[str, str]
+) -> None:
+    document_id, _ = reviewed_run
+    ok = signed_in.patch(f"/api/documents/{document_id}", json={"title": "x" * 200})
+    assert ok.status_code == 200
+    response = signed_in.patch(f"/api/documents/{document_id}", json={"title": "x" * 201})
+    assert response.status_code == 422
+
+
+def test_rename_unknown_document_is_404(signed_in: TestClient) -> None:
+    response = signed_in.patch("/api/documents/nope", json={"title": "Name"})
+    assert response.status_code == 404
+
+
+def test_rename_requires_authentication() -> None:
+    with TestClient(create_app()) as anonymous:
+        response = anonymous.patch("/api/documents/any", json={"title": "x"})
+    assert response.status_code == 401

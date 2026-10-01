@@ -52,6 +52,14 @@ export const useDocumentsStore = defineStore('documents', () => {
     if (document) document.folder_id = folderId
   }
 
+  /** Display name only; the server leaves the file, hash and parse alone. */
+  async function rename(id: string, title: string): Promise<DocumentSummary> {
+    const updated = await api.patch<DocumentSummary>(`/api/documents/${id}`, { title })
+    const document = items.value.find((d) => d.id === id)
+    if (document) document.title = updated.title
+    return updated
+  }
+
   async function reparse(id: string): Promise<void> {
     await api.post(`/api/documents/${id}/reparse`)
     await load()
@@ -74,5 +82,5 @@ export const useDocumentsStore = defineStore('documents', () => {
     })
   }
 
-  return { items, loading, load, stopPolling, get, upload, move, reparse, structure, relabel }
+  return { items, loading, load, stopPolling, get, upload, move, rename, reparse, structure, relabel }
 })

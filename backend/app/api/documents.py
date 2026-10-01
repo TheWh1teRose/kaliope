@@ -28,6 +28,7 @@ from app.schemas.api import (
     BlockOut,
     DocumentMove,
     DocumentOut,
+    DocumentRename,
     SectionOut,
     StructureOut,
     ZoneUpdate,
@@ -41,6 +42,7 @@ from app.worker import worker
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 _PDF_MAGIC = b"%PDF-"
+MAX_TITLE_LENGTH = 200
 
 
 def _store() -> ArtifactStore:
@@ -127,6 +129,35 @@ def get_document(
     document_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> DocumentOut:
     return _document_out(_require(db, document_id))
+
+
+@router.patch("/{document_id}", response_model=DocumentOut)
+def rename_document(
+    document_id: str,
+    payload: DocumentRename,
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
+) -> DocumentOut:
+    """Change the display name only.
+
+    The stored PDF, its hash and the parse artifact are untouched, and a later
+    re-parse keeps the name (``title_edited``). Runs and exports read the title
+    from this row, so they pick the new name up without any other change.
+    """
+    document = _require(db, document_id)
+    title = payload.title.strip()
+    if not title:
+        raise problem(422, "Name required", "A document needs a name.")
+    if len(title) > MAX_TITLE_LENGTH:
+        raise problem(
+            422,
+            "Name too long",
+            f"A document name is at most {MAX_TITLE_LENGTH} characters.",
+        )
+    document.title = title
+    document.title_edited = True
+    db.commit()
+    return _document_out(document)
 
 
 @router.post("/{document_id}/reparse", response_model=DocumentOut, status_code=202)
