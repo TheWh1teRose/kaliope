@@ -90,7 +90,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page" :class="{ 'page--embed': embedded }">
+  <div :class="embedded ? 'page--embed' : 'page'">
     <header v-if="!embedded" class="head">
       <div class="grow">
         <RouterLink
@@ -222,19 +222,24 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page {
-  padding: var(--s6);
-  max-width: 1100px;
-  margin: 0 auto;
+.page,
+.page--embed {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
 }
 
+.page {
+  padding: var(--s6);
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
 .page--embed {
-  padding: 0;
+  width: 100%;
   max-width: none;
   margin: 0;
+  padding: 0;
 }
 
 .head {
