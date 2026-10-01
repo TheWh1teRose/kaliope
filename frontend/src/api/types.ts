@@ -806,6 +806,16 @@ export interface PromptSetup {
   json_schema: Record<string, unknown> | null
 }
 
+/** The setup of the Verbalized Sampling experiment (`VSSetup` on the server). */
+export interface VSSetup {
+  base_prompt: string
+  vs_instruction: string
+  user_template: string
+  fields: Record<string, string>
+  settings: ExperimentSettings
+  k: number
+}
+
 export interface ExperimentStats {
   run_count: number
   saved_count: number
@@ -832,6 +842,8 @@ export interface ExperimentFieldSpec {
 export interface ExperimentDetail<Setup = PromptSetup> extends ExperimentSummary {
   defaults: Setup
   fields: ExperimentFieldSpec[]
+  /** Experiment-specific texts the page shows but the setup does not hold. */
+  extras: Record<string, unknown>
 }
 
 export interface ExperimentBeat {
