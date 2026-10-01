@@ -20,6 +20,12 @@ describe('experimentation routes', () => {
     expect(router.currentRoute.value.query).toEqual({ run: 'r1', document: 'd1' })
   })
 
+  it('opens one experiment by key', () => {
+    const route = freshRouter().resolve('/experiments/direct_style')
+    expect(route.name).toBe('experiment')
+    expect(route.params.key).toBe('direct_style')
+  })
+
   it('serves the experiment collection', () => {
     expect(freshRouter().resolve('/experiments').name).toBe('experiments')
   })
