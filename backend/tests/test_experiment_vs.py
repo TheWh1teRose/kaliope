@@ -147,24 +147,35 @@ def test_parse_fenced_completion_and_truncation() -> None:
     parsed = parse_completion(fenced, VSOptions(k=2))
     assert len(parsed.candidates) == 2 and parsed.warnings == []
 
-    # Cut off inside the third version: the two complete ones survive.
+    # Cut off inside the third version. A fence or a preamble uses the same rule.
     cut = json.dumps(_answer([0.5, 0.3, 0.2]))
     cut = cut[: cut.rindex('"probability": 0.2') - 30]
-    parsed = parse_completion(_completion(cut, "max_tokens"), VSOptions(k=3))
-    assert len(parsed.candidates) == 2
-    assert any("unvollständige" in w for w in parsed.warnings)
-    assert any("2 Fassungen statt 3" in w for w in parsed.warnings)
+    for prefix in ("", "```json\n", "Hier ist das Ergebnis:\n"):
+        parsed = parse_completion(_completion(prefix + cut, "max_tokens"), VSOptions(k=3))
+        assert [c.probability for c in parsed.candidates] == [0.5, 0.3]
+        assert all(len(c.segments) == 2 for c in parsed.candidates)
+        assert any("unvollständige" in w for w in parsed.warnings)
+        assert any("2 Fassungen statt 3" in w for w in parsed.warnings)
 
     # Cut off after finished objects: those versions are complete and stay.
     finished = json.dumps(_answer([0.5, 0.3, 0.2]))
     for tail in (",", ", {"):
-        parsed = parse_completion(_completion(finished[:-2] + tail, "max_tokens"), VSOptions(k=3))
-        assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
-        assert parsed.warnings == []
+        for prefix in ("", "```json\n"):
+            parsed = parse_completion(
+                _completion(prefix + finished[:-2] + tail, "max_tokens"), VSOptions(k=3)
+            )
+            assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
+            assert parsed.warnings == []
 
     # A finished JSON body that still stops at max_tokens keeps every version.
     parsed = parse_completion(_completion(finished, "max_tokens"), VSOptions(k=3))
     assert len(parsed.candidates) == 3
+    assert parsed.warnings == []
+
+    # A cut in a later field is outside the drafts.
+    noted = finished[:-1] + ', "note": "this was cut'
+    parsed = parse_completion(_completion(noted, "max_tokens"), VSOptions(k=3))
+    assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
     assert parsed.warnings == []
 
     # Cut off inside the first version: nothing complete, and the error says why.
@@ -172,6 +183,8 @@ def test_parse_fenced_completion_and_truncation() -> None:
     first = first[: first.index("Antwort 0")]
     with pytest.raises(VSParseError, match="abgeschnitten"):
         parse_completion(_completion(first, "max_tokens"), VSOptions(k=3))
+    with pytest.raises(VSParseError, match="abgeschnitten"):
+        parse_completion(_completion("```json\n" + first, "max_tokens"), VSOptions(k=3))
 
 
 def test_percentages_strings_and_missing_probabilities() -> None:

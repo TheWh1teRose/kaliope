@@ -16,7 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.experiments.verbalized_sampling.options import VSOptions
-from app.llm.base import Completion, LLMError, tail_closed_in_string
+from app.llm.base import Completion, LLMError
 from app.pipeline.nodes.script import _closest_speaker
 
 #: Sum of probabilities above which the answer is flagged. The paper's
@@ -68,13 +68,12 @@ def parse_completion(
         payload = completion.json_payload()
     except LLMError as exc:
         raise VSParseError(f"Die Antwort war kein gültiges JSON: {exc}") from exc
-    truncated = completion.stop_reason == "max_tokens"
     return parse_payload(
         payload,
         options,
         speakers=speakers,
-        truncated=truncated,
-        incomplete_tail=truncated and tail_closed_in_string(completion.text),
+        truncated=completion.stop_reason == "max_tokens",
+        source=completion.text,
     )
 
 
@@ -84,12 +83,12 @@ def parse_payload(
     *,
     speakers: list[str] | None = None,
     truncated: bool = False,
-    incomplete_tail: bool = False,
+    source: str | None = None,
 ) -> ParsedAnswer:
     """Normalise an already-decoded answer from one call.
 
-    ``truncated`` is the call's stop reason. ``incomplete_tail`` means repair
-    closed a cut-off string, so the last candidate itself is unfinished.
+    ``truncated`` is the call's stop reason. ``source`` is the raw completion,
+    used to drop a response only when the text ends inside that response.
     """
     warnings: list[str] = []
 
@@ -109,8 +108,12 @@ def parse_payload(
         items = None
     if not isinstance(items, list):
         raise VSParseError('Die Antwort enthält keine Liste "responses".')
-    if incomplete_tail and items:
-        items = items[:-1]
+    cut_off = False
+    if truncated and source is not None and items:
+        closed, inside = _response_closure(source)
+        if inside and len(items) > closed:
+            items = items[:closed]
+            cut_off = True
 
     candidates: list[Candidate] = []
     raw_probabilities: list[float | None] = []
@@ -151,7 +154,7 @@ def parse_payload(
         candidate.probability = value
 
     _check(candidates, options, warnings)
-    if incomplete_tail:
+    if cut_off:
         warnings.append(
             "Die Antwort wurde bei Max. Ausgabetokens abgeschnitten; die unvollständige letzte "
             "Fassung ist verworfen. Max. Ausgabetokens erhöhen oder k senken."
@@ -160,6 +163,106 @@ def parse_payload(
 
 
 # ------------------------------------------------------------------ helpers
+
+
+def _response_closure(text: str) -> tuple[int, bool]:
+    """Closed response objects, and whether the text ends inside one of them."""
+    containers: list[dict[str, Any]] = []
+    closed = 0
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if char.isspace():
+            i += 1
+            continue
+        if char == '"':
+            i += 1
+            word: list[str] = []
+            while i < n:
+                if text[i] == "\\":
+                    if i + 1 >= n:
+                        return closed, depth > 0
+                    word.append(text[i + 1])
+                    i += 2
+                    continue
+                if text[i] == '"':
+                    break
+                word.append(text[i])
+                i += 1
+            if i >= n:
+                return closed, depth > 0
+            i += 1
+            frame = containers[-1] if containers else None
+            if frame is not None and frame["phase"] == "key":
+                frame["key"] = "".join(word)
+                frame["phase"] = "colon"
+            elif frame is not None and frame["phase"] == "value":
+                frame["phase"] = "next"
+            continue
+        if char == "{":
+            if (
+                containers
+                and containers[-1]["kind"] == "arr"
+                and containers[-1]["responses"]
+                and depth == 0
+            ):
+                depth = 1
+            elif depth:
+                depth += 1
+            containers.append({"kind": "obj", "responses": False, "phase": "key"})
+            i += 1
+            continue
+        if char == "}":
+            if depth:
+                depth -= 1
+                if depth == 0:
+                    closed += 1
+            if containers:
+                containers.pop()
+            if containers:
+                containers[-1]["phase"] = "next"
+            i += 1
+            continue
+        if char == "[":
+            key = containers[-1].get("key") if containers else None
+            responses = not containers or (
+                containers[-1]["kind"] == "obj"
+                and containers[-1]["phase"] == "value"
+                and key in _LIST_KEYS
+                and not any(container["responses"] for container in containers)
+            )
+            containers.append({"kind": "arr", "responses": responses, "phase": "value"})
+            i += 1
+            continue
+        if char == "]":
+            if containers:
+                containers.pop()
+            if containers:
+                containers[-1]["phase"] = "next"
+            i += 1
+            continue
+        if char == ":" and containers and containers[-1]["phase"] == "colon":
+            containers[-1]["phase"] = "value"
+            i += 1
+            continue
+        if char == ",":
+            if containers and containers[-1]["phase"] == "next":
+                kind = containers[-1]["kind"]
+                containers[-1]["phase"] = "key" if kind == "obj" else "value"
+            i += 1
+            continue
+        if containers and containers[-1]["phase"] == "value" and (
+            char in "-0123456789" or char in "tfn"
+        ):
+            i += 1
+            while i < n and (text[i].isalnum() or text[i] in "+-.eE"):
+                i += 1
+            containers[-1]["phase"] = "next"
+            continue
+        i += 1
+    return closed, depth > 0
 
 
 def _segments(item: Any, speakers: list[str] | None) -> tuple[list[CandidateSegment], bool]:

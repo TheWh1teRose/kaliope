@@ -99,21 +99,6 @@ def parse_json(text: str) -> Any:
     response cut off at max_tokens is repaired when the tail can be closed
     without inventing values.
     """
-    value, _closed_in_string = _parse_json(text)
-    return value
-
-
-def tail_closed_in_string(text: str) -> bool:
-    """Whether parsing ``text`` kept a trailing value by closing a cut-off string."""
-    try:
-        _value, closed_in_string = _parse_json(text)
-    except LLMError:
-        return False
-    return closed_in_string
-
-
-def _parse_json(text: str) -> tuple[Any, bool]:
-    """Return the parsed value and whether repair closed a cut-off string to keep it."""
     candidates: list[str] = []
     stripped = text.strip()
     if stripped:
@@ -131,7 +116,7 @@ def _parse_json(text: str) -> tuple[Any, bool]:
 
     for candidate in candidates:
         try:
-            return json.loads(candidate), False
+            return json.loads(candidate)
         except json.JSONDecodeError:
             repaired = _repair_truncated_json(candidate)
             if repaired is not None:
@@ -177,12 +162,8 @@ def _loads_closed(prefix: str) -> Any | None:
         return None
 
 
-def _repair_truncated_json(text: str) -> tuple[Any, bool] | None:
-    """Close a cut-off object or array.
-
-    Returns the value and whether the last value was kept by closing a cut-off
-    string. Otherwise drops an unfinished last value and returns False.
-    """
+def _repair_truncated_json(text: str) -> Any | None:
+    """Close a cut-off object or array. Drops an unfinished last value."""
     stripped = text.strip()
     if not stripped or stripped[0] not in "{[":
         return None
@@ -191,7 +172,7 @@ def _repair_truncated_json(text: str) -> tuple[Any, bool] | None:
     if in_string:
         repaired = _loads_closed(stripped + '"')
         if repaired is not None:
-            return repaired, True
+            return repaired
 
     for end in range(len(stripped), 0, -1):
         if stripped[end - 1] not in ",}]":
@@ -199,7 +180,7 @@ def _repair_truncated_json(text: str) -> tuple[Any, bool] | None:
         prefix = stripped[:end].rstrip().rstrip(",")
         repaired = _loads_closed(prefix)
         if repaired is not None:
-            return repaired, False
+            return repaired
     return None
 
 
