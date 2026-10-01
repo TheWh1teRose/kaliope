@@ -85,8 +85,9 @@ def parse_payload(
 ) -> ParsedAnswer:
     """Normalise an already-decoded answer from one call.
 
-    A candidate counts only when it is an object with non-empty segments and a
-    ``probability`` field. ``cutoff`` is true when the call stopped for length.
+    A candidate counts when it is an object with non-empty segments. A missing
+    or unreadable probability stays null. ``cutoff`` is true when the call
+    stopped for length.
     """
     warnings: list[str] = []
     items = payload.get("responses") if isinstance(payload, dict) else None
@@ -104,8 +105,6 @@ def parse_payload(
         segments = _segments(item, speakers)
         if not segments:
             dropped += 1
-            continue
-        if "probability" not in item:
             continue
         value, marked_percent = _probability(item.get("probability"))
         raw_probabilities.append(value)
