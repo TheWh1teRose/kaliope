@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import type { BlockOut, DocumentSummary, StructureOut } from '@/api/types'
@@ -7,6 +7,7 @@ import ConfidenceStrip from '@/components/ConfidenceStrip.vue'
 import DocumentActions from '@/components/DocumentActions.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import PageCanvas from '@/components/PageCanvas.vue'
+import StatusPill from '@/components/StatusPill.vue'
 import { t } from '@/i18n'
 import { useCatalogueStore } from '@/stores/catalogue'
 import { useDocumentsStore } from '@/stores/documents'
@@ -81,6 +82,14 @@ async function saveRelabel(): Promise<void> {
   }
 }
 
+function inFlight(status: string | undefined): boolean {
+  return status === 'pending' || status === 'parsing'
+}
+
+function polledRow(): DocumentSummary | undefined {
+  return documents.items.find((item) => item.id === props.id)
+}
+
 async function refreshDocument(): Promise<void> {
   const next = await documents.get(props.id)
   document.value = next
@@ -95,8 +104,55 @@ async function onDocumentChanged(): Promise<void> {
   }
 }
 
+const polledParse = computed(() => {
+  const row = polledRow()
+  if (!row) return null
+  return `${row.parse_status}\0${row.parse_version}\0${row.parse_error ?? ''}`
+})
+
+watch(polledParse, async (signature) => {
+  if (!signature) return
+  const row = polledRow()
+  if (!row) return
+  if (inFlight(row.parse_status)) {
+    if (document.value) {
+      document.value = {
+        ...document.value,
+        parse_status: row.parse_status,
+        parse_error: row.parse_error,
+      }
+    }
+    structure.value = null
+    return
+  }
+  const current = document.value
+  const settled =
+    row.parse_status === 'parsed'
+      ? current?.parse_status === 'parsed' &&
+        current.parse_version === row.parse_version &&
+        structure.value !== null
+      : row.parse_status === 'failed' &&
+        current?.parse_status === 'failed' &&
+        current.parse_error === row.parse_error
+  if (settled) return
+  try {
+    await refreshDocument()
+  } catch {
+    return
+  }
+})
+
 onMounted(async () => {
-  await refreshDocument()
+  try {
+    await refreshDocument()
+    if (inFlight(document.value?.parse_status)) await documents.load()
+  } catch {
+    return
+  }
+})
+
+onUnmounted(() => {
+  documents.stopPolling()
 })
 </script>
 
@@ -112,6 +168,16 @@ onMounted(async () => {
           {{ document.page_count }} {{ t.documents.pages }} · {{ document.language }} ·
           parse v{{ document.parse_version }}
         </p>
+        <div v-if="document.parse_status !== 'parsed' || document.parse_error" class="detail__parse">
+          <StatusPill
+            v-if="document.parse_status !== 'parsed'"
+            :status="document.parse_status"
+            kind="parse"
+          />
+          <p v-if="document.parse_error" class="detail__parse-error">
+            {{ document.parse_error.split('\n')[0] }}
+          </p>
+        </div>
       </div>
       <DocumentActions variant="bar" :document="document" @changed="onDocumentChanged" />
     </header>
@@ -310,6 +376,23 @@ onMounted(async () => {
 
 .back:hover {
   color: var(--mark);
+}
+
+.detail__parse {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+
+.detail__parse-error {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--fail);
+  background: var(--fail-soft);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-sm);
 }
 
 .report {

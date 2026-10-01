@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 
-import type { DocumentSummary, FolderOut, StructureOut } from '@/api/types'
+import type { DocumentSummary, FolderOut, IngestionReport, StructureOut } from '@/api/types'
 import DocumentActions from '@/components/DocumentActions.vue'
 import FolderTree from '@/components/FolderTree.vue'
 import { useFoldersStore } from '@/stores/folders'
@@ -55,7 +55,7 @@ function folder(): FolderOut {
   }
 }
 
-function structure(): StructureOut {
+function structure(text = 'Hallo'): StructureOut {
   return {
     document_id: 'doc-1',
     parse_version: 1,
@@ -67,7 +67,7 @@ function structure(): StructureOut {
       {
         id: 'b1',
         ordinal: 0,
-        text: 'Hallo',
+        text,
         page: 0,
         bboxes: [[0, [0, 0, 10, 10]]],
         zone: 'body',
@@ -83,6 +83,77 @@ function structure(): StructureOut {
     objectives: [],
     zone_catalogue: [],
   }
+}
+
+function ingestion(reason: string): IngestionReport {
+  return {
+    language: 'de',
+    language_confidence: 0.9,
+    page_count: 3,
+    extractable_words: 100,
+    narratable_words: 80,
+    visual_content_ratio: 0,
+    text_density: 200,
+    structure_source: 'outline',
+    structure_confidence: 'high',
+    section_count: 1,
+    zone_distribution: { body: 1 },
+    zone_uncertain_ratio: 0,
+    table_count: 0,
+    boilerplate_lines_removed: 0,
+    anchor_integrity: 1,
+    reading_order_confidence: 1,
+    warnings: [],
+    ingestion_confidence: 'high',
+    confidence_reasons: [reason],
+  }
+}
+
+interface ParseScript {
+  status: DocumentSummary['parse_status']
+  parseError: string | null
+  parseVersion: number
+  reason: string
+  blockText: string
+}
+
+function listGets(): number {
+  return calls.filter((call) => call.method === 'GET' && call.url === '/api/documents').length
+}
+
+function installParseScript(script: ParseScript): void {
+  calls.length = 0
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
+      if (method === 'POST' && url.endsWith('/reparse')) {
+        script.status = 'pending'
+        script.parseError = null
+        return json(documentSummary({ parse_status: 'pending', parse_error: null }))
+      }
+      if (url.endsWith('/structure')) return json(structure(script.blockText))
+      const summary = documentSummary({
+        parse_status: script.status,
+        parse_error: script.parseError,
+        parse_version: script.parseVersion,
+        report: null,
+      })
+      if (url === '/api/documents') return json([summary])
+      if (url === '/api/folders') return json([folder()])
+      return json({
+        ...summary,
+        report: script.status === 'parsed' ? ingestion(script.reason) : null,
+      })
+    }),
+  )
+}
+
+async function advancePoll(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(2000)
+  await settle()
 }
 
 function json(body: unknown, status = 200): Response {
@@ -323,5 +394,251 @@ describe('document screens', () => {
     expect(actionIds(wrapper.element)).toEqual([...SHARED])
     expect(wrapper.text()).toContain('Textbereich ändern')
     expect(wrapper.find('button[aria-haspopup="menu"]').exists()).toBe(false)
+  })
+
+  it('follows a read-in started on the structure view until it is parsed', async () => {
+    const script: ParseScript = {
+      status: 'parsed',
+      parseError: null,
+      parseVersion: 1,
+      reason: 'erster Grund',
+      blockText: 'Hallo',
+    }
+    installParseScript(script)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await settle()
+
+      expect(wrapper.text()).toContain('Hallo')
+      expect(wrapper.text()).toContain('erster Grund')
+      expect(wrapper.text()).toContain('In der Werkbank öffnen')
+
+      await wrapper.get('[data-action="reparse"]').trigger('click')
+      await settle()
+
+      expect(wrapper.text()).toContain('Wartet')
+      expect(wrapper.text()).not.toContain('Hallo')
+      expect(wrapper.text()).not.toContain('In der Werkbank öffnen')
+      expect(wrapper.text()).not.toContain('Lauf starten')
+      const structuresWhilePending = calls.filter((call) => call.url.endsWith('/structure')).length
+
+      const listsAtPending = listGets()
+      await vi.advanceTimersByTimeAsync(1999)
+      await settle()
+      expect(listGets()).toBe(listsAtPending)
+
+      script.status = 'parsing'
+      await vi.advanceTimersByTimeAsync(1)
+      await settle()
+      expect(listGets()).toBe(listsAtPending + 1)
+      expect(wrapper.text()).toContain('Wird eingelesen')
+      expect(wrapper.find('[data-action="open-bench"]').exists()).toBe(false)
+      expect(calls.filter((call) => call.url.endsWith('/structure')).length).toBe(
+        structuresWhilePending,
+      )
+
+      script.status = 'parsed'
+      script.parseVersion = 2
+      script.reason = 'zweiter Grund'
+      script.blockText = 'Neu gelesen'
+      await advancePoll()
+
+      expect(wrapper.text()).toContain('Neu gelesen')
+      expect(wrapper.text()).toContain('zweiter Grund')
+      expect(wrapper.text()).toContain('In der Werkbank öffnen')
+      expect(wrapper.text()).toContain('Lauf starten')
+      expect(wrapper.text()).not.toContain('Wartet')
+      expect(calls.filter((call) => call.url.endsWith('/structure')).length).toBe(
+        structuresWhilePending + 1,
+      )
+      expect(calls.some((call) => call.url === '/api/documents' && call.method === 'GET')).toBe(true)
+      const detail = calls.filter((call) => call.url === '/api/documents/doc-1')
+      expect(detail.length).toBeGreaterThan(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('follows a read-in started on the structure view until it fails', async () => {
+    const script: ParseScript = {
+      status: 'parsed',
+      parseError: null,
+      parseVersion: 1,
+      reason: 'erster Grund',
+      blockText: 'Hallo',
+    }
+    installParseScript(script)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await settle()
+
+      await wrapper.get('[data-action="reparse"]').trigger('click')
+      await settle()
+      const structuresWhilePending = calls.filter((call) => call.url.endsWith('/structure')).length
+
+      script.status = 'failed'
+      script.parseError = 'Seite leer\nTraceback (most recent call last)'
+      await advancePoll()
+
+      expect(wrapper.text()).toContain('Fehlgeschlagen')
+      expect(wrapper.text()).toContain('Seite leer')
+      expect(wrapper.text()).not.toContain('Traceback')
+      expect(wrapper.text()).not.toContain('Hallo')
+      expect(wrapper.find('[data-action="open-bench"]').exists()).toBe(false)
+      expect(wrapper.find('[data-action="new-run"]').exists()).toBe(false)
+      expect(calls.filter((call) => call.url.endsWith('/structure')).length).toBe(
+        structuresWhilePending,
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('follows an in-progress read-in when the structure view opens', async () => {
+    const script: ParseScript = {
+      status: 'pending',
+      parseError: null,
+      parseVersion: 1,
+      reason: 'danach',
+      blockText: 'Fertig gelesen',
+    }
+    installParseScript(script)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await settle()
+
+      expect(wrapper.text()).toContain('Wartet')
+      expect(wrapper.text()).not.toContain('Fertig gelesen')
+      expect(wrapper.find('[data-action="open-bench"]').exists()).toBe(false)
+      expect(listGets()).toBe(1)
+
+      script.status = 'parsing'
+      await advancePoll()
+      expect(wrapper.text()).toContain('Wird eingelesen')
+
+      script.status = 'parsed'
+      script.parseVersion = 2
+      await advancePoll()
+      expect(wrapper.text()).toContain('Fertig gelesen')
+      expect(wrapper.text()).toContain('danach')
+      expect(wrapper.text()).toContain('In der Werkbank öffnen')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops following a read-in when the structure view closes', async () => {
+    const script: ParseScript = {
+      status: 'parsed',
+      parseError: null,
+      parseVersion: 1,
+      reason: 'erster Grund',
+      blockText: 'Hallo',
+    }
+    installParseScript(script)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await settle()
+      await wrapper.get('[data-action="reparse"]').trigger('click')
+      await settle()
+      expect(wrapper.text()).toContain('Wartet')
+
+      const lists = listGets()
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(5000)
+      await settle()
+      expect(listGets()).toBe(lists)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not resume polling after the structure view closes during a list reload', async () => {
+    let releaseList = (): void => {}
+    let holdList = false
+    let status: DocumentSummary['parse_status'] = 'parsed'
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
+        if (method === 'POST' && url.endsWith('/reparse')) {
+          status = 'pending'
+          holdList = true
+          return json(documentSummary({ parse_status: 'pending', parse_error: null, report: null }))
+        }
+        if (url.endsWith('/structure')) return json(structure())
+        if (url === '/api/documents' && holdList) {
+          holdList = false
+          await new Promise<void>((resolve) => {
+            releaseList = resolve
+          })
+        }
+        const summary = documentSummary({
+          parse_status: status,
+          parse_error: null,
+          report: status === 'parsed' ? ingestion('erster Grund') : null,
+        })
+        if (url === '/api/documents') return json([summary])
+        return json(summary)
+      }),
+    )
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await settle()
+
+      const pendingClick = wrapper.get('[data-action="reparse"]').trigger('click')
+      await flushPromises()
+      expect(listGets()).toBe(1)
+
+      wrapper.unmount()
+      releaseList()
+      await pendingClick
+      await settle()
+      const lists = listGets()
+      await vi.advanceTimersByTimeAsync(5000)
+      await settle()
+      expect(listGets()).toBe(lists)
+    } finally {
+      releaseList()
+      vi.useRealTimers()
+    }
   })
 })

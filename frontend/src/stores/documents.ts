@@ -11,8 +11,10 @@ export const useDocumentsStore = defineStore('documents', () => {
   const items = ref<DocumentSummary[]>([])
   const loading = ref(false)
   let timer: number | undefined
+  let polling = true
 
   async function load(): Promise<void> {
+    polling = true
     loading.value = true
     try {
       items.value = await api.get<DocumentSummary[]>('/api/documents')
@@ -24,6 +26,8 @@ export const useDocumentsStore = defineStore('documents', () => {
 
   function schedulePoll(): void {
     window.clearTimeout(timer)
+    timer = undefined
+    if (!polling) return
     const pending = items.value.some((d) => d.parse_status === 'pending' || d.parse_status === 'parsing')
     if (!pending) return
     timer = window.setTimeout(() => {
@@ -32,7 +36,9 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   function stopPolling(): void {
+    polling = false
     window.clearTimeout(timer)
+    timer = undefined
   }
 
   async function get(id: string): Promise<DocumentSummary> {
