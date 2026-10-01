@@ -16,7 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.experiments.verbalized_sampling.options import VSOptions
-from app.llm.base import Completion, LLMError
+from app.llm.base import Completion, LLMError, tail_closed_in_string
 from app.pipeline.nodes.script import _closest_speaker
 
 #: Sum of probabilities above which the answer is flagged. The paper's
@@ -47,7 +47,7 @@ class Candidate(BaseModel):
     index: int
     probability: float | None
     segments: list[CandidateSegment]
-    #: Per-candidate notes, e.g. "über der Schwelle", "doppelt".
+    #: Per-candidate notes, e.g. "doppelt".
     flags: list[str] = Field(default_factory=list)
 
     @property
@@ -57,7 +57,6 @@ class Candidate(BaseModel):
 
 class ParsedAnswer(BaseModel):
     candidates: list[Candidate]
-    reasoning: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -69,11 +68,13 @@ def parse_completion(
         payload = completion.json_payload()
     except LLMError as exc:
         raise VSParseError(f"Die Antwort war kein gültiges JSON: {exc}") from exc
+    truncated = completion.stop_reason == "max_tokens"
     return parse_payload(
         payload,
         options,
         speakers=speakers,
-        truncated=completion.stop_reason == "max_tokens",
+        truncated=truncated,
+        incomplete_tail=truncated and tail_closed_in_string(completion.text),
     )
 
 
@@ -83,11 +84,14 @@ def parse_payload(
     *,
     speakers: list[str] | None = None,
     truncated: bool = False,
-    expected: int | None = None,
+    incomplete_tail: bool = False,
 ) -> ParsedAnswer:
-    """Normalise an already-decoded answer (one call, or several merged)."""
+    """Normalise an already-decoded answer from one call.
+
+    ``truncated`` is the call's stop reason. ``incomplete_tail`` means repair
+    closed a cut-off string, so the last candidate itself is unfinished.
+    """
     warnings: list[str] = []
-    reasoning: str | None = None
 
     items: Any
     if isinstance(payload, list):
@@ -101,20 +105,16 @@ def parse_payload(
                 if key != "responses":
                     warnings.append(f'Fassungen standen unter "{key}" statt "responses".')
                 break
-        raw_reasoning = payload.get("reasoning")
-        if isinstance(raw_reasoning, str) and raw_reasoning.strip():
-            reasoning = raw_reasoning.strip()
     else:
         items = None
     if not isinstance(items, list):
         raise VSParseError('Die Antwort enthält keine Liste "responses".')
-    if truncated and items:
-        # The JSON repair closes the cut-off tail, so the last version parses but
-        # stops mid-sentence. It is the one being written when the answer was cut.
+    if incomplete_tail and items:
         items = items[:-1]
 
     candidates: list[Candidate] = []
     raw_probabilities: list[float | None] = []
+    percent_tokens: list[bool] = []
     dropped = 0
     for item in items:
         segments, text_only = _segments(item, speakers)
@@ -126,9 +126,11 @@ def parse_payload(
                 f"Fassung #{len(candidates) + 1} kam als bloßer Text ohne Sprecher; "
                 "sie steht als ein Abschnitt da."
             )
-        raw_probabilities.append(
-            _probability(item.get("probability") if isinstance(item, dict) else None)
+        value, marked_percent = _probability(
+            item.get("probability") if isinstance(item, dict) else None
         )
+        raw_probabilities.append(value)
+        percent_tokens.append(marked_percent)
         candidates.append(Candidate(index=len(candidates), probability=None, segments=segments))
 
     if dropped:
@@ -142,35 +144,19 @@ def parse_payload(
         raise VSParseError("Die Antwort enthält keine verwertbare Fassung.")
 
     for candidate, value in zip(
-        candidates, _normalise_probabilities(raw_probabilities, warnings), strict=True
+        candidates,
+        _normalise_probabilities(raw_probabilities, percent_tokens, warnings),
+        strict=True,
     ):
         candidate.probability = value
 
-    _check(candidates, options, warnings, expected or options.expected_candidates())
-    if truncated:
+    _check(candidates, options, warnings)
+    if incomplete_tail:
         warnings.append(
             "Die Antwort wurde bei Max. Ausgabetokens abgeschnitten; die unvollständige letzte "
             "Fassung ist verworfen. Max. Ausgabetokens erhöhen oder k senken."
         )
-    return ParsedAnswer(candidates=candidates, reasoning=reasoning, warnings=warnings)
-
-
-def merge_turns(answers: list[ParsedAnswer]) -> ParsedAnswer:
-    """VS-Multi: one list across turns, renumbered, warnings kept per turn."""
-    candidates: list[Candidate] = []
-    warnings: list[str] = []
-    reasonings: list[str] = []
-    for turn, answer in enumerate(answers, start=1):
-        for candidate in answer.candidates:
-            candidates.append(candidate.model_copy(update={"index": len(candidates)}))
-        warnings.extend(f"Runde {turn}: {warning}" for warning in answer.warnings)
-        if answer.reasoning:
-            reasonings.append(answer.reasoning)
-    return ParsedAnswer(
-        candidates=candidates,
-        reasoning="\n\n".join(reasonings) or None,
-        warnings=warnings,
-    )
+    return ParsedAnswer(candidates=candidates, warnings=warnings)
 
 
 # ------------------------------------------------------------------ helpers
@@ -223,28 +209,43 @@ def _citations(raw: Any) -> list[Citation]:
     return out
 
 
-def _probability(raw: Any) -> float | None:
-    if isinstance(raw, bool):
-        return None
+def _probability(raw: Any) -> tuple[float | None, bool]:
+    """Return the number and whether its raw token was written as a percent."""
+    if isinstance(raw, bool) or not isinstance(raw, int | float | str):
+        return None, False
     if isinstance(raw, int | float):
-        return float(raw)
-    if isinstance(raw, str):
-        # "35%" stays on the percent scale; _normalise_probabilities converts the batch.
-        try:
-            return float(raw.strip().replace(",", ".").rstrip("%").strip())
-        except ValueError:
-            return None
-    return None
+        return float(raw), False
+    token = raw.strip().replace(",", ".")
+    marked_percent = token.endswith("%")
+    if marked_percent:
+        token = token[:-1].strip()
+    try:
+        return float(token), marked_percent
+    except ValueError:
+        return None, False
 
 
-def _normalise_probabilities(values: list[float | None], warnings: list[str]) -> list[float | None]:
-    present = [v for v in values if v is not None]
-    if present and all(0 <= v <= 100 for v in present) and any(v > 1 for v in present):
+def _normalise_probabilities(
+    values: list[float | None], percent_tokens: list[bool], warnings: list[str]
+) -> list[float | None]:
+    present = [value for value in values if value is not None]
+    batch_percent = bool(present) and all(value > 1 for value in present)
+    scaled: list[float | None] = []
+    converted = False
+    for value, marked_percent in zip(values, percent_tokens, strict=True):
+        if value is None:
+            scaled.append(None)
+            continue
+        if marked_percent or batch_percent:
+            scaled.append(value / 100)
+            converted = True
+        else:
+            scaled.append(value)
+    if converted:
         warnings.append("Wahrscheinlichkeiten kamen als Prozent und wurden in 0–1 umgerechnet.")
-        values = [v / 100 if v is not None else None for v in values]
     out: list[float | None] = []
     clamped = False
-    for value in values:
+    for value in scaled:
         if value is None:
             out.append(None)
             continue
@@ -256,32 +257,20 @@ def _normalise_probabilities(values: list[float | None], warnings: list[str]) ->
     return out
 
 
-def _check(
-    candidates: list[Candidate], options: VSOptions, warnings: list[str], expected: int
-) -> None:
-    if len(candidates) != expected:
-        warnings.append(f"{len(candidates)} Fassungen statt {expected}.")
+def _check(candidates: list[Candidate], options: VSOptions, warnings: list[str]) -> None:
+    if len(candidates) != options.k:
+        warnings.append(f"{len(candidates)} Fassungen statt {options.k}.")
 
     probabilities = [c.probability for c in candidates if c.probability is not None]
-    if options.verbalizes_probability:
-        missing = len(candidates) - len(probabilities)
-        if missing:
-            warnings.append(f"{missing} Fassung(en) ohne Wahrscheinlichkeit.")
-        total = sum(probabilities)
-        if total > PROBABILITY_SUM_LIMIT:
-            shown = f"{total:.2f}".replace(".", ",")
-            warnings.append(f"Summe der Wahrscheinlichkeiten {shown} liegt über 1.")
-        if len(probabilities) > 1 and len(set(probabilities)) == 1:
-            warnings.append("Alle Fassungen haben dieselbe Wahrscheinlichkeit.")
-        if options.threshold_mode == "below":
-            for candidate in candidates:
-                if candidate.probability is not None and candidate.probability >= options.threshold:
-                    candidate.flags.append("über der Schwelle")
-            above = sum("über der Schwelle" in c.flags for c in candidates)
-            if above:
-                warnings.append(
-                    f"{above} Fassung(en) liegen nicht unter der Schwelle {options.threshold:g}."
-                )
+    missing = len(candidates) - len(probabilities)
+    if missing:
+        warnings.append(f"{missing} Fassung(en) ohne Wahrscheinlichkeit.")
+    total = sum(probabilities)
+    if total > PROBABILITY_SUM_LIMIT:
+        shown = f"{total:.2f}".replace(".", ",")
+        warnings.append(f"Summe der Wahrscheinlichkeiten {shown} liegt über 1.")
+    if len(probabilities) > 1 and len(set(probabilities)) == 1:
+        warnings.append("Alle Fassungen haben dieselbe Wahrscheinlichkeit.")
 
     seen: dict[str, int] = {}
     for candidate in candidates:

@@ -5,21 +5,28 @@ node prompt. The VS call appends the VS instruction; the baseline call appends
 only the script node's own closing line. Editing the base therefore changes
 both calls the same way, and the comparison stays fair.
 
-The VS instruction has three placeholders, ``{{k}}``, ``{{threshold_clause}}``
-and ``{{probability_definition}}``. Only those three are filled here; anything
-else in ``{{…}}`` is left as typed, so a user's own text survives untouched.
+The VS instruction has two placeholders, ``{{k}}`` and
+``{{probability_definition}}``. Only those are filled here; anything else in
+``{{…}}`` is left as typed, so a user's own text survives untouched.
 """
 
 from __future__ import annotations
 
 import re
 
-from app.experiments.verbalized_sampling.options import ProbabilityFormat, VSOptions
+from app.experiments.verbalized_sampling.options import VSOptions
 from app.pipeline.nodes.script import _SYSTEM as SCRIPT_SYSTEM
 
-#: The script node's last line. The baseline keeps it; the VS block replaces it
-#: with its own output instructions.
+#: The script node's last line. Both calls strip it, then the baseline puts it
+#: back and the VS block replaces it with its own output instructions.
 BASELINE_SUFFIX = "Return JSON only."
+
+#: One 0–1 definition, the paper's explicit wording (§F.4), used by both the
+#: Kalliope and the paper VS-Standard texts.
+PROBABILITY_DEFINITION = (
+    "the estimated probability from 0.0 to 1.0 of this response given the input prompt "
+    "(relative to the full distribution)."
+)
 
 
 def _strip_suffix(prompt: str) -> str:
@@ -41,7 +48,6 @@ Generate {{k}} different versions of this beat. Every version must follow all ru
 above, use the same passages and speakers, and stay close to the word budget.
 The versions should differ in how they explain: framing, opening question,
 analogies, order and the interplay of the speakers. Do not vary the facts.
-{{threshold_clause}}
 Return the versions in JSON format with the key "responses" (a list of objects).
 Each object must include:
 - segments: the beat as speaker segments, exactly as for a single beat.
@@ -54,98 +60,35 @@ Give ONLY the JSON object, with no explanations or extra text."""
 #: out because the beat's word budget is already in the user message.
 PAPER_VS_INSTRUCTION = """\
 Generate {{k}} responses to the input prompt.
-{{threshold_clause}}
 Return the responses in JSON format with the key: "responses" (list of dicts).
 Each dictionary must include:
 - segments: the response as speaker segments (no explanation or extra text).
 - probability: {{probability_definition}}
 Give ONLY the JSON object, with no explanations or extra text."""
 
-#: Paper §F.4, verbatim.
-PROBABILITY_DEFINITIONS: dict[ProbabilityFormat, str] = {
-    "explicit": (
-        "the estimated probability from 0.0 to 1.0 of this response given the input prompt "
-        "(relative to the full distribution)."
-    ),
-    "implicit": "how likely this response would be (from 0.0 to 1.0).",
-    "relative": (
-        "the probability between 0.0 and 1.0, reflecting the relative likelihood of this "
-        "response given the input."
-    ),
-    "percentage": (
-        "the probability of this response relative to the full distribution, expressed as a "
-        "percentage from 0% to 100%."
-    ),
-    "confidence": (
-        "the normalized likelihood score between 0.0 and 1.0 that indicates how representative "
-        "or typical this response is compared to the full distribution."
-    ),
-}
-
-#: Paper §G.3 (VS-CoT), added in front of the output instructions.
-COT_CLAUSE = (
-    'First, provide a single "reasoning" field as a string, detailing your step-by-step '
-    "thought process. Then return the versions as described below."
-)
-
-_PLACEHOLDER = re.compile(r"\{\{\s*(k|threshold_clause|probability_definition)\s*\}\}")
+_PLACEHOLDER = re.compile(r"\{\{\s*(k|probability_definition)\s*\}\}")
 _K_PLACEHOLDER = re.compile(r"\{\{\s*k\s*\}\}")
-_PROBABILITY_LINE = re.compile(r"^.*\{\{\s*probability_definition\s*\}\}.*$\n?", re.MULTILINE)
-
-
-def threshold_clause(options: VSOptions) -> str:
-    """Paper §G.3 wording, kept verbatim so results compare to the paper."""
-    if options.threshold_mode == "full":
-        return "Randomly sample the responses from the full distribution."
-    if options.threshold_mode == "below":
-        return (
-            "Randomly sample the responses from the distribution, with the probability of each "
-            f"response must be below {options.threshold:g}."
-        )
-    return ""
 
 
 def render_vs_instruction(instruction: str, options: VSOptions) -> tuple[str, list[str]]:
-    """Fill the three VS placeholders. Returns the text and warnings for the user."""
+    """Fill the VS placeholders. Returns the text and warnings for the user."""
     warnings: list[str] = []
     if not _K_PLACEHOLDER.search(instruction):
         warnings.append(
             "Die VS-Anweisung enthält kein {{k}}: die Zahl der Fassungen steht nicht im Prompt "
             f"und wird nur beim Prüfen der Antwort verwendet (erwartet {options.k})."
         )
-
-    text = instruction
-    if not options.verbalizes_probability:
-        # The "list" control asks for the same versions without probabilities.
-        text = _PROBABILITY_LINE.sub("", text)
-
     values = {
         "k": str(options.k),
-        "threshold_clause": threshold_clause(options),
-        "probability_definition": PROBABILITY_DEFINITIONS[options.probability_format],
+        "probability_definition": PROBABILITY_DEFINITION,
     }
-    lines: list[str] = []
-    for line in text.split("\n"):
-        filled = _PLACEHOLDER.sub(lambda m: values[m.group(1)], line)
-        # A placeholder alone on its line that renders empty leaves no blank line.
-        if not filled.strip() and _PLACEHOLDER.search(line):
-            continue
-        lines.append(filled)
-    rendered = "\n".join(lines).strip()
-
-    if options.variant == "cot":
-        rendered = f"{rendered}\n{COT_CLAUSE}"
+    rendered = _PLACEHOLDER.sub(lambda m: values[m.group(1)], instruction).strip()
     return rendered, warnings
 
 
 def vs_system_prompt(base: str, rendered_instruction: str) -> str:
-    return f"{base.rstrip()}\n\n{rendered_instruction.strip()}"
+    return f"{_strip_suffix(base)}\n\n{rendered_instruction.strip()}"
 
 
 def baseline_system_prompt(base: str) -> str:
     return f"{_strip_suffix(base)}\n\n{BASELINE_SUFFIX}"
-
-
-def follow_up_message(options: VSOptions) -> str:
-    """VS-Multi, later turns (paper §G.3)."""
-    return f"Generate {options.k} alternative versions of this beat."

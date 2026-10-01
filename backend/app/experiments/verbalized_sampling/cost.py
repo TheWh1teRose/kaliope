@@ -59,15 +59,14 @@ def estimate(
 ) -> CostEstimate:
     tokens_in = max(1, input_chars // CHARS_PER_TOKEN)
     per_draft = int(word_budget * TOKENS_PER_WORD)
-    vs_out = per_draft * options.expected_candidates()
-    vs_calls = options.turns if options.variant == "multi" else 1
-    vs = registry.cost_usd(model, Usage(input_tokens=tokens_in * vs_calls, output_tokens=vs_out))
+    vs_out = per_draft * options.k
+    vs = registry.cost_usd(model, Usage(input_tokens=tokens_in, output_tokens=vs_out))
     single = registry.cost_usd(model, Usage(input_tokens=tokens_in, output_tokens=per_draft))
     return CostEstimate(
         vs_usd=round(vs, 6),
-        baseline_usd=round(single * options.baseline_calls(), 6),
+        baseline_usd=round(single, 6),
         vs_output_tokens=vs_out,
-        exceeds_max_tokens=vs_out // vs_calls > registry.max_output_for(model, max_tokens),
+        exceeds_max_tokens=vs_out > registry.max_output_for(model, max_tokens),
     )
 
 
