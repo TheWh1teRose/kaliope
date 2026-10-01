@@ -619,6 +619,7 @@ export default {
     thinkingOffEffort: '„Denken: Aus“ geht bei diesem Modell nur bis Aufwand',
     maxTokens: 'Max. Ausgabetokens',
     maxTokensHint: 'inkl. Denken · höchstens',
+    maxTokensTooLow: 'Der Wert muss mindestens 1 sein.',
     maxTokensTooHigh: 'Mehr Tokens, als das Modell ausgeben kann.',
     reset: 'Zurück zum Standard',
   },

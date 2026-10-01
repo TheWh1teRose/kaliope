@@ -319,6 +319,7 @@ const changed = computed(() => {
       <span class="meta">
         {{ labels.maxTokensHint }} {{ state.maxTokensCap.toLocaleString('de-DE') }}
       </span>
+      <p v-if="state.maxTokensTooLow" class="note note--fail">{{ labels.maxTokensTooLow }}</p>
       <p v-if="state.maxTokensError" class="note note--fail">{{ labels.maxTokensTooHigh }}</p>
       <p v-if="state.maxTokensNotWhole" class="note note--fail">{{ labels.wholeNumber }}</p>
     </div>

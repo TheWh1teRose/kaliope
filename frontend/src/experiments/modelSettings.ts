@@ -46,6 +46,7 @@ export interface SettingsState {
   /** Thinking off at an effort the model only allows with thinking on. */
   thinkingOffEffortError: boolean
   maxTokensCap: number
+  maxTokensTooLow: boolean
   maxTokensError: boolean
   budgetNotWhole: boolean
   maxTokensNotWhole: boolean
@@ -104,7 +105,8 @@ export function settingsState(model: ModelInfo, settings: ModelSettings): Settin
     effort !== null &&
     EFFORT_ORDER.indexOf(effort) > EFFORT_ORDER.indexOf(limit)
 
-  const maxTokensError = !(settings.max_tokens >= 1 && settings.max_tokens <= model.max_output_tokens)
+  const maxTokensTooLow = !(settings.max_tokens >= 1)
+  const maxTokensError = settings.max_tokens > model.max_output_tokens
   const topKRefused =
     settings.top_k !== null && (!Number.isInteger(settings.top_k) || settings.top_k < 1)
   const budgetNotWhole =
@@ -121,6 +123,7 @@ export function settingsState(model: ModelInfo, settings: ModelSettings): Settin
     effortLevels: model.effort_levels,
     thinkingOffEffortError,
     maxTokensCap: model.max_output_tokens,
+    maxTokensTooLow,
     maxTokensError,
     budgetNotWhole,
     maxTokensNotWhole,
@@ -128,6 +131,7 @@ export function settingsState(model: ModelInfo, settings: ModelSettings): Settin
     valid:
       !budgetError &&
       !thinkingOffEffortError &&
+      !maxTokensTooLow &&
       !maxTokensError &&
       !topKRefused &&
       !budgetNotWhole &&

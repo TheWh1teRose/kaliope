@@ -89,7 +89,18 @@ describe('settingsState', () => {
   it('flags max_tokens above the model limit', () => {
     const state = settingsState(haiku, { ...defaultSettings(haiku), max_tokens: 40_000 })
     expect(state.maxTokensError).toBe(true)
+    expect(state.maxTokensTooLow).toBe(false)
     expect(state.maxTokensCap).toBe(32_000)
+  })
+
+  it('flags max_tokens below 1 without calling it too high', () => {
+    const empty = settingsState(haiku, { ...defaultSettings(haiku), max_tokens: 0 })
+    expect(empty.maxTokensTooLow).toBe(true)
+    expect(empty.maxTokensError).toBe(false)
+    expect(empty.valid).toBe(false)
+    const negative = settingsState(haiku, { ...defaultSettings(haiku), max_tokens: -1 })
+    expect(negative.maxTokensTooLow).toBe(true)
+    expect(negative.maxTokensError).toBe(false)
   })
 
   it('refuses a top_k below 1 and a non-integer budget or max tokens', () => {

@@ -129,6 +129,18 @@ describe('ModelSettings', () => {
     expect(notes).not.toContain(t.modelSettings.budgetNotBelowMax)
   })
 
+  it('names a max tokens value below 1 separately from one above the cap', () => {
+    const low = render({ ...defaultSettings(catalogue.models[3]), max_tokens: 0 })
+    const lowNotes = low.findAll('.note--fail').map((note) => note.text())
+    expect(lowNotes).toContain(t.modelSettings.maxTokensTooLow)
+    expect(lowNotes).not.toContain(t.modelSettings.maxTokensTooHigh)
+
+    const high = render({ ...defaultSettings(catalogue.models[3]), max_tokens: 40_000 })
+    const highNotes = high.findAll('.note--fail').map((note) => note.text())
+    expect(highNotes).toContain(t.modelSettings.maxTokensTooHigh)
+    expect(highNotes).not.toContain(t.modelSettings.maxTokensTooLow)
+  })
+
   it('notes a fractional max tokens value', () => {
     const wrapper = render({ ...defaultSettings(catalogue.models[0]), max_tokens: 8000.5 })
     const notes = wrapper.findAll('.note--fail').map((note) => note.text())
