@@ -2,17 +2,15 @@
 
 ## Deploy
 
-Every push to `main` (or a manual run of the **Deploy** workflow) ships to the GCP VM.
-Workflow: `.github/workflows/deploy.yml`. VM-side script: `.github/scripts/deploy-vm.sh`.
+Every push to `main` (or a manual run of the **Deploy** workflow) ships to the existing Cloud Run service.
+Workflow: `.github/workflows/deploy.yml`.
 
 1. Auth to GCP via Workload Identity Federation (no JSON key).
 2. Build the Dockerfile on the runner, push `…/kalliope/kalliope:<commit-sha>` and `:latest` to Artifact Registry.
-3. SSH to the VM through IAP (`gcloud compute ssh --tunnel-through-iap`, OS Login) and pipe `deploy-vm.sh` to `sudo bash -s`.
-4. On the VM: pull the SHA image, read `app-secret-key` / `anthropic-api-key` from Secret Manager into env (never a file), `docker rm -f kalliope`, `docker run` it again with `-v /var/lib/kalliope:/data`, `DATA_DIR=/data`, `--restart unless-stopped`.
-5. Poll `http://127.0.0.1:8000/api/health` for `"status":"ok"` (60s). On failure the job fails, logs are printed, and the previous image is restarted.
+3. `gcloud run deploy kalliope --image <sha-tag> --region europe-west1`. Only the image changes; env (`DATA_DIR=/data`), secrets (`app-secret-key`, `anthropic-api-key`), the GCS FUSE volume (bucket `qlug-kalliope-data` at `/data`), scaling and resources stay as configured on the service.
+4. Look up the service URL and poll `<url>/api/health` for `"status":"ok"` (about 2 min). The job fails otherwise. This assumes the service allows unauthenticated requests.
 
-Existing port binding is preserved: `127.0.0.1:8000` if the running container uses it, else `8000:8000`. Override with variable `GCP_PORT_BIND`.
-Runs are serialized (`concurrency: deploy`, no cancel). State in `/var/lib/kalliope` survives redeploys.
+Runs are serialized (`concurrency: deploy`, no cancel). The service runs with max 1 instance because the data is SQLite on a mounted bucket; do not raise it. Cloud Run keeps old revisions, so a failed health check leaves the bad revision serving: roll back (below).
 
 ### Repository variables (Settings → Variables)
 
@@ -20,43 +18,36 @@ Runs are serialized (`concurrency: deploy`, no cancel). State in `/var/lib/kalli
 |---|---|
 | `GCP_PROJECT_ID` | `qlug-kalliope` |
 | `GCP_REGION` | `europe-west1` |
-| `GCP_ZONE` | `europe-west1-b` |
-| `GCP_VM_NAME` | `kalliope` |
+| `GCP_CLOUD_RUN_SERVICE` | optional, default `kalliope` |
 | `GCP_AR_REPO` | optional, default `kalliope` |
 | `GCP_IMAGE_NAME` | optional, default `kalliope` |
-| `GCP_PORT_BIND` | optional, e.g. `127.0.0.1:8000:8000`; empty = keep existing |
 
 Repository secrets: `GCP_WORKLOAD_IDENTITY_PROVIDER` (full provider resource name), `GCP_SERVICE_ACCOUNT` (deployer SA email).
 
 ### One-time setup (run by hand with gcloud as a project owner)
 
+The service itself already exists; this only creates what GitHub needs to deploy it. Each `create` fails with "already exists" if done before, which is harmless; the IAM bindings are idempotent.
+
 ```sh
 PROJECT_ID=qlug-kalliope
-REGION=europe-west1
-ZONE=europe-west1-b
 REPO=TheWh1teRose/kaliope
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
-VM_SA=${PROJECT_NUMBER}-compute@developer.gserviceaccount.com
+RUNTIME_SA=825911302957-compute@developer.gserviceaccount.com   # Cloud Run runtime service account
 DEPLOYER=gh-deployer
 DEPLOYER_SA=${DEPLOYER}@${PROJECT_ID}.iam.gserviceaccount.com
 
-gcloud services enable iamcredentials.googleapis.com iap.googleapis.com oslogin.googleapis.com \
-  artifactregistry.googleapis.com compute.googleapis.com --project=$PROJECT_ID
+gcloud services enable iamcredentials.googleapis.com run.googleapis.com \
+  artifactregistry.googleapis.com --project=$PROJECT_ID
 
 # Deployer service account + roles
 gcloud iam service-accounts create $DEPLOYER --project=$PROJECT_ID --display-name="GitHub deployer"
-for ROLE in roles/artifactregistry.writer roles/compute.instanceAdmin.v1 \
-            roles/compute.osAdminLogin roles/iap.tunnelResourceAccessor; do
+for ROLE in roles/artifactregistry.writer roles/run.admin; do
   gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member=serviceAccount:$DEPLOYER_SA --role=$ROLE --condition=None
 done
-gcloud iam service-accounts add-iam-policy-binding $VM_SA --project=$PROJECT_ID \
+# Needed to deploy a revision that runs as the runtime service account
+gcloud iam service-accounts add-iam-policy-binding $RUNTIME_SA --project=$PROJECT_ID \
   --member=serviceAccount:$DEPLOYER_SA --role=roles/iam.serviceAccountUser
-
-# Allow IAP to reach SSH on the VM
-gcloud compute firewall-rules create allow-iap-ssh-kalliope --project=$PROJECT_ID \
-  --network=default --direction=INGRESS --action=ALLOW --rules=tcp:22 \
-  --source-ranges=35.235.240.0/20 --target-tags=kalliope
 
 # Workload Identity pool + provider, restricted to this repo
 gcloud iam workload-identity-pools create github --project=$PROJECT_ID --location=global \
@@ -75,7 +66,7 @@ gcloud iam workload-identity-pools providers describe github-oidc --project=$PRO
   --location=global --workload-identity-pool=github --format='value(name)'
 ```
 
-Set `GCP_SERVICE_ACCOUNT` to `$DEPLOYER_SA`. The VM's service account must already be able to read both secrets (`roles/secretmanager.secretAccessor`) and pull from Artifact Registry (`roles/artifactregistry.reader`). The VM needs OS Login enabled (`enable-oslogin=TRUE` metadata, project or instance).
+Set `GCP_SERVICE_ACCOUNT` to `$DEPLOYER_SA`. The runtime service account must already read both secrets (`roles/secretmanager.secretAccessor`) and the bucket; the Cloud Run service agent pulls from Artifact Registry in the same project.
 
 ### Roll back
 
@@ -84,11 +75,9 @@ Actions → Deploy → Run workflow, set `image_tag` to an earlier commit SHA (s
 
 ### Deploy manually
 
-Same as CI: from a machine with gcloud access,
+Same as CI, from a machine with gcloud access:
 ```sh
 IMAGE=europe-west1-docker.pkg.dev/qlug-kalliope/kalliope/kalliope:<tag>
 gcloud builds submit --region=europe-west1 --tag $IMAGE      # or docker build + push
-gcloud compute ssh kalliope --zone=europe-west1-b --tunnel-through-iap \
-  --command "sudo env IMAGE=$IMAGE PROJECT_ID=qlug-kalliope REGISTRY_HOST=europe-west1-docker.pkg.dev PORT_BIND= bash -s" \
-  < .github/scripts/deploy-vm.sh
+gcloud run deploy kalliope --project=qlug-kalliope --region=europe-west1 --image=$IMAGE
 ```

@@ -21,8 +21,7 @@ permissions:
 env:
   GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   GCP_REGION: ${{ vars.GCP_REGION }}
-  GCP_ZONE: ${{ vars.GCP_ZONE }}
-  GCP_VM_NAME: ${{ vars.GCP_VM_NAME }}
+  SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE || 'kalliope' }}
   AR_REPO: ${{ vars.GCP_AR_REPO || 'kalliope' }}
   IMAGE_NAME: ${{ vars.GCP_IMAGE_NAME || 'kalliope' }}
 
@@ -62,14 +61,28 @@ jobs:
           docker push "${{ steps.image.outputs.base }}:${GITHUB_SHA}"
           docker push "${{ steps.image.outputs.base }}:latest"
 
-      - name: Deploy on VM
+      - name: Deploy to Cloud Run
         env:
           IMAGE: ${{ steps.image.outputs.ref }}
-          REGISTRY_HOST: ${{ steps.image.outputs.host }}
-          PORT_BIND: ${{ vars.GCP_PORT_BIND }}
         run: |
-          gcloud compute ssh "${GCP_VM_NAME}" \
-            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
-            --tunnel-through-iap --quiet \
-            --command "sudo env IMAGE='${IMAGE}' PROJECT_ID='${GCP_PROJECT_ID}' REGISTRY_HOST='${REGISTRY_HOST}' PORT_BIND='${PORT_BIND}' bash -s" \
-            < .github/scripts/deploy-vm.sh
+          # Only the image changes; env, secrets, volumes, scaling and resources stay as configured on the service.
+          gcloud run deploy "${SERVICE}" \
+            --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" \
+            --image="${IMAGE}" --quiet
+
+      - name: Check health
+        run: |
+          url=$(gcloud run services describe "${SERVICE}" \
+            --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" \
+            --format='value(status.url)')
+          echo "Checking ${url}/api/health"
+          for i in $(seq 1 12); do
+            body=$(curl -fsS --max-time 20 "${url}/api/health" || true)
+            echo "attempt ${i}: ${body}"
+            if echo "${body}" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Health check failed" >&2
+          exit 1
