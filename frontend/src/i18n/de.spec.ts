@@ -78,6 +78,16 @@ describe('German UI strings', () => {
     }
   })
 
+  it('labels every effort level in German', () => {
+    expect(de.modelSettings.effortLevels).toEqual({
+      low: 'niedrig',
+      medium: 'mittel',
+      high: 'hoch',
+      xhigh: 'extra hoch',
+      max: 'maximal',
+    })
+  })
+
   it('falls back to the path when a key is missing', () => {
     expect(tt('does.not.exist')).toBe('does.not.exist')
     expect(tt('does.not.exist', 'fallback')).toBe('fallback')

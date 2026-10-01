@@ -6,12 +6,20 @@
  * rejects is disabled here, and the provider drops it with a warning anyway.
  */
 import { api } from '@/api/client'
-import type { Effort, ModelCatalogue, ModelInfo, ModelSettings, ThinkingMode } from '@/api/types'
+import type {
+  Effort,
+  ModelCatalogue,
+  ModelInfo,
+  ModelSettings,
+  ProviderName,
+  ThinkingMode,
+} from '@/api/types'
 
 export const EFFORT_ORDER: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
-/** Suggested `max_tokens` while the model thinks: it covers thinking plus answer. */
-export const THINKING_MAX_TOKENS = 16_000
+export function temperatureLimit(provider: ProviderName): number {
+  return provider === 'anthropic' ? 1 : 2
+}
 
 export type Block = 'unsupported' | 'thinking' | null
 
@@ -110,6 +118,8 @@ export function fitToModel(model: ModelInfo, settings: ModelSettings): ModelSett
   if (!model.supports_sampling) {
     next.temperature = null
     next.top_p = null
+  } else if (next.temperature !== null) {
+    next.temperature = Math.min(temperatureLimit(model.provider), Math.max(0, next.temperature))
   }
   if (!model.supports_top_k) next.top_k = null
   if (next.thinking !== 'default' && !model.thinking_modes.includes(next.thinking)) {

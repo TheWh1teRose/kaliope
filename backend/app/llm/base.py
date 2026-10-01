@@ -234,6 +234,10 @@ class LLMClient:
         self.traces: list[dict[str, Any]] = []
 
     def complete(self, request: CompletionRequest) -> Completion:
+        # Local import: registry imports this module.
+        from app.llm.registry import adapt_parameters
+
+        adapted = adapt_parameters(request)
         provider = self._resolve(request.model)
         started = time.perf_counter()
         completion = provider.complete(request)
@@ -250,12 +254,12 @@ class LLMClient:
                 "model": request.model,
                 "system": request.system,
                 "messages": [message.model_dump(mode="json") for message in request.messages],
-                "temperature": request.temperature,
-                "top_p": request.top_p,
-                "top_k": request.top_k,
-                "thinking": request.thinking,
-                "thinking_budget": request.thinking_budget,
-                "effort": request.effort,
+                "temperature": adapted.temperature,
+                "top_p": adapted.top_p,
+                "top_k": adapted.top_k,
+                "thinking": adapted.thinking,
+                "thinking_budget": adapted.thinking_budget,
+                "effort": adapted.effort,
                 "max_tokens": request.max_tokens,
                 "response_text": completion.text,
                 "latency_ms": completion.latency_ms,

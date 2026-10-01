@@ -169,11 +169,12 @@ _EFFORT_46: list[Effort] = ["low", "medium", "high", "max"]
 
 #: Request parameters per model beyond sampling (Claude API reference, cached
 #: 2026-09-25). Kept apart from the price table so model and price updates do
-#: not touch it. Ids that are not in ``MODELS`` yet are ignored until they are.
+#: not touch it. A row applies even when the id is not in ``MODELS`` yet.
 _CAPABILITIES: dict[str, dict[str, object]] = {
     # Thinking is always on; it cannot be disabled.
     **{
         model_id: {
+            "supports_sampling": False,
             "thinking_modes": ["adaptive"],
             "thinking_default": "on",
             "effort_levels": _EFFORT_ALL,
@@ -182,12 +183,14 @@ _CAPABILITIES: dict[str, dict[str, object]] = {
         for model_id in ("claude-fable-5-1", "claude-fable-5", "claude-sonnet-5-5")
     },
     "claude-opus-5-5": {
+        "supports_sampling": False,
         "thinking_modes": ["adaptive"],
         "thinking_default": "on",
         "effort_levels": _EFFORT_ALL,
         "default_effort": "medium",
     },
     "claude-opus-5": {
+        "supports_sampling": False,
         "thinking_modes": ["adaptive", "off"],
         "thinking_default": "on",
         "thinking_off_max_effort": "high",
@@ -195,6 +198,7 @@ _CAPABILITIES: dict[str, dict[str, object]] = {
         "default_effort": "high",
     },
     "claude-sonnet-5": {
+        "supports_sampling": False,
         "thinking_modes": ["adaptive", "off"],
         "thinking_default": "on",
         "effort_levels": _EFFORT_ALL,
@@ -202,6 +206,7 @@ _CAPABILITIES: dict[str, dict[str, object]] = {
     },
     **{
         model_id: {
+            "supports_sampling": False,
             "thinking_modes": ["adaptive", "off"],
             "effort_levels": _EFFORT_ALL,
             "default_effort": "high",
@@ -301,8 +306,37 @@ def max_output_for(model_id: str, requested: int) -> int:
     return min(requested, spec.max_output_tokens)
 
 
-def supports_sampling(model_id: str) -> bool:
+def _provider_prefix(model_id: str) -> ProviderName | None:
+    for prefix, provider in _PROVIDER_PREFIXES:
+        if model_id.startswith(prefix):
+            return provider
+    return None
+
+
+def _spec(model_id: str) -> ModelSpec | None:
+    """Registered model, or a capability row for an id that is not priced yet."""
     spec = MODELS.get(model_id)
+    if spec is not None:
+        return spec
+    capabilities = _CAPABILITIES.get(model_id)
+    if not capabilities:
+        return None
+    provider = _provider_prefix(model_id)
+    if provider is None:
+        return None
+    return ModelSpec.model_validate(
+        {
+            "id": model_id,
+            "provider": provider,
+            "input_usd_per_mtok": 0.0,
+            "output_usd_per_mtok": 0.0,
+            **capabilities,
+        }
+    )
+
+
+def supports_sampling(model_id: str) -> bool:
+    spec = _spec(model_id)
     return spec.supports_sampling if spec else True
 
 
@@ -326,17 +360,41 @@ class Parameters:
     warnings: list[str] = field(default_factory=list)
 
 
+_TEMPERATURE_MAX: dict[ProviderName, float] = {
+    "anthropic": 1.0,
+    "openai": 2.0,
+    "google": 2.0,
+}
+
+
+def _ensure_temperature(provider: ProviderName, temperature: float | None) -> None:
+    """Reject a temperature the provider would receive and then refuse."""
+    if temperature is None:
+        return
+    limit = _TEMPERATURE_MAX[provider]
+    if 0 <= temperature <= limit:
+        return
+    raise LLMError(
+        f"temperature must be between 0 and {limit:g} for {provider} models, not {temperature}."
+    )
+
+
 def adapt_parameters(request: CompletionRequest) -> Parameters:
     """Keep what the model accepts, drop the rest with a warning.
 
     Raises :class:`LLMError` for settings that cannot be repaired by dropping
     a value without changing what was asked: thinking off at an effort the
-    model only allows with thinking on, or a thinking budget out of range.
-    Unknown models pass everything through unchanged.
+    model only allows with thinking on, a thinking budget out of range, or a
+    temperature outside the range the provider would accept on a request that
+    sends one. An id with a capability row follows that row even when it is
+    not in ``MODELS`` yet. Any other unknown model is passed through.
     """
-    spec = MODELS.get(request.model)
+    spec = _spec(request.model)
     model = request.model
     if spec is None:
+        provider = _provider_prefix(model)
+        if provider is not None:
+            _ensure_temperature(provider, request.temperature)
         return Parameters(
             temperature=request.temperature,
             top_p=request.top_p,
@@ -414,6 +472,7 @@ def adapt_parameters(request: CompletionRequest) -> Parameters:
             f"sampling; {', '.join(requested)} was not sent."
         )
     elif requested:
+        _ensure_temperature(spec.provider, request.temperature)
         out.temperature = request.temperature
         out.top_p = request.top_p
         if request.top_k is not None:

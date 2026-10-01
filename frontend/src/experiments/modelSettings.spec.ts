@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ModelInfo } from '@/api/types'
 
-import { defaultSettings, fitToModel, settingsState } from './modelSettings'
+import { defaultSettings, fitToModel, settingsState, temperatureLimit } from './modelSettings'
 
 const ALL5 = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
@@ -121,5 +121,23 @@ describe('fitToModel', () => {
     const onOpus = fitToModel(opus5, settings)
     expect([onOpus.temperature, onOpus.top_p, onOpus.top_k]).toEqual([null, null, null])
     expect([onOpus.thinking, onOpus.effort]).toEqual(['off', 'max'])
+  })
+
+  it('caps temperature at 1 for Anthropic and 2 for the other providers', () => {
+    const openai = model({
+      id: 'gpt-4.1',
+      provider: 'openai',
+      supports_top_k: false,
+      thinking_modes: [],
+      effort_levels: [],
+      default_effort: null,
+    })
+    expect(temperatureLimit('anthropic')).toBe(1)
+    expect(temperatureLimit('openai')).toBe(2)
+    expect(temperatureLimit('google')).toBe(2)
+    const ontoSonnet = fitToModel(sonnet46, { ...defaultSettings(openai), temperature: 1.8 })
+    expect(ontoSonnet.temperature).toBe(1)
+    const ontoOpenai = fitToModel(openai, { ...defaultSettings(sonnet46), temperature: 1.8 })
+    expect(ontoOpenai.temperature).toBe(1.8)
   })
 })

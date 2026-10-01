@@ -699,6 +699,11 @@ export interface LLMTraceOut {
   system: string | null
   messages: { role: string; content: string }[]
   temperature: number | null
+  top_p: number | null
+  top_k: number | null
+  thinking: ThinkingMode | null
+  thinking_budget: number | null
+  effort: Effort | null
   max_tokens: number
   response_text: string
   latency_ms: number

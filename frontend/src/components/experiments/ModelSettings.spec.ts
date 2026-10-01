@@ -80,6 +80,39 @@ describe('ModelSettings', () => {
     expect(openai.attributes('disabled')).toBeDefined()
   })
 
+  it('caps temperature at 1 for Anthropic and 2 for OpenAI', async () => {
+    const anthropic = render(defaultSettings(catalogue.models[0]))
+    expect(anthropic.find('#ms-temperature').attributes('max')).toBe('1')
+    await anthropic.find('#ms-temperature').setValue('3')
+    const capped = anthropic.emitted('update:modelValue')?.at(-1)?.[0] as Settings
+    expect(capped.temperature).toBe(1)
+
+    const openai = render(defaultSettings(catalogue.models[2]))
+    expect(openai.find('#ms-temperature').attributes('max')).toBe('2')
+    await openai.find('#ms-temperature').setValue('3')
+    const wider = openai.emitted('update:modelValue')?.at(-1)?.[0] as Settings
+    expect(wider.temperature).toBe(2)
+  })
+
+  it('shows German effort labels and keeps the English values', () => {
+    const wrapper = render({
+      ...defaultSettings(catalogue.models[1]),
+      thinking: 'off',
+      effort: 'xhigh',
+    })
+    const byValue = Object.fromEntries(
+      wrapper.findAll('#ms-effort option').map((option) => [option.attributes('value'), option.text()]),
+    )
+    expect(byValue['']).toContain('hoch')
+    expect(byValue.low).toBe('niedrig')
+    expect(byValue.medium).toBe('mittel')
+    expect(byValue.high).toBe('hoch')
+    expect(byValue.xhigh).toBe('extra hoch')
+    expect(byValue.max).toBe('maximal')
+    expect(wrapper.find('.note--fail').text()).toContain('hoch')
+    expect(wrapper.find('.note--fail').text()).not.toMatch(/\bhigh\b/)
+  })
+
   it('fits the settings to a newly selected model', async () => {
     const wrapper = render({
       ...defaultSettings(catalogue.models[0]),

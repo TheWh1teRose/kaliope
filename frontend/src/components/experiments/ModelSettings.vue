@@ -18,10 +18,10 @@ import type {
   ThinkingMode,
 } from '@/api/types'
 import {
-  THINKING_MAX_TOKENS,
   defaultSettings,
   fitToModel,
   settingsState,
+  temperatureLimit,
 } from '@/experiments/modelSettings'
 import { t } from '@/i18n'
 
@@ -68,6 +68,16 @@ function selectProvider(name: ProviderName): void {
 function numberOrNull(event: Event): number | null {
   const raw = (event.target as HTMLInputElement).value
   return raw === '' ? null : Number(raw)
+}
+
+function temperatureOrNull(event: Event): number | null {
+  const value = numberOrNull(event)
+  if (value === null || Number.isNaN(value) || !current.value) return null
+  return Math.min(temperatureLimit(current.value.provider), Math.max(0, value))
+}
+
+function effortLabel(level: Effort | null): string {
+  return level ? labels.effortLevels[level] : ''
 }
 
 function selectThinking(mode: ThinkingMode): void {
@@ -172,24 +182,24 @@ const changed = computed(() => {
         <input
           type="range"
           min="0"
-          max="2"
+          :max="temperatureLimit(current.provider)"
           step="0.1"
           :aria-label="labels.temperature"
           :disabled="!!state.samplingBlock"
           :value="modelValue.temperature ?? 1"
-          @input="update({ temperature: numberOrNull($event) })"
+          @input="update({ temperature: temperatureOrNull($event) })"
         />
         <input
           id="ms-temperature"
           class="input num"
           type="number"
           min="0"
-          max="2"
+          :max="temperatureLimit(current.provider)"
           step="0.1"
           :placeholder="labels.notSent"
           :disabled="!!state.samplingBlock"
           :value="modelValue.temperature ?? ''"
-          @input="update({ temperature: numberOrNull($event) })"
+          @input="update({ temperature: temperatureOrNull($event) })"
         />
       </div>
       <p v-if="state.samplingBlock" class="note">
@@ -275,19 +285,19 @@ const changed = computed(() => {
         <option value="">
           {{
             state.effortLevels.length
-              ? `${labels.effortDefault} (${current.default_effort})`
+              ? `${labels.effortDefault} (${effortLabel(current.default_effort)})`
               : labels.effortUnsupported
           }}
         </option>
         <option v-for="level in state.effortLevels" :key="level" :value="level">
-          {{ level }}
+          {{ labels.effortLevels[level] }}
         </option>
       </select>
       <span class="meta">
         {{ state.effortLevels.length ? labels.effortHint : labels.effortNone }}
       </span>
       <p v-if="state.thinkingOffEffortError" class="note note--fail">
-        {{ labels.thinkingOffEffort }} {{ current.thinking_off_max_effort }}.
+        {{ labels.thinkingOffEffort }} {{ effortLabel(current.thinking_off_max_effort) }}.
       </p>
     </div>
 
@@ -307,12 +317,6 @@ const changed = computed(() => {
         {{ labels.maxTokensHint }} {{ state.maxTokensCap.toLocaleString('de-DE') }}
       </span>
       <p v-if="state.maxTokensError" class="note note--fail">{{ labels.maxTokensTooHigh }}</p>
-      <p
-        v-else-if="state.thinkingOn && modelValue.max_tokens < THINKING_MAX_TOKENS"
-        class="note"
-      >
-        {{ labels.maxTokensThinking }}
-      </p>
     </div>
 
     <div class="field">

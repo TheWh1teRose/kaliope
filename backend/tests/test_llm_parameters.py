@@ -225,8 +225,9 @@ def test_google_maps_sampling_and_thinking_budget() -> None:
     assert len(completion.warnings) == 2
 
 
-def test_traces_record_the_new_parameters() -> None:
+def test_traces_record_what_was_sent() -> None:
     from app.llm.base import LLMClient
+    from app.schemas.bench import LLMTraceOut
 
     provider = AnthropicProvider()
     provider._client = _FakeAnthropic()
@@ -234,6 +235,13 @@ def test_traces_record_the_new_parameters() -> None:
     client.complete(_request("claude-sonnet-4-6", top_p=0.9, thinking="off", effort="medium"))
     trace = client.traces[-1]
     assert (trace["top_p"], trace["thinking"], trace["effort"]) == (0.9, "off", "medium")
+    published = LLMTraceOut.model_validate(trace)
+    assert (published.top_p, published.thinking, published.effort) == (0.9, "off", "medium")
+
+    client.complete(_request("claude-opus-5", temperature=0.7, top_p=0.5))
+    dropped = client.traces[-1]
+    assert (dropped["temperature"], dropped["top_p"]) == (None, None)
+    assert LLMTraceOut.model_validate(dropped).temperature is None
 
 
 # ---------------------------------------------------------------- registry
@@ -252,6 +260,58 @@ def test_every_model_declares_consistent_capabilities(spec: registry.ModelSpec) 
         assert "off" in spec.thinking_modes
     if spec.provider == "openai":
         assert not (spec.supports_top_k or spec.thinking_modes or spec.effort_levels)
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5", "claude-fable-5-1"],
+)
+def test_unpriced_models_cannot_disable_thinking_or_sample(
+    anthropic_fake: Any, model_id: str
+) -> None:
+    provider, fake = anthropic_fake
+    completion = provider.complete(_request(model_id, thinking="off", temperature=0.2))
+    sent = fake.calls[-1]
+    assert "thinking" not in sent
+    assert "extra_body" not in sent
+    assert any("thinking" in warning for warning in completion.warnings)
+    assert any("temperature" in warning or "sampling" in warning for warning in completion.warnings)
+
+
+def test_unpriced_opus_4_7_rejects_sampling_but_allows_thinking_off(anthropic_fake: Any) -> None:
+    provider, fake = anthropic_fake
+    completion = provider.complete(_request("claude-opus-4-7", thinking="off", temperature=0.2))
+    sent = fake.calls[-1]
+    assert sent["thinking"] == {"type": "disabled"}
+    assert "extra_body" not in sent
+    assert any("temperature" in warning or "sampling" in warning for warning in completion.warnings)
+
+
+def test_temperature_outside_the_provider_range_is_rejected_before_the_call(
+    anthropic_fake: Any,
+) -> None:
+    provider, fake = anthropic_fake
+    with pytest.raises(LLMError, match="temperature"):
+        provider.complete(_request("claude-sonnet-4-6", temperature=1.5))
+    assert fake.calls == []
+    provider.complete(_request("claude-haiku-4-5", temperature=1))
+    assert fake.calls[-1]["extra_body"]["temperature"] == 1
+
+    openai = OpenAIProvider()
+    openai_fake = _FakeOpenAI()
+    openai._client = openai_fake
+    with pytest.raises(LLMError, match="temperature"):
+        openai.complete(_request("gpt-4.1", temperature=3))
+    assert openai_fake.calls == []
+    openai.complete(_request("gpt-4.1", temperature=2))
+    assert openai_fake.calls[-1]["temperature"] == 2
+
+    google = GoogleProvider()
+    google_fake = _FakeGoogle()
+    google._client = google_fake
+    with pytest.raises(LLMError, match="temperature"):
+        google.complete(_request("gemini-2.5-flash", temperature=2.1))
+    assert google_fake.calls == []
 
 
 def test_models_that_cannot_stop_thinking_say_so() -> None:
