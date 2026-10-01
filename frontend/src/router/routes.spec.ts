@@ -39,3 +39,18 @@ describe('quality checks route', () => {
     )
   })
 })
+
+describe('settings route', () => {
+  it('redirects the old export address onto the settings export tab', async () => {
+    const router = freshRouter()
+    await router.push('/exports')
+    expect(router.currentRoute.value.name).toBe('settings')
+    expect(router.currentRoute.value.fullPath).toBe('/settings?tab=export')
+  })
+
+  it('keeps a deep link to the organisation tab', () => {
+    expect(
+      freshRouter().resolve({ name: 'settings', query: { tab: 'organisation' } }).fullPath,
+    ).toBe('/settings?tab=organisation')
+  })
+})

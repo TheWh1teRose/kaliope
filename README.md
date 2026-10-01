@@ -36,7 +36,10 @@ docker run --rm -v kalliope-data:/data --env-file .env kalliope \
   python -m app.cli create-user --email you@example.com --role admin
 ```
 
-Then open <http://localhost:8000>.
+Then open <http://localhost:8000>. Further accounts are added in the console
+under **Einstellungen → Organisation**: every member is an equal admin of one
+shared workspace, and no mail is sent, so pass the credentials on yourself.
+The edit-event export lives in the same place, under **Export**.
 
 ## Develop
 

@@ -71,7 +71,17 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/FormatEditorView.vue'),
     props: true,
   },
-  { path: '/exports', name: 'exports', component: () => import('@/views/ExportsView.vue') },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/SettingsView.vue'),
+  },
+  // Export used to be its own menu entry; it now lives in the settings.
+  {
+    path: '/exports',
+    name: 'exports',
+    redirect: (to) => ({ name: 'settings', query: { ...to.query, tab: 'export' } }),
+  },
   {
     path: '/experiments',
     name: 'experiments',

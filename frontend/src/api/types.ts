@@ -8,6 +8,14 @@ export interface User {
   active: boolean
 }
 
+export interface Member {
+  id: string
+  email: string
+  name: string
+  created_at: string
+  is_self: boolean
+}
+
 export interface IngestionReport {
   language: string
   language_confidence: number

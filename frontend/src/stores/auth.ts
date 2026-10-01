@@ -29,5 +29,17 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
   }
 
-  return { user, checked, refresh, login, logout }
+  async function updateProfile(changes: { name?: string; email?: string }): Promise<User> {
+    user.value = await api.patch<User>('/api/account', changes)
+    return user.value
+  }
+
+  async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await api.post('/api/account/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+  }
+
+  return { user, checked, refresh, login, logout, updateProfile, changePassword }
 })
