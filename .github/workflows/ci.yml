@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # make test leaves the holdout corpus closed and skips live LLM tests.
+      KALLIOPE_HOLDOUT: "0"
+      KALLIOPE_LLM_TESTS: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip and uv
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/uv
+          key: ${{ runner.os }}-py-3.12-${{ hashFiles('backend/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-py-3.12-
+
+      - name: Install backend
+        run: make install-backend
+
+      # Same commands as the `lint` target. Split so a ruff failure does not
+      # skip mypy or the suite (the holdout corpus stays closed either way).
+      - name: Ruff
+        run: |
+          cd backend && .venv/bin/ruff check app tests && .venv/bin/ruff format --check app tests
+
+      - name: mypy
+        if: ${{ !cancelled() }}
+        run: |
+          cd backend && .venv/bin/mypy app
+
+      - name: Backend tests
+        if: ${{ !cancelled() }}
+        run: make test
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        run: make typecheck-ui
+
+      - name: Unit tests
+        run: make test-ui
+
+      - name: Production build
+        run: make build-ui
