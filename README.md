@@ -316,5 +316,11 @@ image of the service, so its env, secrets, bucket volume and scaling stay as
 configured. The job fails unless `/api/health` reports `"status":"ok"`.
 Authentication uses Workload Identity Federation, with no stored keys.
 
+SQLite stays in WAL mode by default. WAL does not work on the Cloud Storage
+bucket mounted at `/data` (logins fail with `stale file handle` on
+`kalliope.db-wal`), so the Cloud Run service must set `SQLITE_JOURNAL_MODE=DELETE`
+(`WAL`, `DELETE`, `TRUNCATE` or `PERSIST`); a leftover `-wal` is checkpointed
+into the database on the next start.
+
 Setup (service account, Workload Identity pool, repo variables), rollback and
 manual deploy are described in [AGENTS.md](AGENTS.md#deploy).

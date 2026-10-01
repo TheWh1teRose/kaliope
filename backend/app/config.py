@@ -13,6 +13,8 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+JOURNAL_MODES: tuple[str, ...] = ("WAL", "DELETE", "TRUNCATE", "PERSIST")
+
 
 class ConfigurationError(RuntimeError):
     """Raised at startup when the environment is not usable."""
@@ -28,6 +30,10 @@ class Settings(BaseSettings):
 
     app_secret_key: str = ""
     data_dir: Path = Path("/data")
+
+    # SQLite journal mode. WAL needs shared-memory and append semantics that a
+    # Cloud Storage FUSE mount does not provide; use DELETE there (README).
+    sqlite_journal_mode: str = "WAL"
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""
@@ -48,6 +54,15 @@ class Settings(BaseSettings):
     @classmethod
     def _upper(cls, v: str) -> str:
         return v.upper()
+
+    @field_validator("sqlite_journal_mode")
+    @classmethod
+    def _journal_mode(cls, v: str) -> str:
+        mode = v.strip().upper()
+        # MEMORY and OFF are excluded: a crash mid-write corrupts the database.
+        if mode not in JOURNAL_MODES:
+            raise ValueError(f"must be one of {', '.join(JOURNAL_MODES)}")
+        return mode
 
     # ---- derived paths -------------------------------------------------
 

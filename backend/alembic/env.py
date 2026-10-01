@@ -9,9 +9,10 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, event, pool
 
 from app.config import get_settings
+from app.db import configure_journal
 from app.models import Base
 
 config = context.config
@@ -44,6 +45,8 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+    # Journal mode only: foreign keys stay off, batch migrations rebuild tables.
+    event.listen(connectable, "connect", configure_journal)
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
