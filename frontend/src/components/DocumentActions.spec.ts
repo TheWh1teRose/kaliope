@@ -145,7 +145,7 @@ function installParseScript(script: ParseScript): void {
       if (url === '/api/folders') return json([folder()])
       return json({
         ...summary,
-        report: script.status === 'parsed' ? ingestion(script.reason) : null,
+        report: ingestion(script.reason),
       })
     }),
   )
@@ -425,6 +425,8 @@ describe('document screens', () => {
 
       expect(wrapper.text()).toContain('Wartet')
       expect(wrapper.text()).not.toContain('Hallo')
+      expect(wrapper.text()).not.toContain('erster Grund')
+      expect(wrapper.text()).not.toContain('Ingestion-Bericht')
       expect(wrapper.text()).not.toContain('In der Werkbank öffnen')
       expect(wrapper.text()).not.toContain('Lauf starten')
       const structuresWhilePending = calls.filter((call) => call.url.endsWith('/structure')).length
@@ -439,6 +441,8 @@ describe('document screens', () => {
       await settle()
       expect(listGets()).toBe(listsAtPending + 1)
       expect(wrapper.text()).toContain('Wird eingelesen')
+      expect(wrapper.text()).not.toContain('erster Grund')
+      expect(wrapper.text()).not.toContain('Ingestion-Bericht')
       expect(wrapper.find('[data-action="open-bench"]').exists()).toBe(false)
       expect(calls.filter((call) => call.url.endsWith('/structure')).length).toBe(
         structuresWhilePending,
@@ -497,6 +501,8 @@ describe('document screens', () => {
       expect(wrapper.text()).toContain('Fehlgeschlagen')
       expect(wrapper.text()).toContain('Seite leer')
       expect(wrapper.text()).not.toContain('Traceback')
+      expect(wrapper.text()).not.toContain('erster Grund')
+      expect(wrapper.text()).not.toContain('Ingestion-Bericht')
       expect(wrapper.text()).not.toContain('Hallo')
       expect(wrapper.find('[data-action="open-bench"]').exists()).toBe(false)
       expect(wrapper.find('[data-action="new-run"]').exists()).toBe(false)
@@ -530,6 +536,8 @@ describe('document screens', () => {
 
       expect(wrapper.text()).toContain('Wartet')
       expect(wrapper.text()).not.toContain('Fertig gelesen')
+      expect(wrapper.text()).not.toContain('danach')
+      expect(wrapper.text()).not.toContain('Ingestion-Bericht')
       expect(wrapper.find('[data-action="open-bench"]').exists()).toBe(false)
       expect(listGets()).toBe(1)
 
@@ -811,6 +819,84 @@ describe('document screens', () => {
       expect(wrapper.text()).not.toContain('Wartet')
     } finally {
       releaseDetail()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps polling after a rename drops an in-flight list', async () => {
+    let releaseList = (): void => {}
+    let holdList = true
+    let status: DocumentSummary['parse_status'] = 'pending'
+    let reason = 'alter Bericht'
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
+        if (method === 'PATCH') {
+          return json(documentSummary({ title: 'Neuer Name', parse_status: status, report: null }))
+        }
+        if (url.endsWith('/structure')) return json(structure('Fertig gelesen'))
+        if (url === '/api/documents' && holdList) {
+          holdList = false
+          await new Promise<void>((resolve) => {
+            releaseList = resolve
+          })
+          return json([documentSummary({ parse_status: 'pending', parse_error: null, report: null })])
+        }
+        const summary = documentSummary({
+          parse_status: status,
+          parse_error: null,
+          parse_version: status === 'parsed' ? 2 : 1,
+          report: null,
+        })
+        if (url === '/api/documents') return json([summary])
+        return json({ ...summary, report: ingestion(reason) })
+      }),
+    )
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await settle()
+
+      expect(wrapper.text()).toContain('Wartet')
+      expect(wrapper.text()).not.toContain('alter Bericht')
+      expect(wrapper.text()).not.toContain('Ingestion-Bericht')
+      expect(listGets()).toBe(1)
+
+      await wrapper.get('[data-action="rename"]').trigger('click')
+      await nextTick()
+      const input = document.body.querySelector('input') as HTMLInputElement
+      setControlValue(input, 'Neuer Name')
+      document.body.querySelector<HTMLButtonElement>('[data-action="confirm"]')?.click()
+      await settle()
+
+      releaseList()
+      await settle()
+      expect(wrapper.text()).toContain('Wartet')
+      expect(wrapper.text()).not.toContain('Fertig gelesen')
+      const lists = listGets()
+      expect(lists).toBe(1)
+
+      status = 'parsed'
+      reason = 'neuer Bericht'
+      await advancePoll()
+
+      expect(listGets()).toBe(lists + 1)
+      expect(wrapper.text()).toContain('Fertig gelesen')
+      expect(wrapper.text()).toContain('neuer Bericht')
+      expect(wrapper.text()).toContain('In der Werkbank öffnen')
+      expect(wrapper.text()).not.toContain('Wartet')
+    } finally {
+      releaseList()
       vi.useRealTimers()
     }
   })

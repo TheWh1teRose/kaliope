@@ -21,17 +21,21 @@ export const useDocumentsStore = defineStore('documents', () => {
     try {
       const next = await api.get<DocumentSummary[]>('/api/documents')
       if (ticket !== loadEpoch) return
-      if (refreshEpoch === refreshAtStart) items.value = next
-      schedulePoll()
+      if (refreshEpoch === refreshAtStart) {
+        items.value = next
+        schedulePoll()
+        return
+      }
+      schedulePoll(next)
     } finally {
       if (ticket === loadEpoch) loading.value = false
     }
   }
 
-  function schedulePoll(): void {
+  function schedulePoll(rows: DocumentSummary[] = items.value): void {
     window.clearTimeout(timer)
     timer = undefined
-    const pending = items.value.some((d) => d.parse_status === 'pending' || d.parse_status === 'parsing')
+    const pending = rows.some((d) => d.parse_status === 'pending' || d.parse_status === 'parsing')
     if (!pending) return
     timer = window.setTimeout(() => {
       void load()

@@ -195,7 +195,7 @@ onUnmounted(() => {
       <DocumentActions variant="bar" :document="document" @changed="onDocumentChanged" />
     </header>
 
-    <section v-if="document.report" class="report sheet">
+    <section v-if="document.parse_status === 'parsed' && document.report" class="report sheet">
       <div class="spread">
         <h2 class="h-section">{{ t.report.title }}</h2>
         <span
