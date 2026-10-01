@@ -192,11 +192,15 @@ def test_parse_fenced_completion_and_truncation() -> None:
     parsed = parse_completion(_completion(lead, "length"), VSOptions(k=3))
     assert [c.probability for c in parsed.candidates] == [0.5, 0.3, None]
 
-    example = json.dumps(_answer([0.9]))
-    parsed = parse_completion(
-        _completion(f"Beispiel: {example}\n{finished}", "end"), VSOptions(k=3)
-    )
-    assert [c.probability for c in parsed.candidates] == [0.5, 0.3, 0.2]
+    noted = json.dumps({"note": "see {this}", **_answer([0.5, 0.4])})
+    parsed = parse_completion(_completion(noted, "end_turn"), VSOptions(k=2))
+    assert [c.probability for c in parsed.candidates] == [0.5, 0.4]
+    assert parsed.warnings == []
+
+    drafts = json.dumps(_answer([0.5, 0.3]))
+    trailed = drafts + "\n```json\n" + json.dumps({"ok": True}) + "\n```"
+    parsed = parse_completion(_completion(trailed, "end_turn"), VSOptions(k=2))
+    assert [c.probability for c in parsed.candidates] == [0.5, 0.3]
     assert parsed.warnings == []
 
     first = json.dumps(_answer([0.5]))
@@ -207,6 +211,7 @@ def test_parse_fenced_completion_and_truncation() -> None:
         assert parsed.candidates[0].segments[0].text == "Frage 0?"
         assert "1 Fassung(en) ohne Wahrscheinlichkeit." in parsed.warnings
         assert "1 Fassungen statt 3." in parsed.warnings
+        assert cutoff in parsed.warnings
 
 
 def test_percentages_strings_and_missing_probabilities() -> None:

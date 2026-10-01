@@ -10,6 +10,7 @@ Warnings are German because they are shown in the experiment screen.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Literal
 
@@ -24,6 +25,7 @@ from app.pipeline.nodes.script import _closest_speaker
 PROBABILITY_SUM_LIMIT = 1.05
 
 _CUTOFF_STOPS = frozenset({"max_tokens", "length", "MAX_TOKENS"})
+_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _WS = re.compile(r"\s+")
 
 
@@ -126,7 +128,7 @@ def parse_payload(
     _check(candidates, warnings)
     if len(candidates) < options.k:
         warnings.append(f"{len(candidates)} Fassungen statt {options.k}.")
-    elif cutoff:
+    if cutoff:
         warnings.append(
             "Die Antwort wurde abgeschnitten. Max. Ausgabetokens erhöhen oder k senken."
         )
@@ -136,27 +138,55 @@ def parse_payload(
 # ------------------------------------------------------------------ helpers
 
 
+def _responses_object(data: Any) -> dict[str, Any] | None:
+    if isinstance(data, dict) and isinstance(data.get("responses"), list):
+        return data
+    return None
+
+
 def _responses_payload(text: str) -> Any:
-    """The last JSON object in ``text`` that has a ``responses`` list."""
-    chosen: Any = None
-    marker = '"responses"'
-    start = 0
+    """The first JSON object in ``text`` that has a ``responses`` list."""
+    stripped = text.strip()
+    if stripped:
+        try:
+            found = _responses_object(json.loads(stripped))
+        except json.JSONDecodeError:
+            found = None
+        if found is not None:
+            return found
+    for match in _FENCE.finditer(text):
+        piece = match.group(1).strip()
+        if not piece:
+            continue
+        try:
+            found = _responses_object(json.loads(piece))
+        except json.JSONDecodeError:
+            continue
+        if found is not None:
+            return found
+
+    decoder = json.JSONDecoder()
+    index = 0
     while True:
-        index = text.find(marker, start)
+        index = text.find("{", index)
         if index < 0:
             break
-        brace = text.rfind("{", 0, index)
-        if brace >= 0:
+        try:
+            data, end = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
             try:
-                data = parse_json(text[brace:])
+                found = _responses_object(parse_json(text[index:]))
             except LLMError:
-                data = None
-            if isinstance(data, dict) and isinstance(data.get("responses"), list):
-                chosen = data
-        start = index + len(marker)
-    if chosen is None:
-        raise VSParseError('Die Antwort enthält keine Liste "responses".')
-    return chosen
+                found = None
+            if found is not None:
+                return found
+            index += 1
+            continue
+        found = _responses_object(data)
+        if found is not None:
+            return found
+        index = end
+    raise VSParseError('Die Antwort enthält keine Liste "responses".')
 
 
 def _segments(item: Any, speakers: list[str] | None) -> list[CandidateSegment]:
