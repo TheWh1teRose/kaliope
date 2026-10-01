@@ -308,7 +308,7 @@ def test_parse_json_closes_a_truncated_notes_list() -> None:
         "('biochemische Stoffe'). Vor die Definition ein Beispiel setzen, "
         "an dem die Zuhörer die Botenstoff-Idee erleben (z. B. Schreck: "
         "Adrenalin wird ausgeschüttet, Herz schlägt schneller – obwohl das "
-        'Hormon an einer anderen'
+        "Hormon an einer anderen"
     )
     payload = parse_json(cut)
     assert payload["notes"][0]["target_id"] == "beat000-s0003"
@@ -316,10 +316,7 @@ def test_parse_json_closes_a_truncated_notes_list() -> None:
 
 
 def test_parse_json_drops_an_unfinished_last_item() -> None:
-    cut = (
-        '{"notes":[{"target_kind":"beat","target_id":"beat000","text":"Kürzer."},'
-        '{"targ'
-    )
+    cut = '{"notes":[{"target_kind":"beat","target_id":"beat000","text":"Kürzer."},{"targ'
     payload = parse_json(cut)
     assert payload == {
         "notes": [{"target_kind": "beat", "target_id": "beat000", "text": "Kürzer."}]

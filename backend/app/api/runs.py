@@ -669,11 +669,7 @@ def _topology(flow: Flow) -> tuple[list[FlowNodeOut], list[EdgeOut], list[PortOu
             source = producers.get(key)
             if source is not None and _position(flow, source) >= index:
                 source = None
-            if (
-                source is None
-                and key not in RUN_SEED_KEYS
-                and not info.is_required()
-            ):
+            if source is None and key not in RUN_SEED_KEYS and not info.is_required():
                 continue
             if source is None and key not in seed_keys:
                 seed_keys.append(key)
