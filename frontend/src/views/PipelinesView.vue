@@ -40,7 +40,7 @@ function selectTab(next: Tab): void {
   const query = { ...route.query }
   if (next === 'pipelines') delete query.tab
   else query.tab = next
-  void router.push({ name: 'pipelines', query })
+  void router.replace({ name: 'pipelines', query })
 }
 
 const loading = ref(true)

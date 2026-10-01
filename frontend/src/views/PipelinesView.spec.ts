@@ -73,4 +73,40 @@ describe('pipelines quality checks tab', () => {
     expect(tab(wrapper, 'Qualitätsprüfungen').classes()).toContain('tab--on')
     expect(wrapper.find('.gates-catalogue').exists()).toBe(true)
   })
+
+  it('switches tabs in place so back leaves the page', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/documents', name: 'documents', component: { template: '<div />' } },
+        { path: '/pipelines', name: 'pipelines', component: PipelinesView },
+        { path: '/pipelines/:id', name: 'pipeline', component: { template: '<div />' } },
+        { path: '/formats/:id', name: 'format', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/documents')
+    await router.push('/pipelines')
+    const wrapper = mount(PipelinesView, { global: { plugins: [router] } })
+    await flushPromises()
+
+    await tab(wrapper, 'Formate').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/pipelines?tab=formats')
+
+    await tab(wrapper, 'Knoten').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/pipelines?tab=nodes')
+
+    await tab(wrapper, 'Qualitätsprüfungen').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/pipelines?tab=gates')
+
+    await tab(wrapper, 'Pipelines').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/pipelines')
+
+    router.back()
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('documents')
+  })
 })
