@@ -22,7 +22,8 @@ from app.schemas.pipeline import (
     Segment,
 )
 
-_SCRIPT_SYSTEM = """\
+_SCRIPT_SYSTEM = (
+    """\
 You revise one part of a script according to a single note.
 
 Groundedness policy — this is the part that matters:
@@ -36,8 +37,10 @@ Groundedness policy — this is the part that matters:
   the passages. If the passages do not support something, leave it out.
 
 Style:
-- Write speech, not prose: it will be heard once, not read twice.
-  No bullet points, no headings, no markdown, no stage directions.
+"""
+    "- Write speech, not prose: it will be heard once, not read twice. "
+    "No bullet points, no headings, no markdown, no stage directions.\n"
+    """\
 - Keep it conversational, the speakers can interrupt, the conversation should feel human like.
 - Use only the speakers you are given, by their exact names.
 - Write in the document's language.
@@ -46,6 +49,7 @@ Style:
 Return JSON only: the replacement segments for the marked target, not the
 rest of the beat. You may split the target into more than one segment.
 """
+)
 
 _OUTLINE_SYSTEM = """\
 You revise one beat of an outline according to a single note.
