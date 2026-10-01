@@ -11,9 +11,7 @@ const base: Omit<ModelInfo, 'id'> = {
   provider: 'anthropic',
   input_usd_per_mtok: 3,
   output_usd_per_mtok: 15,
-  context_window: 1_000_000,
   max_output_tokens: 64_000,
-  small: false,
   supports_sampling: true,
   supports_top_k: true,
   sampling_with_thinking: false,
@@ -117,6 +115,25 @@ describe('ModelSettings', () => {
     await wrapper.find('#ms-max-tokens').setValue('8000.5')
     const withTokens = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Settings
     expect(settingsState(haiku, withTokens).valid).toBe(false)
+  })
+
+  it('notes a fractional thinking budget', () => {
+    const wrapper = render({
+      ...defaultSettings(catalogue.models[3]),
+      thinking: 'budget',
+      thinking_budget: 2048.5,
+    })
+    const notes = wrapper.findAll('.note--fail').map((note) => note.text())
+    expect(notes).toContain(t.modelSettings.wholeNumber)
+    expect(notes).not.toContain(t.modelSettings.budgetTooLow)
+    expect(notes).not.toContain(t.modelSettings.budgetNotBelowMax)
+  })
+
+  it('notes a fractional max tokens value', () => {
+    const wrapper = render({ ...defaultSettings(catalogue.models[0]), max_tokens: 8000.5 })
+    const notes = wrapper.findAll('.note--fail').map((note) => note.text())
+    expect(notes).toContain(t.modelSettings.wholeNumber)
+    expect(notes).not.toContain(t.modelSettings.maxTokensTooHigh)
   })
 
   it('names a thinking mode the model actually lists when sampling is off', () => {

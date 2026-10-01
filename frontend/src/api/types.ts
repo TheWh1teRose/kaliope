@@ -753,9 +753,7 @@ export interface ModelInfo {
   provider: ProviderName
   input_usd_per_mtok: number
   output_usd_per_mtok: number
-  context_window: number
   max_output_tokens: number
-  small: boolean
   supports_sampling: boolean
   supports_top_k: boolean
   sampling_with_thinking: boolean

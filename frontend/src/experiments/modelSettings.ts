@@ -47,6 +47,8 @@ export interface SettingsState {
   thinkingOffEffortError: boolean
   maxTokensCap: number
   maxTokensError: boolean
+  budgetNotWhole: boolean
+  maxTokensNotWhole: boolean
   /** Mode that turns thinking off so sampling can be changed. `off` when the model lists it. */
   samplingRestore: 'off' | 'default'
   /** Whether a request with these settings would be refused. */
@@ -120,6 +122,8 @@ export function settingsState(model: ModelInfo, settings: ModelSettings): Settin
     thinkingOffEffortError,
     maxTokensCap: model.max_output_tokens,
     maxTokensError,
+    budgetNotWhole,
+    maxTokensNotWhole,
     samplingRestore: model.thinking_modes.includes('off') ? 'off' : 'default',
     valid:
       !budgetError &&

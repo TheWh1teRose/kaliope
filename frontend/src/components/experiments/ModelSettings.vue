@@ -271,6 +271,9 @@ const changed = computed(() => {
       <p v-if="state.budgetError" class="note note--fail">
         {{ state.budgetError === 'tooLow' ? labels.budgetTooLow : labels.budgetNotBelowMax }}
       </p>
+      <p v-if="state.budgetVisible && state.budgetNotWhole" class="note note--fail">
+        {{ labels.wholeNumber }}
+      </p>
     </div>
 
     <div class="field">
@@ -317,6 +320,7 @@ const changed = computed(() => {
         {{ labels.maxTokensHint }} {{ state.maxTokensCap.toLocaleString('de-DE') }}
       </span>
       <p v-if="state.maxTokensError" class="note note--fail">{{ labels.maxTokensTooHigh }}</p>
+      <p v-if="state.maxTokensNotWhole" class="note note--fail">{{ labels.wholeNumber }}</p>
     </div>
 
     <div class="field">

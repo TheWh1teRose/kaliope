@@ -603,6 +603,7 @@ export default {
     budgetBelowMax: 'kleiner als Max. Ausgabetokens',
     budgetTooLow: 'Das Budget liegt unter dem Minimum des Modells.',
     budgetNotBelowMax: 'Das Budget muss kleiner sein als Max. Ausgabetokens.',
+    wholeNumber: 'Der Wert muss eine ganze Zahl sein.',
     effort: 'Aufwand',
     effortLevels: {
       low: 'niedrig',

@@ -17,9 +17,7 @@ class ModelOut(BaseModel):
     provider: ProviderName
     input_usd_per_mtok: float
     output_usd_per_mtok: float
-    context_window: int
     max_output_tokens: int
-    small: bool
     supports_sampling: bool
     supports_top_k: bool
     sampling_with_thinking: bool
