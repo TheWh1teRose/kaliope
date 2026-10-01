@@ -272,6 +272,7 @@ backend/app/
 ├─ api/          auth · folders · documents · runs · review
 ├─ llm/          provider protocol, pricing and capability registry, three providers
 ├─ lang/         detection, per-language resources, readability formulas
+├─ experiments/  verbalized sampling: prompts, schemas, parsing, checks, cost
 ├─ ingestion/    runs · extract · layout · repetition · normalize · blocks ·
 │                anchors · structure · zones · tables · report · pipeline
 └─ pipeline/
