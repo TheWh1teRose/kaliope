@@ -61,10 +61,20 @@ onMounted(async () => {
         <span class="rail__icon" aria-hidden="true">⧉</span>
         <span class="rail__label">{{ t.nav.pipelines }}</span>
       </RouterLink>
-      <RouterLink :to="{ name: 'bench' }" class="rail__link" :title="t.nav.bench">
-        <span class="rail__icon" aria-hidden="true">⚒</span>
-        <span class="rail__label">{{ t.nav.bench }}</span>
-      </RouterLink>
+      <div class="rail__group" role="group" aria-labelledby="rail-experimenting">
+        <span id="rail-experimenting" class="rail__head">
+          <span class="rail__icon" aria-hidden="true">⌬</span>
+          <span class="rail__label">{{ t.nav.experimenting }}</span>
+        </span>
+        <div class="rail__sub">
+          <RouterLink :to="{ name: 'bench' }" class="rail__link" :title="t.nav.bench">
+            <span class="rail__label">{{ t.nav.bench }}</span>
+          </RouterLink>
+          <RouterLink :to="{ name: 'experiments' }" class="rail__link" :title="t.nav.experiments">
+            <span class="rail__label">{{ t.nav.experiments }}</span>
+          </RouterLink>
+        </div>
+      </div>
       <RouterLink :to="{ name: 'exports' }" class="rail__link" :title="t.nav.exports">
         <span class="rail__icon" aria-hidden="true">↧</span>
         <span class="rail__label">{{ t.nav.exports }}</span>
@@ -165,6 +175,37 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rail__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--s1) 0;
+}
+
+.rail__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 30px;
+  padding: 0 var(--s2);
+  font-size: 0.8125rem;
+  font-weight: 560;
+  color: var(--ink-2);
+}
+
+.rail__sub {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: calc(var(--s2) + 0.6rem);
+  padding-left: calc(var(--s2) + 2px);
+  border-left: 1px solid var(--rule-strong);
+}
+
+.rail__sub .rail__link {
+  min-height: 30px;
 }
 
 .rail__link:hover {

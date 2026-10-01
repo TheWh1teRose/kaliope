@@ -14,6 +14,8 @@ export default {
     gates: 'Qualitätsprüfungen',
     pipelines: 'Pipelines',
     bench: 'Werkbank',
+    experimenting: 'Experimentieren',
+    experiments: 'Experimente',
     logout: 'Abmelden',
     theme: 'Darstellung wechseln',
   },
@@ -524,6 +526,13 @@ export default {
     feedbackLead: 'Der Lauf wartet auf Anmerkungen. Öffnen Sie den Editor, um Belege im Dokument zu prüfen.',
     openNotes: 'Anmerkungen schreiben',
     closeNotes: 'Editor schließen',
+  },
+  experiments: {
+    title: 'Experimente',
+    lead: 'Fest aufgebaute Versuche, jeder im Code angelegt. Jeder hat eigene Eingaben und sammelt seine eigenen Ausgaben. Nichts davon wird ein Lauf.',
+    emptyEyebrow: 'Noch leer',
+    emptyTitle: 'Noch keine Experimente',
+    emptyLead: 'Ein neues Experiment wird im Code ergänzt und erscheint dann hier.',
   },
   notes: {
     title: 'Anmerkungen',

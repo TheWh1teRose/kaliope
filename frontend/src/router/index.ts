@@ -1,78 +1,91 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogueStore } from '@/stores/catalogue'
 
+export const routes: RouteRecordRaw[] = [
+  { path: '/', redirect: { name: 'documents' } },
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { public: true },
+  },
+  { path: '/documents', name: 'documents', component: () => import('@/views/DocumentsView.vue') },
+  {
+    path: '/documents/:id',
+    name: 'document',
+    component: () => import('@/views/DocumentDetailView.vue'),
+    props: true,
+  },
+  {
+    path: '/documents/:id/runs/new',
+    name: 'new-run',
+    component: () => import('@/views/NewRunView.vue'),
+    props: true,
+  },
+  { path: '/runs', name: 'runs', component: () => import('@/views/RunsView.vue') },
+  {
+    path: '/runs/:id',
+    name: 'run',
+    component: () => import('@/views/RunDetailView.vue'),
+    props: true,
+  },
+  {
+    path: '/runs/:id/review',
+    name: 'review',
+    component: () => import('@/views/ReviewView.vue'),
+    props: true,
+  },
+  {
+    path: '/runs/:id/feedback',
+    name: 'feedback',
+    component: () => import('@/views/FeedbackView.vue'),
+    props: true,
+  },
+  {
+    path: '/runs/:id/gates',
+    name: 'run-gates',
+    component: () => import('@/views/GatesView.vue'),
+    props: true,
+  },
+  { path: '/gates', name: 'gates', component: () => import('@/views/GatesView.vue') },
+  {
+    path: '/pipelines',
+    name: 'pipelines',
+    component: () => import('@/views/PipelinesView.vue'),
+  },
+  {
+    path: '/pipelines/:id',
+    name: 'pipeline',
+    component: () => import('@/views/PipelineEditorView.vue'),
+    props: true,
+  },
+  {
+    path: '/formats/:id',
+    name: 'format',
+    component: () => import('@/views/FormatEditorView.vue'),
+    props: true,
+  },
+  { path: '/exports', name: 'exports', component: () => import('@/views/ExportsView.vue') },
+  {
+    path: '/experiments',
+    name: 'experiments',
+    component: () => import('@/views/ExperimentsView.vue'),
+  },
+  {
+    path: '/experiments/bench',
+    name: 'bench',
+    component: () => import('@/views/BenchView.vue'),
+  },
+  // The workbench used to live here; old links and bookmarks keep their query.
+  { path: '/bench', redirect: (to) => ({ name: 'bench', query: to.query }) },
+  { path: '/:pathMatch(.*)*', redirect: { name: 'documents' } },
+]
+
 export const router = createRouter({
   history: createWebHistory(),
-  routes: [
-    { path: '/', redirect: { name: 'documents' } },
-    {
-      path: '/login',
-      name: 'login',
-      component: () => import('@/views/LoginView.vue'),
-      meta: { public: true },
-    },
-    { path: '/documents', name: 'documents', component: () => import('@/views/DocumentsView.vue') },
-    {
-      path: '/documents/:id',
-      name: 'document',
-      component: () => import('@/views/DocumentDetailView.vue'),
-      props: true,
-    },
-    {
-      path: '/documents/:id/runs/new',
-      name: 'new-run',
-      component: () => import('@/views/NewRunView.vue'),
-      props: true,
-    },
-    { path: '/runs', name: 'runs', component: () => import('@/views/RunsView.vue') },
-    {
-      path: '/runs/:id',
-      name: 'run',
-      component: () => import('@/views/RunDetailView.vue'),
-      props: true,
-    },
-    {
-      path: '/runs/:id/review',
-      name: 'review',
-      component: () => import('@/views/ReviewView.vue'),
-      props: true,
-    },
-    {
-      path: '/runs/:id/feedback',
-      name: 'feedback',
-      component: () => import('@/views/FeedbackView.vue'),
-      props: true,
-    },
-    {
-      path: '/runs/:id/gates',
-      name: 'run-gates',
-      component: () => import('@/views/GatesView.vue'),
-      props: true,
-    },
-    { path: '/gates', name: 'gates', component: () => import('@/views/GatesView.vue') },
-    {
-      path: '/pipelines',
-      name: 'pipelines',
-      component: () => import('@/views/PipelinesView.vue'),
-    },
-    {
-      path: '/pipelines/:id',
-      name: 'pipeline',
-      component: () => import('@/views/PipelineEditorView.vue'),
-      props: true,
-    },
-    {
-      path: '/formats/:id',
-      name: 'format',
-      component: () => import('@/views/FormatEditorView.vue'),
-      props: true,
-    },
-    { path: '/exports', name: 'exports', component: () => import('@/views/ExportsView.vue') },
-    { path: '/bench', name: 'bench', component: () => import('@/views/BenchView.vue') },
-    { path: '/:pathMatch(.*)*', redirect: { name: 'documents' } },
-  ],
+  routes,
 })
 
 router.beforeEach(async (to) => {
