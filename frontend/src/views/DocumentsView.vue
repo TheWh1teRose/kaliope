@@ -16,6 +16,14 @@ const folders = useFoldersStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const error = ref('')
+const notice = ref('')
+let noticeTimer: number | undefined
+
+function announce(message: string): void {
+  notice.value = message
+  window.clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => (notice.value = ''), 4000)
+}
 
 /** `null` shows everything, `'root'` the unfiled documents, else a folder id. */
 const selected = ref<string | null>(null)
@@ -28,6 +36,7 @@ type Prompt =
   | { kind: 'move'; folder: FolderOut }
   | { kind: 'remove'; folder: FolderOut }
   | { kind: 'file'; document: DocumentSummary }
+  | { kind: 'rename-document'; document: DocumentSummary }
 
 const prompt = ref<Prompt | null>(null)
 const draftName = ref('')
@@ -65,6 +74,8 @@ const promptTitle = computed(() => {
       return t.folders.deleteTitle
     case 'file':
       return t.folders.moveDocument
+    case 'rename-document':
+      return t.documents.renameTitle
     default:
       return ''
   }
@@ -107,7 +118,13 @@ async function fileDocument(documentId: string, folderId: string | null): Promis
 
 function openPrompt(next: Prompt): void {
   prompt.value = next
-  draftName.value = next.kind === 'rename' ? next.folder.name : ''
+  draftName.value =
+    next.kind === 'rename'
+      ? next.folder.name
+      : next.kind === 'rename-document'
+        ? next.document.title || next.document.filename
+        : ''
+  error.value = ''
   draftParent.value =
     next.kind === 'create'
       ? next.parentId
@@ -127,6 +144,10 @@ async function confirmPrompt(): Promise<void> {
     if (current.kind === 'create') await folders.create(draftName.value, draftParent.value)
     if (current.kind === 'rename') await folders.rename(current.folder.id, draftName.value)
     if (current.kind === 'move') await folders.move(current.folder.id, draftParent.value)
+    if (current.kind === 'rename-document') {
+      await documents.rename(current.document.id, draftName.value.trim())
+      announce(t.documents.renamed)
+    }
     if (current.kind === 'file') await fileDocument(current.document.id, draftParent.value)
     if (current.kind === 'remove') {
       await folders.remove(current.folder.id, true)
@@ -160,7 +181,10 @@ function confidenceLabel(document: DocumentSummary): string {
 }
 
 onMounted(() => Promise.all([documents.load(), folders.load()]))
-onUnmounted(() => documents.stopPolling())
+onUnmounted(() => {
+  documents.stopPolling()
+  window.clearTimeout(noticeTimer)
+})
 </script>
 
 <template>
@@ -185,7 +209,8 @@ onUnmounted(() => documents.stopPolling())
       </div>
     </header>
 
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="error && !prompt" class="error" role="alert">{{ error }}</p>
+    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
 
     <div class="layout">
       <FolderTree
@@ -290,6 +315,12 @@ onUnmounted(() => documents.stopPolling())
               >
                 {{ t.folders.inFolder }}
               </button>
+              <button
+                class="btn btn--sm btn--ghost"
+                @click="openPrompt({ kind: 'rename-document', document })"
+              >
+                {{ t.common.rename }}
+              </button>
               <button class="btn btn--sm btn--ghost" @click="documents.reparse(document.id)">
                 {{ t.documents.reparse }}
               </button>
@@ -307,7 +338,9 @@ onUnmounted(() => documents.stopPolling())
           ? t.folders.deleteLead
           : prompt?.kind === 'file'
             ? t.folders.moveDocumentLead
-            : ''
+            : prompt?.kind === 'rename-document'
+              ? t.documents.renameLead
+              : ''
       "
       @close="prompt = null"
     >
@@ -318,6 +351,21 @@ onUnmounted(() => documents.stopPolling())
           <label for="folder-name">{{ t.folders.name }}</label>
           <input id="folder-name" v-model="draftName" class="input" data-autofocus />
         </div>
+
+        <div v-if="prompt?.kind === 'rename-document'" class="field">
+          <label for="document-name">{{ t.documents.nameLabel }}</label>
+          <input
+            id="document-name"
+            v-model="draftName"
+            class="input"
+            maxlength="200"
+            data-autofocus
+            @keydown.enter="confirmPrompt"
+          />
+          <p class="meta">{{ t.documents.nameMax }}</p>
+        </div>
+
+        <p v-if="error && prompt" class="error" role="alert">{{ error }}</p>
 
         <div
           v-if="prompt?.kind === 'create' || prompt?.kind === 'move' || prompt?.kind === 'file'"
@@ -342,7 +390,10 @@ onUnmounted(() => documents.stopPolling())
           :class="prompt?.kind === 'remove' ? 'btn--danger' : 'btn--mark'"
           :disabled="
             busy ||
-            ((prompt?.kind === 'create' || prompt?.kind === 'rename') && !draftName.trim())
+            ((prompt?.kind === 'create' ||
+              prompt?.kind === 'rename' ||
+              prompt?.kind === 'rename-document') &&
+              !draftName.trim())
           "
           @click="confirmPrompt"
         >
@@ -490,6 +541,15 @@ onUnmounted(() => documents.stopPolling())
 .doc__facts dd {
   margin: 2px 0 0;
   font-size: var(--t-sm);
+}
+
+.notice {
+  margin: 0 0 var(--s3);
+  padding: var(--s2) var(--s3);
+  font-size: var(--t-sm);
+  color: var(--pass);
+  background: var(--pass-soft);
+  border-radius: var(--r-sm);
 }
 
 .doc__error {

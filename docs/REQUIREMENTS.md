@@ -662,6 +662,7 @@ POST   /api/documents                        multipart PDF upload, parses async
 GET    /api/documents/{id}                   includes IngestionReport
 GET    /api/documents/{id}/structure         sections + blocks + zones
 GET    /api/documents/{id}/pages/{n}/image   PNG render, cached on disk
+PATCH  /api/documents/{id}                   {title} rename; kept across reparse
 POST   /api/documents/{id}/reparse
 PATCH  /api/documents/{id}/blocks/{bid}/zone  reviewer relabel → EditEvent
 

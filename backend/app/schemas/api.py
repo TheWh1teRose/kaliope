@@ -76,6 +76,12 @@ class FolderMove(BaseModel):
     parent_id: str | None = None
 
 
+class DocumentRename(BaseModel):
+    #: Trimmed and length-checked by the endpoint, so an empty or oversized name
+    #: gets the same problem+json as every other refusal.
+    title: str
+
+
 class DocumentMove(BaseModel):
     #: ``None`` moves the document out of every folder, back to the root.
     folder_id: str | None = None
