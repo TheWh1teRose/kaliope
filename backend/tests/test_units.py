@@ -15,7 +15,7 @@ from app.lang.detect import detect_language
 from app.lang.readability import has_formula, score
 from app.lang.resources import conjunctions_for, words_per_minute
 from app.llm.base import Completion, CompletionRequest, LLMClient, Message, Usage, parse_json
-from app.llm.registry import cost_usd, provider_name_for, supports_sampling
+from app.llm.registry import MODELS, cost_usd, provider_name_for, supports_sampling
 from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
 from app.pipeline.framework.keys import node_key
 from app.pipeline.nodes.script import locate_quote
@@ -228,10 +228,62 @@ def test_readability_only_scores_languages_it_knows() -> None:
 
 # --------------------------------------------------------------- registry
 
+#: USD per million tokens (input, output) and context window. Claude API
+#: reference, 2026-09-25. Dated Haiku stays so existing ids keep resolving.
+_ANTHROPIC_PRICES: dict[str, tuple[float, float, int]] = {
+    "claude-fable-5-1": (10.0, 50.0, 1_000_000),
+    "claude-fable-5": (10.0, 50.0, 1_000_000),
+    "claude-opus-5-5": (4.0, 20.0, 1_000_000),
+    "claude-opus-5": (5.0, 25.0, 1_000_000),
+    "claude-opus-4-8": (5.0, 25.0, 1_000_000),
+    "claude-opus-4-7": (5.0, 25.0, 1_000_000),
+    "claude-opus-4-6": (5.0, 25.0, 1_000_000),
+    "claude-sonnet-5-5": (2.0, 10.0, 1_000_000),
+    "claude-sonnet-5": (2.0, 10.0, 1_000_000),
+    "claude-sonnet-4-6": (3.0, 15.0, 1_000_000),
+    "claude-haiku-4-5": (1.0, 5.0, 200_000),
+    "claude-haiku-4-5-20251001": (1.0, 5.0, 200_000),
+}
+
+#: These reject non-default temperature/top_p/top_k.
+_NO_SAMPLING = {
+    "claude-fable-5-1",
+    "claude-fable-5",
+    "claude-opus-5-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-sonnet-5-5",
+    "claude-sonnet-5",
+}
+
+
+def test_every_model_has_a_price_and_context_window() -> None:
+    assert MODELS
+    for spec in MODELS.values():
+        assert spec.input_usd_per_mtok > 0
+        assert spec.output_usd_per_mtok > 0
+        assert spec.context_window > 0
+    for model_id, (input_rate, output_rate, window) in _ANTHROPIC_PRICES.items():
+        spec = MODELS[model_id]
+        assert spec.input_usd_per_mtok == input_rate
+        assert spec.output_usd_per_mtok == output_rate
+        assert spec.context_window == window
+        assert spec.max_output_tokens == (32_000 if spec.small else 128_000)
+
 
 def test_cost_is_computed_from_the_pricing_table() -> None:
     usage = Usage(input_tokens=1_000_000, output_tokens=1_000_000)
     assert cost_usd("claude-opus-5", usage) == pytest.approx(30.0)
+    assert cost_usd("claude-sonnet-5", usage) == pytest.approx(12.0)
+    assert cost_usd("claude-sonnet-5-5", usage) == pytest.approx(12.0)
+    assert cost_usd("claude-opus-5-5", usage) == pytest.approx(24.0)
+    # Published cache-read prices per million tokens.
+    cached = Usage(cache_read_tokens=1_000_000)
+    assert cost_usd("claude-fable-5-1", cached) == pytest.approx(0.25)
+    assert cost_usd("claude-fable-5", cached) == pytest.approx(1.00)
+    assert cost_usd("claude-opus-5-5", cached) == pytest.approx(0.20)
+    assert cost_usd("claude-sonnet-5-5", cached) == pytest.approx(0.20)
     # An unknown model is usable, but its cost is recorded as zero rather than
     # invented.
     assert cost_usd("some-future-model", usage) == 0.0
@@ -245,7 +297,13 @@ def test_provider_is_inferred_for_an_unknown_model() -> None:
 
 def test_sampling_support_is_declared_per_model() -> None:
     assert supports_sampling("claude-haiku-4-5") is True
-    assert supports_sampling("claude-opus-5") is False
+    assert supports_sampling("claude-opus-4-6") is True
+    assert supports_sampling("claude-sonnet-4-6") is True
+    for model_id in _NO_SAMPLING:
+        assert supports_sampling(model_id) is False
+        assert MODELS[model_id].supports_sampling is False
+    # Unknown ids stay usable; sampling is assumed until the model is registered.
+    assert supports_sampling("some-future-model") is True
 
 
 # -------------------------------------------------------- cache and store
