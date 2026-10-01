@@ -269,7 +269,7 @@ reviewer, the reason code, and the text before and after.
 
 ```
 backend/app/
-├─ main.py config.py db.py security.py errors.py events.py migrations.py worker.py cli.py
+├─ main.py config.py db.py security.py accounts.py errors.py events.py migrations.py worker.py cli.py
 ├─ models/       SQLAlchemy ORM
 ├─ schemas/      pydantic domain + API models, zone taxonomy, reason codes
 ├─ api/          auth · folders · documents · runs · review
