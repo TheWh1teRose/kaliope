@@ -32,6 +32,7 @@ from app.models import (
     BenchNode,
     BenchRun,
     Document,
+    ExperimentRun,
     GateResult,
     LLMCall,
     Run,
@@ -146,6 +147,64 @@ class Worker:
 
     def submit_bench(self, bench_id: str) -> Future[Any]:
         return self.submit(self.execute_bench, bench_id)
+
+    def submit_experiment(self, run_id: str) -> Future[Any]:
+        return self.submit(self.execute_experiment, run_id)
+
+    def execute_experiment(self, run_id: str) -> None:
+        """Run one experiment click. No gates, no artifacts, no review rows."""
+        from app.experiments.base import ExperimentContext, SourceIn
+        from app.experiments.registry import get_experiment
+
+        with session_scope() as session:
+            row = session.get(ExperimentRun, run_id)
+            if row is None:
+                logger.warning("experiment run requested for unknown id %s", run_id)
+                return
+            row.status = "running"
+            row.started_at = datetime.now(UTC)
+            key = row.experiment_key
+            setup_raw = dict(row.setup_json or {})
+            source_raw = row.source_json
+
+        llm = self._build_llm(run_id=None)
+        try:
+            experiment = get_experiment(key)
+            llm.node_name = f"experiment:{key}"
+            setup = experiment.Setup.model_validate(setup_raw)
+            source = None
+            if isinstance(source_raw, dict) and source_raw.get("run_id"):
+                source = SourceIn.model_validate(source_raw)
+            ctx = ExperimentContext(
+                source=source,
+                store=ArtifactStore(get_settings().artifacts_dir),
+                session_scope=session_scope,
+            )
+            result = experiment.run(setup, llm, ctx)
+        except Exception as exc:  # noqa: BLE001 - recorded on the run, shown on the page
+            logger.warning("experiment run %s failed: %s", run_id, exc)
+            with session_scope() as session:
+                row = session.get(ExperimentRun, run_id)
+                if row is not None:
+                    row.status = "failed"
+                    row.error = str(exc)
+                    row.finished_at = datetime.now(UTC)
+                    row.manifest_json = {"llm_traces": list(llm.traces)}
+                    row.total_cost_usd = llm.total_cost_usd
+            return
+
+        with session_scope() as session:
+            row = session.get(ExperimentRun, run_id)
+            if row is None:
+                return
+            row.status = "completed"
+            row.output_json = result.output_json
+            row.warnings_json = list(result.warnings)
+            row.manifest_json = {"llm_traces": list(llm.traces), "text": result.text}
+            row.total_cost_usd = llm.total_cost_usd
+            row.tokens_in = llm.total_usage.input_tokens + llm.total_usage.cache_read_tokens
+            row.tokens_out = llm.total_usage.output_tokens
+            row.finished_at = datetime.now(UTC)
 
     def execute_run(self, run_id: str) -> None:
         settings = get_settings()
