@@ -574,7 +574,6 @@ export default {
   },
   modelSettings: {
     provider: 'Anbieter',
-    providerUnavailable: 'kein API-Schlüssel',
     model: 'Modell',
     price: 'Preis',
     priceIn: 'ein',

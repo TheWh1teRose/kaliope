@@ -42,9 +42,6 @@ const state = computed(() =>
   current.value ? settingsState(current.value, props.modelValue) : null,
 )
 
-const available = computed(
-  () => new Map(props.catalogue.providers.map((p) => [p.name, p.available] as const)),
-)
 const providerModels = computed(() =>
   props.catalogue.models.filter((m) => m.provider === current.value?.provider),
 )
@@ -158,13 +155,8 @@ const changed = computed(() => {
         :value="current.provider"
         @change="selectProvider(($event.target as HTMLSelectElement).value as ProviderName)"
       >
-        <option
-          v-for="provider in catalogue.providers"
-          :key="provider.name"
-          :value="provider.name"
-          :disabled="!provider.available"
-        >
-          {{ provider.name }}{{ provider.available ? '' : ` · ${labels.providerUnavailable}` }}
+        <option v-for="provider in catalogue.providers" :key="provider.name" :value="provider.name">
+          {{ provider.name }}
         </option>
       </select>
     </div>
@@ -177,12 +169,7 @@ const changed = computed(() => {
         :value="modelValue.model"
         @change="selectModel(($event.target as HTMLSelectElement).value)"
       >
-        <option
-          v-for="model in providerModels"
-          :key="model.id"
-          :value="model.id"
-          :disabled="available.get(model.provider) === false"
-        >
+        <option v-for="model in providerModels" :key="model.id" :value="model.id">
           {{ model.id }} · {{ usd(model.input_usd_per_mtok) }} /
           {{ usd(model.output_usd_per_mtok) }}
         </option>

@@ -496,8 +496,6 @@ def catalogue() -> list[dict[str, object]]:
             "supports_sampling": s.supports_sampling,
             "supports_top_k": s.supports_top_k,
             "sampling_with_thinking": s.sampling_with_thinking,
-            "supports_structured_outputs": s.supports_structured_outputs,
-            "supports_prompt_caching": s.supports_prompt_caching,
             "thinking_modes": list(s.thinking_modes),
             "thinking_default": s.thinking_default,
             "min_thinking_budget": s.min_thinking_budget,
@@ -534,15 +532,6 @@ def resolve_provider(model_id: str) -> Provider:
             f"(see .env.example) to use model '{model_id}'."
         )
     return provider
-
-
-def provider_available(name: ProviderName) -> bool:
-    """Whether ``name`` has its API key, without raising like ``resolve_provider``."""
-    provider = _providers.get(name)
-    if provider is None:
-        provider = _build_provider(name)
-        _providers[name] = provider
-    return provider.available()
 
 
 def _build_provider(name: ProviderName) -> Provider:

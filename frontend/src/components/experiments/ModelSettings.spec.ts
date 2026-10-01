@@ -17,8 +17,6 @@ const base: Omit<ModelInfo, 'id'> = {
   supports_sampling: true,
   supports_top_k: true,
   sampling_with_thinking: false,
-  supports_structured_outputs: true,
-  supports_prompt_caching: true,
   thinking_modes: ['adaptive', 'off'],
   thinking_default: 'off',
   min_thinking_budget: 1024,
@@ -57,11 +55,7 @@ const catalogue: ModelCatalogue = {
       default_effort: null,
     },
   ],
-  providers: [
-    { name: 'anthropic', available: true },
-    { name: 'openai', available: false },
-    { name: 'google', available: false },
-  ],
+  providers: [{ name: 'anthropic' }, { name: 'openai' }, { name: 'google' }],
 }
 
 function render(settings: Settings) {
@@ -81,12 +75,6 @@ describe('ModelSettings', () => {
     expect(wrapper.find('#ms-temperature').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#ms-top-p').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.note').text()).toContain('keine Sampling-Parameter')
-  })
-
-  it('marks providers without a key as unavailable', () => {
-    const wrapper = render(defaultSettings(catalogue.models[0]))
-    const openai = wrapper.find('#ms-provider option[value="openai"]')
-    expect(openai.attributes('disabled')).toBeDefined()
   })
 
   it('caps temperature at 1 for Anthropic and 2 for OpenAI', async () => {

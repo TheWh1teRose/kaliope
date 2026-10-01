@@ -22,8 +22,5 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 def get_models(_user: User = Depends(current_user)) -> ModelCatalogueOut:
     return ModelCatalogueOut(
         models=[ModelOut.model_validate(entry) for entry in llm_registry.catalogue()],
-        providers=[
-            ProviderOut(name=name, available=llm_registry.provider_available(name))
-            for name in get_args(llm_registry.ProviderName)
-        ],
+        providers=[ProviderOut(name=name) for name in get_args(llm_registry.ProviderName)],
     )

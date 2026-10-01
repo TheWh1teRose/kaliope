@@ -359,4 +359,3 @@ def test_model_catalogue_lists_models_and_providers(client: TestClient) -> None:
     assert opus["thinking_default"] == "on"
     assert opus["thinking_off_max_effort"] == "high"
     assert {p["name"] for p in body["providers"]} == {"anthropic", "openai", "google"}
-    assert all(isinstance(p["available"], bool) for p in body["providers"])

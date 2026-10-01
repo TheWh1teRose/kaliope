@@ -18,8 +18,6 @@ function model(overrides: Partial<ModelInfo>): ModelInfo {
     supports_sampling: true,
     supports_top_k: true,
     sampling_with_thinking: false,
-    supports_structured_outputs: true,
-    supports_prompt_caching: true,
     thinking_modes: ['adaptive', 'off'],
     thinking_default: 'off',
     min_thinking_budget: 1024,

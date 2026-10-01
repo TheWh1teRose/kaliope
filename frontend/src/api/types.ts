@@ -759,8 +759,6 @@ export interface ModelInfo {
   supports_sampling: boolean
   supports_top_k: boolean
   sampling_with_thinking: boolean
-  supports_structured_outputs: boolean
-  supports_prompt_caching: boolean
   /** Thinking modes besides `default`, which sends nothing. */
   thinking_modes: Exclude<ThinkingMode, 'default'>[]
   /** Whether the model thinks when no thinking setting is sent. */
@@ -774,7 +772,6 @@ export interface ModelInfo {
 
 export interface ProviderInfo {
   name: ProviderName
-  available: boolean
 }
 
 export interface ModelCatalogue {

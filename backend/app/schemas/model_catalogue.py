@@ -23,8 +23,6 @@ class ModelOut(BaseModel):
     supports_sampling: bool
     supports_top_k: bool
     sampling_with_thinking: bool
-    supports_structured_outputs: bool
-    supports_prompt_caching: bool
     thinking_modes: list[ThinkingMode]
     thinking_default: Literal["on", "off"]
     min_thinking_budget: int
@@ -35,8 +33,6 @@ class ModelOut(BaseModel):
 
 class ProviderOut(BaseModel):
     name: ProviderName
-    #: ``False`` when its API key is not set.
-    available: bool
 
 
 class ModelCatalogueOut(BaseModel):
