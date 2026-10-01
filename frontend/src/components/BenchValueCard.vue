@@ -11,6 +11,8 @@ import { computed, ref, watch } from 'vue'
 import type { BenchValueOut } from '@/api/types'
 import { t } from '@/i18n'
 
+import ArtifactView from './ArtifactView.vue'
+
 const props = defineProps<{
   value: BenchValueOut
   text: string
@@ -102,15 +104,25 @@ function onInput(event: Event): void {
 
       <p v-if="value.truncated && !dirty" class="muted small">{{ t.graph.truncated }}</p>
 
-      <textarea
-        class="textarea json"
-        spellcheck="false"
-        rows="14"
-        :value="draft"
-        :placeholder="t.bench.emptyHint"
-        @input="onInput"
-      />
-      <p v-if="jsonError" class="err">{{ t.bench.jsonInvalid }} {{ jsonError }}</p>
+      <ArtifactView
+        :model="value.model"
+        :preview="draft"
+        :payload="value.payload"
+        :truncated="value.truncated && !dirty"
+        editable
+      >
+        <template #json>
+          <textarea
+            class="textarea json"
+            spellcheck="false"
+            rows="14"
+            :value="draft"
+            :placeholder="t.bench.emptyHint"
+            @input="onInput"
+          />
+          <p v-if="jsonError" class="err">{{ t.bench.jsonInvalid }} {{ jsonError }}</p>
+        </template>
+      </ArtifactView>
 
       <div class="row wrap">
         <button

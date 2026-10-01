@@ -19,6 +19,7 @@ import type {
   NodeSpecOut,
   Note,
 } from '@/api/types'
+import ArtifactView from '@/components/ArtifactView.vue'
 import BenchValueCard from '@/components/BenchValueCard.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
@@ -855,7 +856,12 @@ onBeforeRouteLeave(() => {
 
                 <template v-if="outputOf(record.node_name)?.preview">
                   <p class="eyebrow">{{ t.bench.nodeOutput }}</p>
-                  <pre class="json scroll">{{ outputOf(record.node_name)?.preview }}</pre>
+                  <ArtifactView
+                    :model="outputOf(record.node_name)!.model"
+                    :preview="outputOf(record.node_name)?.preview"
+                    :payload="outputOf(record.node_name)?.payload"
+                    :truncated="outputOf(record.node_name)?.truncated"
+                  />
                 </template>
               </div>
             </li>

@@ -43,6 +43,7 @@ describe('German UI strings', () => {
       'bench',
       'experiments',
       'notes',
+      'artifact',
     ]) {
       expect(de).toHaveProperty(key)
     }

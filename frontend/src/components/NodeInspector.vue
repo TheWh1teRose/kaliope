@@ -4,14 +4,15 @@
  *
  * The point is provenance: each input names the node that published it and the
  * artifact hash it resolved to, so "this output is wrong" can be walked back to
- * "because this input was". The preview is deliberately the raw artifact JSON —
- * a prettified rendering would be a second interpretation of the data, and the
- * thing being debugged is the data.
+ * "because this input was". Outline, beat, and script values open as text.
+ * JSON stays one click away, because the thing being debugged is still the data.
  */
 import { computed, ref } from 'vue'
 
 import type { NodeIOOut, NodeValueOut } from '@/api/types'
 import { t } from '@/i18n'
+
+import ArtifactView from './ArtifactView.vue'
 
 const props = defineProps<{ io: NodeIOOut | null; loading?: boolean }>()
 
@@ -124,7 +125,12 @@ function configRows(config: Record<string, unknown>): { key: string; text: strin
               <span class="kv__value mono">{{ row.text }}</span>
             </li>
           </ul>
-          <pre v-if="value.preview" class="json scroll">{{ value.preview }}</pre>
+          <ArtifactView
+            v-if="value.preview"
+            :model="value.model"
+            :preview="value.preview"
+            :truncated="value.truncated"
+          />
           <p v-if="value.truncated" class="muted small">{{ t.graph.truncated }}</p>
         </template>
       </div>
