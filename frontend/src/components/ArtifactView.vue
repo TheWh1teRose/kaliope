@@ -59,9 +59,12 @@ const segments = computed<SegmentView[] | null>(() => {
 
 const rendered = computed(() => beats.value !== null || segments.value !== null)
 const showText = computed(() => artifactMode.value === 'text' && rendered.value)
-const mismatch = computed(
-  () => kind.value !== null && artifactMode.value === 'text' && !rendered.value,
-)
+const mismatch = computed(() => {
+  if (kind.value === null || artifactMode.value !== 'text' || rendered.value) return false
+  if (props.truncated) return true
+  if (typeof props.preview === 'string' && props.preview !== '') return true
+  return props.payload != null
+})
 
 const jsonText = computed(() => {
   if (typeof props.preview === 'string') return props.preview

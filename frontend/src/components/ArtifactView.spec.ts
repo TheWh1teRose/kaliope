@@ -153,6 +153,20 @@ describe('ArtifactView', () => {
     expect(wrapper.find('.beat').exists()).toBe(false)
   })
 
+  it('does not label an empty known-model slot as a bad shape', () => {
+    const empties: { preview?: string | null; payload: null }[] = [
+      { preview: '', payload: null },
+      { preview: null, payload: null },
+      { payload: null },
+    ]
+    for (const model of ['Outline', 'Beat', 'Script']) {
+      for (const props of empties) {
+        const wrapper = mount(ArtifactView, { props: { model, ...props } })
+        expect(wrapper.text()).not.toContain('Diese Struktur passt nicht zur Textansicht.')
+      }
+    }
+  })
+
   it('does not render a truncated string as a partial tree', () => {
     const wrapper = mount(ArtifactView, {
       props: {
