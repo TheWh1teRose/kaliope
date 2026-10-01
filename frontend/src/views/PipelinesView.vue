@@ -2,28 +2,47 @@
 /**
  * The pipelines page: what a run can be made of.
  *
- * Three things belong together here and are shown as three tabs of one page,
- * because editing any of them changes what a run does. Pipelines are the ordered
- * steps; formats are the shape of the episode those steps produce; the node
- * catalogue is the parts list both are assembled from, with each part explaining
- * itself.
+ * Four things belong together here and are shown as tabs of one page, because
+ * editing any of them changes what a run does. Pipelines are the ordered steps;
+ * formats are the shape of the episode those steps produce; the node catalogue
+ * is the parts list both are assembled from, with each part explaining itself;
+ * quality checks are the gates that run after the script is finished. The
+ * active tab is the `tab` query, so a link to one tab opens that tab.
  */
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { FormatSpec, FormatSummary, NodeSpecOut, PipelineSummary } from '@/api/types'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
 import { t } from '@/i18n'
+import { useCatalogueStore } from '@/stores/catalogue'
 import { usePipelinesStore } from '@/stores/pipelines'
+import GatesView from '@/views/GatesView.vue'
 
-type Tab = 'pipelines' | 'formats' | 'nodes'
+const TABS = ['pipelines', 'formats', 'nodes', 'gates'] as const
+type Tab = (typeof TABS)[number]
 
 const store = usePipelinesStore()
+const catalogue = useCatalogueStore()
+const route = useRoute()
 const router = useRouter()
 
-const tab = ref<Tab>('pipelines')
+const tab = computed<Tab>(() => {
+  const raw = route.query.tab
+  const value = Array.isArray(raw) ? raw[0] : raw
+  return value && (TABS as readonly string[]).includes(value) ? (value as Tab) : 'pipelines'
+})
+
+function selectTab(next: Tab): void {
+  if (next === tab.value) return
+  const query = { ...route.query }
+  if (next === 'pipelines') delete query.tab
+  else query.tab = next
+  void router.push({ name: 'pipelines', query })
+}
+
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
@@ -178,20 +197,24 @@ onMounted(load)
     </header>
 
     <div class="tabs">
-      <button class="tab" :class="{ 'tab--on': tab === 'pipelines' }" @click="tab = 'pipelines'">
+      <button class="tab" :class="{ 'tab--on': tab === 'pipelines' }" @click="selectTab('pipelines')">
         {{ t.pipelines.tabPipelines }}
         <span class="tab__count num">{{ store.pipelines.length }}</span>
       </button>
-      <button class="tab" :class="{ 'tab--on': tab === 'formats' }" @click="tab = 'formats'">
+      <button class="tab" :class="{ 'tab--on': tab === 'formats' }" @click="selectTab('formats')">
         {{ t.pipelines.tabFormats }}
         <span class="tab__count num">{{ store.formats.length }}</span>
       </button>
-      <button class="tab" :class="{ 'tab--on': tab === 'nodes' }" @click="tab = 'nodes'">
+      <button class="tab" :class="{ 'tab--on': tab === 'nodes' }" @click="selectTab('nodes')">
         {{ t.pipelines.tabNodes }}
         <span class="tab__count num">{{ nodes.length }}</span>
       </button>
+      <button class="tab" :class="{ 'tab--on': tab === 'gates' }" @click="selectTab('gates')">
+        {{ t.pipelines.tabGates }}
+        <span class="tab__count num">{{ catalogue.gates.length }}</span>
+      </button>
       <span class="grow" />
-      <label v-if="tab !== 'nodes'" class="toggle">
+      <label v-if="tab === 'pipelines' || tab === 'formats'" class="toggle">
         <input v-model="showArchived" type="checkbox" @change="load" />
         {{ t.pipelines.showArchived }}
       </label>
@@ -275,7 +298,7 @@ onMounted(load)
     </ul>
 
     <!-- ----------------------------------------------------------- nodes -->
-    <div v-else class="nodes">
+    <div v-else-if="tab === 'nodes'" class="nodes">
       <p class="muted lead">{{ t.nodeCatalogue.lead }}</p>
       <ul class="cards">
         <li v-for="node in nodes" :key="node.name" class="card node">
@@ -307,6 +330,9 @@ onMounted(load)
         </li>
       </ul>
     </div>
+
+    <!-- ----------------------------------------------------------- gates -->
+    <GatesView v-else-if="tab === 'gates'" embedded />
 
     <!-- --------------------------------------------------------- dialogs -->
     <ModalDialog

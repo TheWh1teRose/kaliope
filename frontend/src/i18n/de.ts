@@ -65,6 +65,7 @@ export default {
     tabPipelines: 'Pipelines',
     tabFormats: 'Formate',
     tabNodes: 'Knoten',
+    tabGates: 'Qualitätsprüfungen',
     empty: 'Noch keine Pipelines.',
     new: 'Neue Pipeline',
     newTitle: 'Pipeline anlegen',

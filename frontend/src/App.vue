@@ -53,10 +53,6 @@ onMounted(async () => {
         <span class="rail__icon" aria-hidden="true">≡</span>
         <span class="rail__label">{{ t.nav.runs }}</span>
       </RouterLink>
-      <RouterLink :to="{ name: 'gates' }" class="rail__link" :title="t.nav.gates">
-        <span class="rail__icon" aria-hidden="true">⊘</span>
-        <span class="rail__label">{{ t.nav.gates }}</span>
-      </RouterLink>
       <RouterLink :to="{ name: 'pipelines' }" class="rail__link" :title="t.nav.pipelines">
         <span class="rail__icon" aria-hidden="true">⧉</span>
         <span class="rail__label">{{ t.nav.pipelines }}</span>
