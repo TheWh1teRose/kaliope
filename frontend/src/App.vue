@@ -46,39 +46,39 @@ onMounted(async () => {
       </RouterLink>
 
       <RouterLink :to="{ name: 'documents' }" class="rail__link" :title="t.nav.documents">
-        <span aria-hidden="true">◫</span>
-        <span class="sr-only">{{ t.nav.documents }}</span>
+        <span class="rail__icon" aria-hidden="true">◫</span>
+        <span class="rail__label">{{ t.nav.documents }}</span>
       </RouterLink>
       <RouterLink :to="{ name: 'runs' }" class="rail__link" :title="t.nav.runs">
-        <span aria-hidden="true">≡</span>
-        <span class="sr-only">{{ t.nav.runs }}</span>
+        <span class="rail__icon" aria-hidden="true">≡</span>
+        <span class="rail__label">{{ t.nav.runs }}</span>
       </RouterLink>
       <RouterLink :to="{ name: 'gates' }" class="rail__link" :title="t.nav.gates">
-        <span aria-hidden="true">⊘</span>
-        <span class="sr-only">{{ t.nav.gates }}</span>
+        <span class="rail__icon" aria-hidden="true">⊘</span>
+        <span class="rail__label">{{ t.nav.gates }}</span>
       </RouterLink>
       <RouterLink :to="{ name: 'pipelines' }" class="rail__link" :title="t.nav.pipelines">
-        <span aria-hidden="true">⧉</span>
-        <span class="sr-only">{{ t.nav.pipelines }}</span>
+        <span class="rail__icon" aria-hidden="true">⧉</span>
+        <span class="rail__label">{{ t.nav.pipelines }}</span>
       </RouterLink>
       <RouterLink :to="{ name: 'bench' }" class="rail__link" :title="t.nav.bench">
-        <span aria-hidden="true">⚒</span>
-        <span class="sr-only">{{ t.nav.bench }}</span>
+        <span class="rail__icon" aria-hidden="true">⚒</span>
+        <span class="rail__label">{{ t.nav.bench }}</span>
       </RouterLink>
       <RouterLink :to="{ name: 'exports' }" class="rail__link" :title="t.nav.exports">
-        <span aria-hidden="true">↧</span>
-        <span class="sr-only">{{ t.nav.exports }}</span>
+        <span class="rail__icon" aria-hidden="true">↧</span>
+        <span class="rail__label">{{ t.nav.exports }}</span>
       </RouterLink>
 
       <div class="grow" />
 
       <button class="rail__link" :title="t.nav.theme" @click="cycleTheme">
-        <span aria-hidden="true">◐</span>
-        <span class="sr-only">{{ t.nav.theme }}</span>
+        <span class="rail__icon" aria-hidden="true">◐</span>
+        <span class="rail__label">{{ t.nav.theme }}</span>
       </button>
       <button class="rail__link" :title="t.nav.logout" @click="auth.logout()">
-        <span aria-hidden="true">⏻</span>
-        <span class="sr-only">{{ t.nav.logout }}</span>
+        <span class="rail__icon" aria-hidden="true">⏻</span>
+        <span class="rail__label">{{ t.nav.logout }}</span>
       </button>
       <span class="rail__who" :title="auth.user?.email">{{
         (auth.user?.name ?? '?').slice(0, 2).toUpperCase()
@@ -98,7 +98,7 @@ onMounted(async () => {
 <style scoped>
 .shell {
   display: grid;
-  grid-template-columns: var(--rail) 1fr;
+  grid-template-columns: var(--rail-wide) 1fr;
   height: 100%;
 }
 
@@ -109,9 +109,10 @@ onMounted(async () => {
 .rail {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: var(--s1);
-  padding: var(--s3) 0 var(--s4);
+  padding: var(--s3) var(--s2) var(--s4);
+  min-width: 0;
   background: var(--chrome);
   border-right: 1px solid var(--rule);
 }
@@ -119,6 +120,7 @@ onMounted(async () => {
 .rail__mark {
   display: grid;
   place-items: center;
+  align-self: center;
   width: 36px;
   height: 36px;
   margin-bottom: var(--s4);
@@ -131,20 +133,38 @@ onMounted(async () => {
 }
 
 .rail__link {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 34px;
+  padding: 0 var(--s2);
+  min-width: 0;
   border: 0;
+  text-align: left;
+  font: inherit;
+  font-size: 0.8125rem;
   border-radius: var(--r-md);
   background: transparent;
   color: var(--ink-3);
-  font-size: 1.05rem;
   cursor: pointer;
   text-decoration: none;
   transition:
     background var(--fast),
     color var(--fast);
+}
+
+.rail__icon {
+  flex: none;
+  width: 1.25rem;
+  text-align: center;
+  font-size: 1.05rem;
+}
+
+.rail__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rail__link:hover {
@@ -159,6 +179,7 @@ onMounted(async () => {
 
 .rail__who {
   margin-top: var(--s3);
+  align-self: center;
   display: grid;
   place-items: center;
   width: 28px;
