@@ -11,23 +11,26 @@ export const useDocumentsStore = defineStore('documents', () => {
   const items = ref<DocumentSummary[]>([])
   const loading = ref(false)
   let timer: number | undefined
-  let polling = true
+  let loadEpoch = 0
+  let refreshEpoch = 0
 
   async function load(): Promise<void> {
-    polling = true
+    const ticket = ++loadEpoch
+    const refreshAtStart = refreshEpoch
     loading.value = true
     try {
-      items.value = await api.get<DocumentSummary[]>('/api/documents')
+      const next = await api.get<DocumentSummary[]>('/api/documents')
+      if (ticket !== loadEpoch) return
+      if (refreshEpoch === refreshAtStart) items.value = next
+      schedulePoll()
     } finally {
-      loading.value = false
+      if (ticket === loadEpoch) loading.value = false
     }
-    schedulePoll()
   }
 
   function schedulePoll(): void {
     window.clearTimeout(timer)
     timer = undefined
-    if (!polling) return
     const pending = items.value.some((d) => d.parse_status === 'pending' || d.parse_status === 'parsing')
     if (!pending) return
     timer = window.setTimeout(() => {
@@ -36,9 +39,18 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   function stopPolling(): void {
-    polling = false
+    loadEpoch += 1
     window.clearTimeout(timer)
     timer = undefined
+    loading.value = false
+  }
+
+  function beginRefresh(): number {
+    return ++refreshEpoch
+  }
+
+  function refreshIsCurrent(ticket: number): boolean {
+    return ticket === refreshEpoch
   }
 
   async function get(id: string): Promise<DocumentSummary> {
@@ -88,5 +100,19 @@ export const useDocumentsStore = defineStore('documents', () => {
     })
   }
 
-  return { items, loading, load, stopPolling, get, upload, move, rename, reparse, structure, relabel }
+  return {
+    items,
+    loading,
+    load,
+    stopPolling,
+    beginRefresh,
+    refreshIsCurrent,
+    get,
+    upload,
+    move,
+    rename,
+    reparse,
+    structure,
+    relabel,
+  }
 })

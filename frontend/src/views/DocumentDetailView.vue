@@ -91,9 +91,17 @@ function polledRow(): DocumentSummary | undefined {
 }
 
 async function refreshDocument(): Promise<void> {
+  const ticket = documents.beginRefresh()
   const next = await documents.get(props.id)
+  if (!documents.refreshIsCurrent(ticket)) return
   document.value = next
-  structure.value = next.parse_status === 'parsed' ? await documents.structure(props.id) : null
+  if (next.parse_status !== 'parsed') {
+    structure.value = null
+    return
+  }
+  const parsed = await documents.structure(props.id)
+  if (!documents.refreshIsCurrent(ticket)) return
+  structure.value = parsed
 }
 
 async function onDocumentChanged(): Promise<void> {
@@ -145,7 +153,12 @@ watch(polledParse, async (signature) => {
 onMounted(async () => {
   try {
     await refreshDocument()
-    if (inFlight(document.value?.parse_status)) await documents.load()
+    if (
+      inFlight(document.value?.parse_status) ||
+      documents.items.some((item) => inFlight(item.parse_status))
+    ) {
+      await documents.load()
+    }
   } catch {
     return
   }

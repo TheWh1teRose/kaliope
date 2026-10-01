@@ -641,4 +641,177 @@ describe('document screens', () => {
       vi.useRealTimers()
     }
   })
+
+  it('keeps a finished structure view when an older list response arrives', async () => {
+    let releaseList = (): void => {}
+    let holdList = false
+    let status: DocumentSummary['parse_status'] = 'pending'
+    let blockText = 'Hallo'
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
+        if (url.endsWith('/structure')) return json(structure(blockText))
+        if (url === '/api/folders') return json([])
+        if (url === '/api/documents' && holdList) {
+          holdList = false
+          const captured = status
+          await new Promise<void>((resolve) => {
+            releaseList = resolve
+          })
+          return json([
+            documentSummary({ parse_status: captured, parse_error: null, report: null }),
+          ])
+        }
+        const summary = documentSummary({
+          parse_status: status,
+          parse_error: null,
+          parse_version: status === 'parsed' ? 2 : 1,
+          report: null,
+        })
+        if (url === '/api/documents') return json([summary])
+        return json({
+          ...summary,
+          report: status === 'parsed' ? ingestion('danach') : null,
+        })
+      }),
+    )
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents')
+      const overview = mount(DocumentsView, {
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => overview.unmount())
+      await settle()
+      expect(listGets()).toBe(1)
+
+      holdList = true
+      status = 'parsing'
+      await vi.advanceTimersByTime(2000)
+      await flushPromises()
+      expect(listGets()).toBe(2)
+
+      status = 'parsed'
+      blockText = 'Fertig gelesen'
+      overview.unmount()
+      await router.push('/documents/doc-1')
+      const detail = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => detail.unmount())
+      await settle()
+
+      expect(detail.text()).toContain('Fertig gelesen')
+      expect(detail.text()).toContain('In der Werkbank öffnen')
+      expect(listGets()).toBe(3)
+
+      releaseList()
+      await settle()
+      expect(detail.text()).toContain('Fertig gelesen')
+      expect(detail.text()).toContain('In der Werkbank öffnen')
+      expect(detail.text()).not.toContain('Wird eingelesen')
+      expect(detail.text()).not.toContain('Wartet')
+      const lists = listGets()
+      await vi.advanceTimersByTime(5000)
+      await flushPromises()
+      expect(listGets()).toBe(lists)
+    } finally {
+      releaseList()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the newer structure read when an older refresh finishes last', async () => {
+    let releaseDetail = (): void => {}
+    let holdNextDetail = false
+    const script: ParseScript = {
+      status: 'parsed',
+      parseError: null,
+      parseVersion: 1,
+      reason: 'erster Grund',
+      blockText: 'Hallo',
+    }
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
+        if (method === 'POST' && url.endsWith('/reparse')) {
+          script.status = 'pending'
+          script.parseError = null
+          return json(documentSummary({ parse_status: 'pending', parse_error: null }))
+        }
+        if (url.endsWith('/structure')) return json(structure(script.blockText))
+        if (url === '/api/documents/doc-1' && holdNextDetail) {
+          holdNextDetail = false
+          const stale = documentSummary({
+            parse_status: 'pending',
+            parse_error: null,
+            parse_version: 1,
+            report: null,
+          })
+          await new Promise<void>((resolve) => {
+            releaseDetail = resolve
+          })
+          return json(stale)
+        }
+        const summary = documentSummary({
+          parse_status: script.status,
+          parse_error: script.parseError,
+          parse_version: script.parseVersion,
+          report: null,
+        })
+        if (url === '/api/documents') return json([summary])
+        return json({
+          ...summary,
+          report: script.status === 'parsed' ? ingestion(script.reason) : null,
+        })
+      }),
+    )
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await settle()
+
+      holdNextDetail = true
+      const pendingClick = wrapper.get('[data-action="reparse"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('Wartet')
+
+      script.status = 'parsed'
+      script.parseVersion = 2
+      script.reason = 'zweiter Grund'
+      script.blockText = 'Neu gelesen'
+      await vi.advanceTimersByTime(2000)
+      await settle()
+      expect(wrapper.text()).toContain('Neu gelesen')
+      expect(wrapper.text()).toContain('In der Werkbank öffnen')
+
+      releaseDetail()
+      await pendingClick
+      await settle()
+      expect(wrapper.text()).toContain('Neu gelesen')
+      expect(wrapper.text()).toContain('zweiter Grund')
+      expect(wrapper.text()).toContain('In der Werkbank öffnen')
+      expect(wrapper.text()).not.toContain('Wartet')
+    } finally {
+      releaseDetail()
+      vi.useRealTimers()
+    }
+  })
 })
