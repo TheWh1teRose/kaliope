@@ -3,7 +3,12 @@
 Requests are adapted to the model's declared capabilities before they are sent:
 current frontier models reject sampling parameters outright, so ``temperature``
 is dropped with a recorded warning rather than raising a 400 in the middle of a
-run. Structured outputs are used where available, which is what makes the JSON
+run. Models that still sample receive ``temperature`` through ``extra_body``,
+because SDK 1.x no longer accepts ``temperature``, ``top_p``, or ``top_k`` as
+``messages.create`` keyword arguments. A ``max_tokens`` above the SDK's
+non-streaming budget is sent with ``messages.stream`` and read back via
+``get_final_message`` so the completion, usage, and cost path stay the same.
+Structured outputs are used where available, which is what makes the JSON
 contracts in §5.6 and §6 reliable.
 """
 
@@ -18,6 +23,11 @@ from app.llm import registry
 from app.llm.base import Completion, CompletionRequest, LLMError, Usage
 
 logger = logging.getLogger(__name__)
+
+# Anthropic._calculate_nonstreaming_timeout refuses a non-streaming call when
+# ``3600 * max_tokens / 128_000`` exceeds the 10-minute default. 21333 still
+# passes; 21334 is the first value that raises.
+_NONSTREAMING_MAX_TOKENS = 128_000 * 600 // 3600
 
 
 class AnthropicProvider:
@@ -62,7 +72,9 @@ class AnthropicProvider:
 
         if request.temperature is not None:
             if registry.supports_sampling(request.model):
-                kwargs["temperature"] = request.temperature
+                # SDK 1.x rejects temperature/top_p/top_k as keywords. extra_body
+                # is merged into the JSON body, which is where the API still reads them.
+                kwargs["extra_body"] = {"temperature": request.temperature}
             else:
                 warnings.append(
                     f"model '{request.model}' does not accept a temperature; the request "
@@ -82,7 +94,7 @@ class AnthropicProvider:
 
         started = time.perf_counter()
         try:
-            response = client.messages.create(**kwargs)
+            response = _send(client, kwargs)
         except Exception as exc:  # noqa: BLE001 - surfaced to the run as a node failure
             raise LLMError(f"Anthropic request failed: {exc}") from exc
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -110,6 +122,14 @@ class AnthropicProvider:
             stop_reason=stop_reason,
             warnings=warnings,
         )
+
+
+def _send(client: Any, kwargs: dict[str, Any]) -> Any:
+    """Call Messages, streaming only when a non-streaming request would be refused."""
+    if int(kwargs["max_tokens"]) > _NONSTREAMING_MAX_TOKENS:
+        with client.messages.stream(**kwargs) as stream:
+            return stream.get_final_message()
+    return client.messages.create(**kwargs)
 
 
 def _usage(response: Any) -> Usage:
