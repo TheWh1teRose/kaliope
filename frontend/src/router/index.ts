@@ -49,7 +49,11 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/GatesView.vue'),
     props: true,
   },
-  { path: '/gates', name: 'gates', component: () => import('@/views/GatesView.vue') },
+  // The catalogue used to be its own page; bookmarks land on the pipelines tab.
+  {
+    path: '/gates',
+    redirect: (to) => ({ name: 'pipelines', query: { ...to.query, tab: 'gates' } }),
+  },
   {
     path: '/pipelines',
     name: 'pipelines',

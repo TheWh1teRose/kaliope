@@ -24,3 +24,18 @@ describe('experimentation routes', () => {
     expect(freshRouter().resolve('/experiments').name).toBe('experiments')
   })
 })
+
+describe('quality checks route', () => {
+  it('redirects the old catalogue address onto the pipelines tab', async () => {
+    const router = freshRouter()
+    await router.push('/gates?from=bookmark')
+    expect(router.currentRoute.value.name).toBe('pipelines')
+    expect(router.currentRoute.value.query).toEqual({ from: 'bookmark', tab: 'gates' })
+  })
+
+  it('keeps a deep link to the quality checks tab', () => {
+    expect(freshRouter().resolve({ name: 'pipelines', query: { tab: 'gates' } }).fullPath).toBe(
+      '/pipelines?tab=gates',
+    )
+  })
+})

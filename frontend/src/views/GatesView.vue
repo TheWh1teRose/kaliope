@@ -8,7 +8,8 @@
  * the catalogue — what the system checks, before anyone has uploaded anything.
  *
  * The gates describe themselves through the API, so a threshold that moves in
- * a gate moves on this page with no edit here.
+ * a gate moves on this page with no edit here. `embedded` drops the page
+ * chrome so the same catalogue can sit in the pipelines tab.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
@@ -19,7 +20,7 @@ import { t, tt } from '@/i18n'
 import { useCatalogueStore } from '@/stores/catalogue'
 import { useRunsStore } from '@/stores/runs'
 
-const props = defineProps<{ id?: string }>()
+const props = defineProps<{ id?: string; embedded?: boolean }>()
 
 const runs = useRunsStore()
 const catalogue = useCatalogueStore()
@@ -89,8 +90,8 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page">
-    <header class="head">
+  <div :class="embedded ? 'page--embed' : 'page'">
+    <header v-if="!embedded" class="head">
       <div class="grow">
         <RouterLink
           v-if="scoped"
@@ -117,6 +118,7 @@ onMounted(load)
         </span>
       </div>
     </header>
+    <p v-else-if="!scoped" class="muted lead">{{ t.gate.catalogueLead }}</p>
 
     <label v-if="scoped" class="toggle">
       <input v-model="findingsOnly" type="checkbox" />
@@ -220,13 +222,24 @@ onMounted(load)
 </template>
 
 <style scoped>
+.page,
+.page--embed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
 .page {
   padding: var(--s6);
   max-width: 1100px;
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s4);
+}
+
+.page--embed {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
 }
 
 .head {
