@@ -1,0 +1,75 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Skip the build and deploy this existing image tag (e.g. a commit SHA, for rollback)"
+        required: false
+        type: string
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  GCP_ZONE: ${{ vars.GCP_ZONE }}
+  GCP_VM_NAME: ${{ vars.GCP_VM_NAME }}
+  AR_REPO: ${{ vars.GCP_AR_REPO || 'kalliope' }}
+  IMAGE_NAME: ${{ vars.GCP_IMAGE_NAME || 'kalliope' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve image
+        id: image
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+        run: |
+          host="${GCP_REGION}-docker.pkg.dev"
+          base="${host}/${GCP_PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}"
+          tag="${INPUT_TAG}"
+          echo "host=${host}" >> "$GITHUB_OUTPUT"
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+          echo "build=$([ -z "$tag" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "ref=${base}:${tag:-${GITHUB_SHA}}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        if: steps.image.outputs.build == 'true'
+        run: |
+          gcloud auth configure-docker "${{ steps.image.outputs.host }}" --quiet
+          docker build -t "${{ steps.image.outputs.base }}:${GITHUB_SHA}" -t "${{ steps.image.outputs.base }}:latest" .
+          docker push "${{ steps.image.outputs.base }}:${GITHUB_SHA}"
+          docker push "${{ steps.image.outputs.base }}:latest"
+
+      - name: Deploy on VM
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+          REGISTRY_HOST: ${{ steps.image.outputs.host }}
+          PORT_BIND: ${{ vars.GCP_PORT_BIND }}
+        run: |
+          gcloud compute ssh "${GCP_VM_NAME}" \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+            --tunnel-through-iap --quiet \
+            --command "sudo env IMAGE='${IMAGE}' PROJECT_ID='${GCP_PROJECT_ID}' REGISTRY_HOST='${REGISTRY_HOST}' PORT_BIND='${PORT_BIND}' bash -s" \
+            < .github/scripts/deploy-vm.sh
