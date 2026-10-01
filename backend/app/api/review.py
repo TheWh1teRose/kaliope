@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.accounts import author_labels
 from app.config import get_settings
 from app.db import get_db, session_scope
 from app.errors import problem
@@ -356,7 +357,7 @@ def export_edit_events(_user: User = Depends(current_user)) -> StreamingResponse
 
 
 def _emails(db: Session) -> dict[str, str]:
-    return {u.id: u.email for u in db.scalars(select(User)).all()}
+    return author_labels(db)
 
 
 def _event_out(event: EditEvent, email: str | None) -> EditEventOut:

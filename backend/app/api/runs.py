@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.accounts import author_labels
 from app.api.documents import load_parsed_document
 from app.api.introspection import fields_of, is_model, port_for_key, type_name
 from app.api.review import edited_texts, segment_states
@@ -511,7 +512,7 @@ def get_script(
                 )
 
     states = segment_states(db, run_id)
-    emails = {u.id: u.email for u in db.scalars(select(User)).all()}
+    emails = author_labels(db)
 
     segments: list[SegmentOut] = []
     for ordinal, segment in enumerate(script.segments):

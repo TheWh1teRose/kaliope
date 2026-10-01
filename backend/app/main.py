@@ -29,6 +29,7 @@ from app.api import (
     model_catalogue,
     review,
     runs,
+    users,
 )
 from app.config import get_settings
 from app.db import session_scope
@@ -111,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(bench.router)
     app.include_router(feedback.router)
     app.include_router(model_catalogue.router)
+    app.include_router(users.router)
 
     @app.get("/api/health", response_model=HealthOut, tags=["meta"])
     def health() -> HealthOut:

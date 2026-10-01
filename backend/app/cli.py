@@ -20,6 +20,7 @@ from typing import Any
 import typer
 from sqlalchemy import select
 
+from app.accounts import MIN_PASSWORD_LENGTH
 from app.config import get_settings
 from app.db import create_all, session_scope
 from app.models import Document, EditEvent, Run, User
@@ -53,8 +54,10 @@ def create_user(
         raise typer.Exit(2)
 
     secret = password or getpass.getpass("Password: ")
-    if len(secret) < 10:
-        typer.secho("password must be at least 10 characters", fg=typer.colors.RED)
+    if len(secret) < MIN_PASSWORD_LENGTH:
+        typer.secho(
+            f"password must be at least {MIN_PASSWORD_LENGTH} characters", fg=typer.colors.RED
+        )
         raise typer.Exit(2)
 
     get_settings().ensure_dirs()

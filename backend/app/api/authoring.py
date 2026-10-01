@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.accounts import author_labels
 from app.api.introspection import fields_of, port_for_key
 from app.db import get_db
 from app.errors import problem
@@ -560,7 +561,7 @@ def _format_run_counts(db: Session) -> dict[str, int]:
 
 
 def _emails(db: Session) -> dict[str, str]:
-    return {row.id: row.email for row in db.scalars(select(User)).all()}
+    return author_labels(db)
 
 
 def _iso(value: datetime | None) -> str | None:
