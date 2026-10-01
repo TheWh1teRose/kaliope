@@ -13,10 +13,12 @@ pointing at a real row, and authorship shows as ``REMOVED_LABEL``.
 from __future__ import annotations
 
 import secrets
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.accounts import (
@@ -63,7 +65,7 @@ def update_account(
         email = normalise_email(payload.email)
         ensure_email_free(db, email, exclude_id=user.id)
         user.email = email
-    db.commit()
+    _commit_unique_email(db)
     return _user_out(user)
 
 
@@ -117,7 +119,7 @@ def create_member(
         email=email, name=name, password_hash=hash_password(payload.password), role="admin"
     )
     db.add(member)
-    db.commit()
+    _commit_unique_email(db)
     return _member_out(member, user)
 
 
@@ -149,20 +151,51 @@ def remove_member(
     member = _require_member(db, user_id)
     if member.id == user.id:
         raise problem(409, "Cannot remove yourself", "Another member has to remove your account.")
-    active = db.scalar(select(func.count()).select_from(User).where(User.active.is_(True))) or 0
-    if active <= 1:
-        raise problem(409, "Last member", "The last remaining member cannot be removed.")
 
-    member.active = False
-    member.password_hash = UNUSABLE_PASSWORD
-    # Frees the address for a new account; the row stays for authorship.
-    member.email = f"removed-{member.id}-{secrets.token_hex(4)}@removed.invalid"
+    # One conditional UPDATE, so the last-member check and the deactivation
+    # cannot interleave: two members removing each other at once would
+    # otherwise both see two active accounts and leave none.
+    still_active = (
+        select(func.count()).select_from(User).where(User.active.is_(True)).scalar_subquery()
+    )
+    result = db.execute(
+        update(User)
+        .where(User.id == member.id, User.active.is_(True), still_active > 1)
+        .values(
+            active=False,
+            password_hash=UNUSABLE_PASSWORD,
+            # Frees the address for a new account; the row stays for authorship.
+            email=f"removed-{member.id}-{secrets.token_hex(4)}@removed.invalid",
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if cast(CursorResult[Any], result).rowcount != 1:
+        db.rollback()
+        db.refresh(member)
+        if not member.active:
+            raise problem(404, "No such member", f"There is no active member '{user_id}'.")
+        raise problem(409, "Last member", "The last remaining member cannot be removed.")
     _end_sessions(db, member.id)
     db.commit()
     return Response(status_code=204)
 
 
 # ------------------------------------------------------------------ helpers
+
+
+def _commit_unique_email(db: Session) -> None:
+    """Commit, turning a lost race on the unique email index into a 409.
+
+    ``ensure_email_free`` gives the friendly answer; this covers two requests
+    that both passed it before either committed.
+    """
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise problem(
+            409, "Email in use", "Another account already uses this email address."
+        ) from exc
 
 
 def _require_member(db: Session, user_id: str) -> User:

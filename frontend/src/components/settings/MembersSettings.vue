@@ -64,7 +64,8 @@ const canAdd = computed(
     draftName.value.trim().length > 0 &&
     draftEmail.value.trim().length > 0 &&
     draftPassword.value.length >= MIN_PASSWORD_LENGTH &&
-    !adding.value,
+    !adding.value &&
+    !loading.value,
 )
 
 const draftCopied = ref(false)

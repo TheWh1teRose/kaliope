@@ -222,6 +222,27 @@ def test_create_member_rejects_a_duplicate_email(owner: tuple[TestClient, str, s
     assert response.status_code == 409
 
 
+def test_a_lost_race_on_the_email_index_is_a_409(
+    owner: tuple[TestClient, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two requests that both passed the pre-check: the unique index decides."""
+    import app.api.users as users_api
+
+    client, _, _ = owner
+    _make_user("raced@kalliope.test")
+    monkeypatch.setattr(users_api, "ensure_email_free", lambda *_a, **_k: None)
+    created = client.post(
+        "/api/users",
+        json={"email": "raced@kalliope.test", "name": "X", "password": "member-pass-1"},
+    )
+    assert created.status_code == 409
+    assert created.json()["title"] == "Email in use"
+    profile = client.patch("/api/account", json={"email": "raced@kalliope.test"})
+    assert profile.status_code == 409
+    # The failed write left the session usable and the profile unchanged.
+    assert client.get("/api/account").json()["email"] != "raced@kalliope.test"
+
+
 def test_create_member_rejects_a_weak_password(owner: tuple[TestClient, str, str]) -> None:
     client, _, _ = owner
     response = client.post(
@@ -321,16 +342,13 @@ def test_the_last_member_cannot_be_removed(owner: tuple[TestClient, str, str]) -
         assert response.status_code == 409
         from app.api.users import remove_member
 
+        caller = User(email="phantom@kalliope.test", name="P", password_hash="!", active=False)
         with session_scope() as session:
-            phantom = User(email="phantom@kalliope.test", name="P", password_hash="!", active=False)
-            session.add(phantom)
-            session.flush()
-            owner_row = session.get(User, user_id)
-            assert owner_row is not None
             with pytest.raises(Exception) as caught:
-                remove_member(user_id, db=session, user=phantom)
+                remove_member(user_id, db=session, user=caller)
             assert getattr(caught.value, "title", "") == "Last member"
-            session.delete(phantom)
+            owner_row = session.get(User, user_id)
+            assert owner_row is not None and owner_row.active is True
     finally:
         with session_scope() as session:
             for row_id in saved:
