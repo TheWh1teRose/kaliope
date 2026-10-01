@@ -100,8 +100,7 @@
   --shadow-md: 0 2px 6px rgb(23 35 61 / 0.07), 0 8px 24px -12px rgb(23 35 61 / 0.18);
   --shadow-lg: 0 4px 12px rgb(23 35 61 / 0.1), 0 24px 48px -20px rgb(23 35 61 / 0.28);
 
-  --rail: 52px;
-  --rail-wide: 156px;
+  --rail-wide: 208px;
   --sidebar: 268px;
   --fast: 120ms cubic-bezier(0.2, 0, 0.2, 1);
   --slow: 320ms cubic-bezier(0.16, 1, 0.3, 1);
