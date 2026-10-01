@@ -8,7 +8,7 @@ import { ref } from 'vue'
 
 import type { ExperimentOutput } from '@/api/types'
 import OutputCard, { type OutputView } from '@/components/experiments/OutputCard.vue'
-import { outputBadges, outputFacts, outputWarnings } from '@/experiments/outputMeta'
+import { type Badge, outputBadges, outputFacts, outputWarnings } from '@/experiments/outputMeta'
 import { t } from '@/i18n'
 
 withDefaults(
@@ -16,8 +16,16 @@ withDefaults(
     outputs: ExperimentOutput<unknown>[]
     /** Which part of an output is the answer to render. */
     payloadOf?: (output: ExperimentOutput<unknown>) => unknown
+    /** Card title; defaults to the label. */
+    titleOf?: (output: ExperimentOutput<unknown>) => string
+    /** Card badges; defaults to the run's settings. */
+    badgesOf?: (output: ExperimentOutput<unknown>) => Badge[]
   }>(),
-  { payloadOf: (output: ExperimentOutput<unknown>) => output.output?.payload ?? null },
+  {
+    payloadOf: (output: ExperimentOutput<unknown>) => output.output?.payload ?? null,
+    titleOf: (output: ExperimentOutput<unknown>) => output.label || t.experiments.unnamed,
+    badgesOf: (output: ExperimentOutput<unknown>) => outputBadges(output.meta),
+  },
 )
 const emit = defineEmits<{
   (e: 'adopt', output: ExperimentOutput<unknown>): void
@@ -46,14 +54,15 @@ function remove(output: ExperimentOutput<unknown>): void {
         <button :aria-pressed="view === 'json'" @click="view = 'json'">{{ t.experiments.json }}</button>
       </span>
     </div>
+    <slot name="meta" />
     <p v-if="!outputs.length" class="muted small">{{ t.experiments.collectionEmpty }}</p>
     <OutputCard
       v-for="output in outputs"
       :key="output.id"
-      :title="output.label || t.experiments.unnamed"
+      :title="titleOf(output)"
       :payload="payloadOf(output)"
       :text="output.text"
-      :badges="outputBadges(output.meta)"
+      :badges="badgesOf(output)"
       :facts="outputFacts(output.meta)"
       :warnings="outputWarnings(output.meta)"
       :view="view"
