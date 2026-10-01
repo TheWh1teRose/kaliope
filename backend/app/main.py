@@ -19,7 +19,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, authoring, bench, documents, feedback, folders, review, runs
+from app.api import (
+    auth,
+    authoring,
+    bench,
+    documents,
+    feedback,
+    folders,
+    model_catalogue,
+    review,
+    runs,
+)
 from app.config import get_settings
 from app.db import session_scope
 from app.errors import (
@@ -100,6 +110,7 @@ def create_app() -> FastAPI:
     app.include_router(authoring.router)
     app.include_router(bench.router)
     app.include_router(feedback.router)
+    app.include_router(model_catalogue.router)
 
     @app.get("/api/health", response_model=HealthOut, tags=["meta"])
     def health() -> HealthOut:

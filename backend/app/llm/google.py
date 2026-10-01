@@ -37,11 +37,16 @@ class GoogleProvider:
         }
         if request.system:
             config["system_instruction"] = request.system
-        if request.temperature is not None:
-            if registry.supports_sampling(request.model):
-                config["temperature"] = request.temperature
-            else:
-                warnings.append(f"model '{request.model}' does not accept a temperature")
+        params = registry.adapt_parameters(request)
+        warnings.extend(params.warnings)
+        for name in ("temperature", "top_p", "top_k"):
+            value = getattr(params, name)
+            if value is not None:
+                config[name] = value
+        if params.thinking == "off":
+            config["thinking_config"] = {"thinking_budget": 0}
+        elif params.thinking == "budget":
+            config["thinking_config"] = {"thinking_budget": params.thinking_budget}
         if request.json_schema is not None:
             config["response_mime_type"] = "application/json"
             config["response_schema"] = request.json_schema

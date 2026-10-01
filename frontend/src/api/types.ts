@@ -735,3 +735,56 @@ export interface BenchRunIn {
   only?: string | null
   from_node?: string | null
 }
+
+// --------------------------------------------------------------- models
+
+export type ProviderName = 'anthropic' | 'openai' | 'google'
+export type ThinkingMode = 'default' | 'adaptive' | 'off' | 'budget'
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** One registered model and the request parameters it accepts (`GET /api/models`). */
+export interface ModelInfo {
+  id: string
+  provider: ProviderName
+  input_usd_per_mtok: number
+  output_usd_per_mtok: number
+  context_window: number
+  max_output_tokens: number
+  small: boolean
+  supports_sampling: boolean
+  supports_top_k: boolean
+  sampling_with_thinking: boolean
+  supports_structured_outputs: boolean
+  supports_prompt_caching: boolean
+  /** Thinking modes besides `default`, which sends nothing. */
+  thinking_modes: Exclude<ThinkingMode, 'default'>[]
+  /** Whether the model thinks when no thinking setting is sent. */
+  thinking_default: 'on' | 'off'
+  min_thinking_budget: number
+  /** Highest effort at which thinking `off` is accepted; null = any. */
+  thinking_off_max_effort: Effort | null
+  effort_levels: Effort[]
+  default_effort: Effort | null
+}
+
+export interface ProviderInfo {
+  name: ProviderName
+  available: boolean
+}
+
+export interface ModelCatalogue {
+  models: ModelInfo[]
+  providers: ProviderInfo[]
+}
+
+/** The model parameters an experiment sends with each call. Null = not sent. */
+export interface ModelSettings {
+  model: string
+  temperature: number | null
+  top_p: number | null
+  top_k: number | null
+  thinking: ThinkingMode
+  thinking_budget: number | null
+  effort: Effort | null
+  max_tokens: number
+}
