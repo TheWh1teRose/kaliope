@@ -297,6 +297,7 @@ def test_passages_from_text_headers_and_json() -> None:
     blocks = json.dumps([{"id": "b-1", "text": QUOTE, "page": 1}])
     assert parse_passages(blocks) == {"b-1": QUOTE}
     assert parse_passages(json.dumps({"blocks": [{"id": "x", "text": "y"}]})) == {"x": "y"}
+    assert parse_passages(json.dumps({"b-1": QUOTE})) == {}
     assert parse_passages("Kein Block hier.") == {}
 
 

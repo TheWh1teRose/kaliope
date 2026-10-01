@@ -75,10 +75,6 @@ def check_citations(segments: list[CandidateSegment], passages: dict[str, str]) 
 def _blocks_from_json(data: Any) -> dict[str, str] | None:
     if isinstance(data, dict) and isinstance(data.get("blocks"), list):
         data = data["blocks"]
-    if isinstance(data, dict):
-        if all(isinstance(v, str) for v in data.values()):
-            return {str(k): v for k, v in data.items() if v.strip()}
-        return None
     if not isinstance(data, list):
         return None
     out: dict[str, str] = {}
