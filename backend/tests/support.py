@@ -138,6 +138,8 @@ class StubProvider:
             return self._objective_outline(text, request.model)
         if "You plan the running order" in system:
             return self._outline(text, request.model)
+        if "You write one beat" in system and '"responses"' in system:
+            return self._vs_beats(system, text)
         if "You write one beat" in system:
             return self._beat(text)
         if "You review an outline or a script" in system:
@@ -280,6 +282,17 @@ class StubProvider:
                 },
             ]
         }
+
+    def _vs_beats(self, system: str, text: str) -> Any:
+        """Verbalized Sampling: k versions of the beat, each with a probability."""
+        match = re.search(r"Generate (\d+)", system)
+        k = int(match.group(1)) if match else 5
+        responses = []
+        for index in range(k):
+            segments = self._beat(text)["segments"]
+            segments[0]["text"] = f"Fassung {index + 1}: {segments[0]['text']}"
+            responses.append({"segments": segments, "probability": round(0.4 / (index + 1), 3)})
+        return {"responses": responses}
 
     def _critic(self, text: str) -> Any:
         ids = re.findall(r"\[(beat\d+|[\w-]+-s\d+)\]", text)

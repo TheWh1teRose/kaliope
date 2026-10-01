@@ -207,6 +207,10 @@ class Experiment(Protocol):
 
     def field_specs(self) -> list[FieldSpec]: ...
 
+    def extras(self) -> dict[str, Any]:
+        """Texts or schemas the page shows that are not part of the setup."""
+        ...
+
     def validate_setup(self, setup: BaseModel) -> list[str]:
         """Problems that refuse a run before it is queued; empty when it may run."""
         ...
@@ -239,6 +243,9 @@ class PromptExperiment:
 
     def field_specs(self) -> list[FieldSpec]:
         return []
+
+    def extras(self) -> dict[str, Any]:
+        return {}
 
     def validate_setup(self, setup: BaseModel) -> list[str]:
         assert isinstance(setup, PromptSetup)

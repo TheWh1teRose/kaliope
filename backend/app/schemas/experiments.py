@@ -29,6 +29,8 @@ class ExperimentDetailOut(ExperimentSummaryOut):
     #: The experiment's starting setup (its own ``Setup`` model, as JSON).
     defaults: dict[str, Any]
     fields: list[FieldSpec] = Field(default_factory=list)
+    #: Experiment-specific texts the page shows but the setup does not hold.
+    extras: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExperimentSourceOut(BaseModel):
