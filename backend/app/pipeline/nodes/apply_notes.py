@@ -36,7 +36,8 @@ Groundedness policy — this is the part that matters:
   the passages. If the passages do not support something, leave it out.
 
 Style:
-- Write speech, not prose: it will be heard once, not read twice. No bullet points, no headings, no markdown, no stage directions.
+- Write speech, not prose: it will be heard once, not read twice.
+  No bullet points, no headings, no markdown, no stage directions.
 - Keep it conversational, the speakers can interrupt, the conversation should feel human like.
 - Use only the speakers you are given, by their exact names.
 - Write in the document's language.
