@@ -95,6 +95,27 @@ describe('settingsState', () => {
     expect(state.maxTokensError).toBe(true)
     expect(state.maxTokensCap).toBe(32_000)
   })
+
+  it('refuses a top_k below 1 and a non-integer budget or max tokens', () => {
+    const base = defaultSettings(sonnet46)
+    expect(settingsState(sonnet46, { ...base, top_k: 40 }).valid).toBe(true)
+    expect(settingsState(sonnet46, { ...base, top_k: 0 }).valid).toBe(false)
+    expect(settingsState(sonnet46, { ...base, top_k: 1.5 }).valid).toBe(false)
+
+    const budget = { ...defaultSettings(haiku), thinking: 'budget' as const, thinking_budget: 2048.5 }
+    const fractional = settingsState(haiku, budget)
+    expect(fractional.budgetError).toBeNull()
+    expect(fractional.valid).toBe(false)
+
+    const tokens = settingsState(haiku, { ...defaultSettings(haiku), max_tokens: 8_000.5 })
+    expect(tokens.maxTokensError).toBe(false)
+    expect(tokens.valid).toBe(false)
+  })
+
+  it('names thinking off when the model lists it, otherwise the model default', () => {
+    expect(settingsState(sonnet46, defaultSettings(sonnet46)).samplingRestore).toBe('off')
+    expect(settingsState(haiku, defaultSettings(haiku)).samplingRestore).toBe('default')
+  })
 })
 
 describe('fitToModel', () => {
@@ -139,5 +160,8 @@ describe('fitToModel', () => {
     expect(ontoSonnet.temperature).toBe(1)
     const ontoOpenai = fitToModel(openai, { ...defaultSettings(sonnet46), temperature: 1.8 })
     expect(ontoOpenai.temperature).toBe(1.8)
+    const clamped = fitToModel(sonnet46, { ...defaultSettings(sonnet46), top_p: 1.4, top_k: 0.2 })
+    expect(clamped.top_p).toBe(1)
+    expect(clamped.top_k).toBe(1)
   })
 })

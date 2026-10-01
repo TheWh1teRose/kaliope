@@ -21,6 +21,14 @@ export function temperatureLimit(provider: ProviderName): number {
   return provider === 'anthropic' ? 1 : 2
 }
 
+export function clampTopP(value: number): number {
+  return Math.min(1, Math.max(0, value))
+}
+
+export function clampTopK(value: number): number {
+  return Math.max(1, Math.round(value))
+}
+
 export type Block = 'unsupported' | 'thinking' | null
 
 export interface SettingsState {
@@ -39,6 +47,8 @@ export interface SettingsState {
   thinkingOffEffortError: boolean
   maxTokensCap: number
   maxTokensError: boolean
+  /** Mode that turns thinking off so sampling can be changed. `off` when the model lists it. */
+  samplingRestore: 'off' | 'default'
   /** Whether a request with these settings would be refused. */
   valid: boolean
 }
@@ -93,6 +103,11 @@ export function settingsState(model: ModelInfo, settings: ModelSettings): Settin
     EFFORT_ORDER.indexOf(effort) > EFFORT_ORDER.indexOf(limit)
 
   const maxTokensError = !(settings.max_tokens >= 1 && settings.max_tokens <= model.max_output_tokens)
+  const topKRefused =
+    settings.top_k !== null && (!Number.isInteger(settings.top_k) || settings.top_k < 1)
+  const budgetNotWhole =
+    settings.thinking_budget !== null && !Number.isInteger(settings.thinking_budget)
+  const maxTokensNotWhole = !Number.isInteger(settings.max_tokens)
 
   return {
     thinkingOn: on,
@@ -105,7 +120,14 @@ export function settingsState(model: ModelInfo, settings: ModelSettings): Settin
     thinkingOffEffortError,
     maxTokensCap: model.max_output_tokens,
     maxTokensError,
-    valid: !budgetError && !thinkingOffEffortError && !maxTokensError,
+    samplingRestore: model.thinking_modes.includes('off') ? 'off' : 'default',
+    valid:
+      !budgetError &&
+      !thinkingOffEffortError &&
+      !maxTokensError &&
+      !topKRefused &&
+      !budgetNotWhole &&
+      !maxTokensNotWhole,
   }
 }
 
@@ -118,10 +140,14 @@ export function fitToModel(model: ModelInfo, settings: ModelSettings): ModelSett
   if (!model.supports_sampling) {
     next.temperature = null
     next.top_p = null
-  } else if (next.temperature !== null) {
-    next.temperature = Math.min(temperatureLimit(model.provider), Math.max(0, next.temperature))
+  } else {
+    if (next.temperature !== null) {
+      next.temperature = Math.min(temperatureLimit(model.provider), Math.max(0, next.temperature))
+    }
+    if (next.top_p !== null) next.top_p = clampTopP(next.top_p)
   }
   if (!model.supports_top_k) next.top_k = null
+  else if (next.top_k !== null) next.top_k = clampTopK(next.top_k)
   if (next.thinking !== 'default' && !model.thinking_modes.includes(next.thinking)) {
     next.thinking = 'default'
   }

@@ -586,7 +586,8 @@ export default {
     samplingUnsupported:
       'Dieses Modell nimmt keine Sampling-Parameter an (Temperatur, top_p, top_k). Sie werden nicht gesendet.',
     samplingThinking:
-      'Solange das Modell denkt, bleiben Temperatur, top_p und top_k auf Standard. Zum Ändern „Denken: Aus“ wählen.',
+      'Solange das Modell denkt, bleiben Temperatur, top_p und top_k auf Standard. Zum Ändern',
+    samplingThinkingChoose: 'wählen.',
     topKUnsupported: 'Dieses Modell kennt kein top_k.',
     thinking: 'Denken',
     thinkingDefaultOn: 'Standard des Modells (an)',

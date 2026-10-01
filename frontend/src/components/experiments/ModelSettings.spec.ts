@@ -2,7 +2,8 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import type { ModelCatalogue, ModelInfo, ModelSettings as Settings } from '@/api/types'
-import { defaultSettings } from '@/experiments/modelSettings'
+import { defaultSettings, settingsState } from '@/experiments/modelSettings'
+import { t } from '@/i18n'
 
 import ModelSettings from './ModelSettings.vue'
 
@@ -44,6 +45,14 @@ const catalogue: ModelCatalogue = {
       provider: 'openai',
       supports_top_k: false,
       thinking_modes: [],
+      effort_levels: [],
+      default_effort: null,
+    },
+    {
+      ...base,
+      id: 'claude-haiku-4-5',
+      max_output_tokens: 32_000,
+      thinking_modes: ['budget'],
       effort_levels: [],
       default_effort: null,
     },
@@ -92,6 +101,48 @@ describe('ModelSettings', () => {
     await openai.find('#ms-temperature').setValue('3')
     const wider = openai.emitted('update:modelValue')?.at(-1)?.[0] as Settings
     expect(wider.temperature).toBe(2)
+  })
+
+  it('clamps top_p into 0–1 and top_k to an integer of at least 1', async () => {
+    const wrapper = render(defaultSettings(catalogue.models[0]))
+    await wrapper.find('#ms-top-p').setValue('2')
+    const topP = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Settings
+    expect(topP.top_p).toBe(1)
+
+    await wrapper.find('#ms-top-k').setValue('0')
+    const zero = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Settings
+    expect(zero.top_k).toBe(1)
+
+    await wrapper.find('#ms-top-k').setValue('1.5')
+    const rounded = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Settings
+    expect(rounded.top_k).toBe(2)
+  })
+
+  it('treats a non-integer thinking budget or max tokens as not valid', async () => {
+    const haiku = catalogue.models[3]
+    const wrapper = render({ ...defaultSettings(haiku), thinking: 'budget', thinking_budget: 2048 })
+    const budget = wrapper.find(`[aria-label="${t.modelSettings.thinkingBudget}"]`)
+    await budget.setValue('2048.5')
+    const withBudget = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Settings
+    expect(settingsState(haiku, withBudget).valid).toBe(false)
+
+    await wrapper.find('#ms-max-tokens').setValue('8000.5')
+    const withTokens = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Settings
+    expect(settingsState(haiku, withTokens).valid).toBe(false)
+  })
+
+  it('names a thinking mode the model actually lists when sampling is off', () => {
+    const thinking = render({ ...defaultSettings(catalogue.models[0]), thinking: 'adaptive' })
+    expect(thinking.find('.note').text()).toContain('Denken: Aus')
+
+    const haiku = render({
+      ...defaultSettings(catalogue.models[3]),
+      thinking: 'budget',
+      thinking_budget: 2048,
+    })
+    const note = haiku.find('.note').text()
+    expect(note).toContain('Standard des Modells (aus)')
+    expect(note).not.toContain('Denken: Aus')
   })
 
   it('shows German effort labels and keeps the English values', () => {

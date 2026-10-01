@@ -18,6 +18,8 @@ import type {
   ThinkingMode,
 } from '@/api/types'
 import {
+  clampTopK,
+  clampTopP,
   defaultSettings,
   fitToModel,
   settingsState,
@@ -76,6 +78,12 @@ function temperatureOrNull(event: Event): number | null {
   return Math.min(temperatureLimit(current.value.provider), Math.max(0, value))
 }
 
+function boundedOrNull(event: Event, clamp: (value: number) => number): number | null {
+  const value = numberOrNull(event)
+  if (value === null || Number.isNaN(value)) return null
+  return clamp(value)
+}
+
 function effortLabel(level: Effort | null): string {
   return level ? labels.effortLevels[level] : ''
 }
@@ -104,6 +112,11 @@ function reset(): void {
 const thinkingDefaultLabel = computed(() =>
   current.value?.thinking_default === 'on' ? labels.thinkingDefaultOn : labels.thinkingDefaultOff,
 )
+
+const samplingRestoreLabel = computed(() => {
+  if (!current.value || state.value?.samplingRestore !== 'off') return thinkingDefaultLabel.value
+  return `${labels.thinking}: ${labels.thinkingModes.off}`
+})
 
 const thinkingHint = computed(() => {
   const model = current.value
@@ -206,7 +219,7 @@ const changed = computed(() => {
         {{
           state.samplingBlock === 'unsupported'
             ? labels.samplingUnsupported
-            : labels.samplingThinking
+            : `${labels.samplingThinking} „${samplingRestoreLabel}“ ${labels.samplingThinkingChoose}`
         }}
       </p>
     </div>
@@ -223,7 +236,7 @@ const changed = computed(() => {
         :placeholder="labels.notSent"
         :disabled="!!state.samplingBlock"
         :value="modelValue.top_p ?? ''"
-        @input="update({ top_p: numberOrNull($event) })"
+        @input="update({ top_p: boundedOrNull($event, clampTopP) })"
       />
     </div>
 
@@ -238,7 +251,7 @@ const changed = computed(() => {
         :placeholder="labels.notSent"
         :disabled="!!state.topKBlock"
         :value="modelValue.top_k ?? ''"
-        @input="update({ top_k: numberOrNull($event) })"
+        @input="update({ top_k: boundedOrNull($event, clampTopK) })"
       />
       <span v-if="state.topKBlock === 'unsupported' && !state.samplingBlock" class="meta">
         {{ labels.topKUnsupported }}
