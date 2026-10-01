@@ -64,7 +64,11 @@ class Completion(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
     def json_payload(self) -> Any:
-        """Parse the completion as JSON, tolerating code fences and preamble."""
+        """Parse the completion as JSON, tolerating code fences and preamble.
+
+        A length stop (``max_tokens``, ``length``, or ``MAX_TOKENS``) that is
+        still not valid JSON raises an error that names the cutoff.
+        """
         try:
             return parse_json(self.text)
         except LLMError:

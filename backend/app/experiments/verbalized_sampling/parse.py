@@ -88,8 +88,10 @@ def parse_payload(
     """Normalise an already-decoded answer from one call.
 
     A candidate counts when it is an object with non-empty segments. A missing
-    or unreadable probability stays null. ``cutoff`` is true when the call
-    stopped for length.
+    or unreadable probability stays null. The caller sets ``cutoff`` when the
+    stop reason is missing or is ``max_tokens``, ``length``, or ``MAX_TOKENS``.
+    A shortfall warning is separate and can appear together with the cutoff
+    warning.
     """
     warnings: list[str] = []
     items = payload.get("responses") if isinstance(payload, dict) else None
@@ -145,7 +147,12 @@ def _responses_object(data: Any) -> dict[str, Any] | None:
 
 
 def _responses_payload(text: str) -> Any:
-    """The first JSON object in ``text`` that has a ``responses`` list."""
+    """Object in ``text`` whose ``responses`` value is a list.
+
+    The whole stripped text wins when it is that object. Otherwise the first
+    fenced body that is, even when an earlier object also has the list. Only
+    then is each ``{`` scanned with ``json.JSONDecoder.raw_decode``.
+    """
     stripped = text.strip()
     if stripped:
         try:
