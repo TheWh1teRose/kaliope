@@ -306,3 +306,15 @@ feedback; pairwise evaluation, judges or rubrics; vision-based extraction of
 diagram content; multi-tenancy or customer-facing upload; OCR of scanned pages.
 None of these are partially implemented.
 # kaliope
+
+## Deploy
+
+Pushes to `main` deploy automatically to the Google Cloud VM: GitHub Actions
+builds the image, pushes it to Artifact Registry (tagged with the commit SHA and
+`latest`), and recreates the container on the VM over an IAP SSH tunnel. Secrets
+come from Secret Manager on the VM, data in `/var/lib/kalliope` is kept, and the
+job fails unless `/api/health` reports `"status":"ok"`. Authentication uses
+Workload Identity Federation, with no stored keys.
+
+Setup (service account, Workload Identity pool, repo variables), rollback and
+manual deploy are described in [AGENTS.md](AGENTS.md#deploy).
