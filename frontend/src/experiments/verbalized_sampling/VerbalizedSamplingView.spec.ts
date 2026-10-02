@@ -2,7 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import type { ExperimentRun, VSSetup } from '@/api/types'
+import type { ExperimentRun, ExperimentSource, VSSetup } from '@/api/types'
+import { loadSource, startRun } from '@/experiments/api'
 
 import VerbalizedSamplingView from './VerbalizedSamplingView.vue'
 
@@ -105,6 +106,40 @@ const run: ExperimentRun<VSSetup> = {
   calls: [],
 }
 
+const loaded: ExperimentSource = {
+  fields: { beat_title: 'Die Dunkelreaktion', passages: '[b20]\nDer Calvin-Zyklus.' },
+  beats: [
+    { id: 'beat-1', title: 'Die Lichtreaktion', word_budget: 220, passage_count: 3 },
+    { id: 'beat-2', title: 'Die Dunkelreaktion', word_budget: 180, passage_count: 1 },
+  ],
+  source: {
+    run_id: 'prod-1',
+    document_id: 'doc-1',
+    document_title: 'Photosynthese',
+    beat_id: 'beat-2',
+    beat_title: 'Die Dunkelreaktion',
+    beat_position: 2,
+    beat_total: 2,
+    reference: [],
+  },
+}
+
+vi.mock('@/api/client', async (original) => ({
+  ...(await original<typeof import('@/api/client')>()),
+  api: {
+    get: vi.fn(async () => [
+      {
+        id: 'prod-1',
+        document_id: 'doc-1',
+        document_title: 'Photosynthese',
+        flow_id: 'baseline_v0',
+        status: 'completed',
+        created_at: '2026-10-01T10:00:00Z',
+      },
+    ]),
+  },
+}))
+
 vi.mock('@/experiments/api', () => ({
   getExperiment: vi.fn(async () => ({
     key: 'verbalized_sampling',
@@ -120,7 +155,8 @@ vi.mock('@/experiments/api', () => ({
   listOutputs: vi.fn(async () => []),
   listRuns: vi.fn(async () => [run]),
   isFinished: (r: { status: string }) => r.status === 'completed' || r.status === 'failed',
-  startRun: vi.fn(),
+  startRun: vi.fn(async () => ({ ...run, id: 'run-2' })),
+  loadSource: vi.fn(async () => loaded),
   waitForRun: vi.fn(),
   collect: vi.fn(),
   deleteOutput: vi.fn(),
@@ -128,7 +164,8 @@ vi.mock('@/experiments/api', () => ({
 
 vi.mock('@/experiments/modelSettings', async (original) => ({
   ...(await original<typeof import('@/experiments/modelSettings')>()),
-  loadModelCatalogue: vi.fn(async () => ({ models: [], providers: [] })),
+  loadModelCatalogue: vi.fn(async () => ({ models: [{ id: 'claude-opus-5' }], providers: [] })),
+  settingsState: () => ({ valid: true }),
 }))
 
 async function mountView() {
@@ -140,7 +177,9 @@ async function mountView() {
     ],
   })
   await router.push('/vs')
-  const wrapper = mount(VerbalizedSamplingView, { global: { plugins: [router] } })
+  const wrapper = mount(VerbalizedSamplingView, {
+    global: { plugins: [router], stubs: { teleport: true } },
+  })
   await flushPromises()
   return wrapper
 }
@@ -149,8 +188,21 @@ function titles(wrapper: Awaited<ReturnType<typeof mountView>>): string[] {
   return wrapper.findAll('.drafts .out__title').map((node) => node.text())
 }
 
+function button(wrapper: Awaited<ReturnType<typeof mountView>>, text: string) {
+  return wrapper.findAll('button').find((b) => b.text().includes(text))!
+}
+
+function badges(wrapper: Awaited<ReturnType<typeof mountView>>): Record<string, string> {
+  return Object.fromEntries(
+    wrapper.findAll('.vcard').map((card) => [card.find('code').text(), card.find('.badge').text()]),
+  )
+}
+
 describe('Verbalized Sampling screen', () => {
-  beforeEach(() => localStorage.clear())
+  beforeEach(() => {
+    localStorage.clear()
+    vi.clearAllMocks()
+  })
 
   it('opens a finished run blind, with a stable order', async () => {
     const wrapper = await mountView()
@@ -183,5 +235,65 @@ describe('Verbalized Sampling screen', () => {
     expect(json).toContain('VS-Text')
     expect(json).not.toContain('probability')
     expect(json).not.toContain('"source"')
+  })
+
+  it('fills the input fields from a run and beat, marked as loaded', async () => {
+    const wrapper = await mountView()
+    await button(wrapper, 'Eingabe').trigger('click')
+    expect(badges(wrapper)).toEqual({ beat_title: 'Beispiel' })
+
+    await button(wrapper, 'Aus Lauf laden').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'Photosynthese').trigger('click')
+    await flushPromises()
+    expect(loadSource).toHaveBeenLastCalledWith('verbalized_sampling', 'prod-1')
+    await button(wrapper, 'Die Dunkelreaktion').trigger('click')
+    await button(wrapper, 'Felder füllen').trigger('click')
+    await flushPromises()
+
+    expect(loadSource).toHaveBeenLastCalledWith('verbalized_sampling', 'prod-1', 'beat-2')
+    expect(badges(wrapper)).toEqual({ beat_title: 'aus Lauf', passages: 'aus Lauf' })
+    expect(wrapper.find('.source').text()).toContain('Photosynthese')
+    expect(wrapper.find('.summary').text()).toContain('Abschnitt 2/2')
+    expect(wrapper.find('textarea[aria-label="passages"]').element).toHaveProperty(
+      'value',
+      '[b20]\nDer Calvin-Zyklus.',
+    )
+  })
+
+  it('keeps loaded fields editable and sends where they came from', async () => {
+    const wrapper = await mountView()
+    await button(wrapper, 'Eingabe').trigger('click')
+    await button(wrapper, 'Aus Lauf laden').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'Photosynthese').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'Felder füllen').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('textarea[aria-label="passages"]').setValue('[b20]\nGekürzt.')
+    expect(badges(wrapper)).toEqual({ beat_title: 'aus Lauf', passages: 'bearbeitet' })
+
+    await button(wrapper, 'Beispiel').trigger('click')
+    expect(badges(wrapper)).toEqual({ beat_title: 'Beispiel' })
+    expect(wrapper.find('.source').text()).toContain('kein Lauf geladen')
+  })
+
+  it('starts a run with the loaded source', async () => {
+    const wrapper = await mountView()
+    await button(wrapper, 'Eingabe').trigger('click')
+    await button(wrapper, 'Aus Lauf laden').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'Photosynthese').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'Felder füllen').trigger('click')
+    await flushPromises()
+    await wrapper.find('.btn--primary').trigger('click')
+    await flushPromises()
+    expect(startRun).toHaveBeenCalledWith(
+      'verbalized_sampling',
+      expect.objectContaining({ fields: loaded.fields }),
+      loaded.source,
+    )
   })
 })

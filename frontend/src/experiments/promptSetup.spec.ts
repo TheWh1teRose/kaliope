@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { FIELD_NAME, originsFor, placeholders } from './promptSetup'
+import { FIELD_NAME, originsFor, placeholders, refill } from './promptSetup'
 
 describe('prompt template placeholders', () => {
   it('lists each placeholder once with whether its field is filled, empty or missing', () => {
@@ -24,6 +24,20 @@ describe('prompt template placeholders', () => {
     expect(originsFor({ passages: 'p', anmerkung: 'n' }, ['passages'], 'run')).toEqual({
       passages: 'run',
       anmerkung: 'custom',
+    })
+  })
+
+  it('refills loaded fields and keeps custom ones', () => {
+    expect(
+      refill(
+        { passages: 'old', speakers: 'edited', anmerkung: 'n' },
+        { passages: 'sample', speakers: 'edited', anmerkung: 'custom' },
+        { passages: 'new', speakers: 's' },
+        'run',
+      ),
+    ).toEqual({
+      fields: { passages: 'new', speakers: 's', anmerkung: 'n' },
+      origins: { passages: 'run', speakers: 'run', anmerkung: 'custom' },
     })
   })
 })

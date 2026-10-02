@@ -10,7 +10,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 
-import { ApiError, api } from '@/api/client'
+import { ApiError } from '@/api/client'
 import type {
   ExperimentDetail,
   ExperimentOutput,
@@ -20,14 +20,13 @@ import type {
   ModelCatalogue,
   ModelSettings as SharedSettings,
   PromptSetup,
-  RunOut,
 } from '@/api/types'
-import ModalDialog from '@/components/ModalDialog.vue'
 import CollectionList from '@/components/experiments/CollectionList.vue'
 import ExperimentFrame from '@/components/experiments/ExperimentFrame.vue'
 import FieldCard, { type FieldOrigin } from '@/components/experiments/FieldCard.vue'
 import ModelSettings from '@/components/experiments/ModelSettings.vue'
 import OutputCard from '@/components/experiments/OutputCard.vue'
+import SourceLoader from '@/components/experiments/SourceLoader.vue'
 import {
   collect,
   deleteOutput,
@@ -35,7 +34,6 @@ import {
   isFinished,
   listOutputs,
   listRuns,
-  loadSource,
   startRun,
   waitForRun,
 } from '@/experiments/api'
@@ -47,13 +45,13 @@ import {
   originsFor,
   placeholders,
   readDraft,
+  refill,
   writeDraft,
 } from '@/experiments/promptSetup'
 import { t } from '@/i18n'
 
 const KEY = 'direct_style'
 const labels = t.experiments
-const FINISHED_RUN = new Set(['completed', 'in_review', 'reviewed', 'failed', 'paused'])
 
 type Tab = 'prompt' | 'input' | 'model'
 
@@ -71,14 +69,6 @@ const notice = ref('')
 const running = ref(false)
 const label = ref('')
 let leaving = false
-
-// load-from-run dialog
-const picking = ref(false)
-const finishedRuns = ref<RunOut[]>([])
-const pickedRun = ref('')
-const pickedSource = ref<ExperimentSource | null>(null)
-const pickedBeat = ref('')
-const pickBusy = ref(false)
 
 const defaults = computed(() => detail.value?.defaults ?? null)
 const fieldSpecs = computed(
@@ -180,67 +170,21 @@ function addField(): void {
 
 // ------------------------------------------------------------- load from run
 
-async function openPicker(): Promise<void> {
-  picking.value = true
-  pickedSource.value = null
-  pickedRun.value = ''
-  pickedBeat.value = ''
-  try {
-    const runs = await api.get<RunOut[]>('/api/runs')
-    finishedRuns.value = runs.filter((run) => FINISHED_RUN.has(run.status))
-  } catch (exc) {
-    fail(exc)
-  }
-}
-
-async function pickRun(id: string): Promise<void> {
-  pickedRun.value = id
-  pickBusy.value = true
-  try {
-    pickedSource.value = await loadSource(KEY, id)
-    pickedBeat.value = pickedSource.value.source.beat_id ?? ''
-  } catch (exc) {
-    pickedSource.value = null
-    fail(exc)
-  } finally {
-    pickBusy.value = false
-  }
-}
-
-async function applyPicked(): Promise<void> {
-  if (!setup.value || !pickedRun.value) return
-  pickBusy.value = true
-  try {
-    const loaded = await loadSource(KEY, pickedRun.value, pickedBeat.value || null)
-    const custom = Object.fromEntries(
-      Object.entries(setup.value.fields).filter(([name]) => origins.value[name] === 'custom'),
-    )
-    setup.value.fields = { ...loaded.fields, ...custom }
-    origins.value = {
-      ...originsFor(loaded.fields, Object.keys(loaded.fields), 'run'),
-      ...Object.fromEntries(Object.keys(custom).map((name) => [name, 'custom' as const])),
-    }
-    source.value = loaded.source
-    picking.value = false
-    tab.value = 'input'
-    flash(labels.loaded)
-  } catch (exc) {
-    fail(exc)
-  } finally {
-    pickBusy.value = false
-  }
+function applySource(loaded: ExperimentSource): void {
+  if (!setup.value) return
+  const next = refill(setup.value.fields, origins.value, loaded.fields, 'run')
+  setup.value.fields = next.fields
+  origins.value = next.origins
+  source.value = loaded.source
+  tab.value = 'input'
+  flash(labels.loaded)
 }
 
 function useSample(): void {
   if (!setup.value || !defaults.value) return
-  const custom = Object.fromEntries(
-    Object.entries(setup.value.fields).filter(([name]) => origins.value[name] === 'custom'),
-  )
-  setup.value.fields = { ...defaults.value.fields, ...custom }
-  origins.value = {
-    ...originsFor(defaults.value.fields, Object.keys(defaults.value.fields), 'sample'),
-    ...Object.fromEntries(Object.keys(custom).map((name) => [name, 'custom' as const])),
-  }
+  const next = refill(setup.value.fields, origins.value, defaults.value.fields, 'sample')
+  setup.value.fields = next.fields
+  origins.value = next.origins
   source.value = null
 }
 
@@ -496,22 +440,13 @@ onBeforeRouteLeave(() => {
 
         <!-- input -->
         <div v-else-if="tab === 'input'" class="stack">
-          <div class="source">
-            <div class="grow">
-              <p class="eyebrow">{{ labels.source }}</p>
-              <p v-if="source?.beat_title" class="small">
-                <strong>{{ source.document_title }}</strong> · {{ labels.sourceBeat }}
-                {{ source.beat_position }}/{{ source.beat_total }}: <em>{{ source.beat_title }}</em>
-              </p>
-              <p v-else class="small muted">{{ labels.sourceSample }}</p>
-            </div>
-            <div class="row wrap">
-              <button class="btn btn--sm" @click="openPicker">{{ labels.loadFromRun }}</button>
-              <button v-if="source" class="btn btn--ghost btn--sm" @click="useSample">
-                {{ labels.sample }}
-              </button>
-            </div>
-          </div>
+          <SourceLoader
+            experiment-key="direct_style"
+            :source="source"
+            @loaded="applySource"
+            @sample="useSample"
+            @error="fail"
+          />
           <p class="hint">{{ labels.fieldsLead }}</p>
           <FieldCard
             v-for="name in fieldNames"
@@ -606,49 +541,6 @@ onBeforeRouteLeave(() => {
     </template>
   </ExperimentFrame>
 
-  <ModalDialog
-    :open="picking"
-    :title="labels.loadFromRun"
-    :lead="labels.loadFromRunLead"
-    @close="picking = false"
-  >
-    <p class="eyebrow">{{ labels.pickRun }}</p>
-    <p v-if="!finishedRuns.length" class="muted small">{{ labels.noRuns }}</p>
-    <ul class="pick">
-      <li v-for="item in finishedRuns" :key="item.id">
-        <button
-          class="pick__item"
-          :class="{ 'pick__item--on': pickedRun === item.id }"
-          @click="pickRun(item.id)"
-        >
-          <span>{{ item.document_title || item.document_id }}</span>
-          <span class="meta">{{ item.flow_id }} · {{ new Date(item.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) }}</span>
-        </button>
-      </li>
-    </ul>
-    <template v-if="pickedSource">
-      <p class="eyebrow pick__label">{{ labels.pickBeat }}</p>
-      <ul class="pick">
-        <li v-for="beat in pickedSource.beats" :key="beat.id">
-          <button
-            class="pick__item"
-            :class="{ 'pick__item--on': pickedBeat === beat.id }"
-            @click="pickedBeat = beat.id"
-          >
-            <span>{{ beat.title }}</span>
-            <span class="meta">{{ beat.word_budget }} {{ t.common.words }}</span>
-          </button>
-        </li>
-      </ul>
-    </template>
-    <div class="row pick__foot">
-      <span class="grow" />
-      <button class="btn" @click="picking = false">{{ t.common.cancel }}</button>
-      <button class="btn btn--primary" :disabled="!pickedSource || pickBusy" @click="applyPicked">
-        {{ labels.fillFields }}
-      </button>
-    </div>
-  </ModalDialog>
 </template>
 
 <style scoped>
@@ -746,17 +638,6 @@ onBeforeRouteLeave(() => {
   line-height: 1.55;
 }
 
-.source {
-  display: flex;
-  gap: var(--s3);
-  flex-wrap: wrap;
-  align-items: center;
-  padding: var(--s3) var(--s4);
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-lg);
-}
-
 .small {
   font-size: var(--t-sm);
 }
@@ -824,42 +705,5 @@ onBeforeRouteLeave(() => {
   min-width: 180px;
   padding: 6px 10px;
   font-size: var(--t-sm);
-}
-
-.pick {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: var(--s2) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.pick__item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--card);
-  text-align: left;
-  cursor: pointer;
-}
-
-.pick__item:hover,
-.pick__item--on {
-  border-color: var(--mark);
-  background: var(--mark-soft);
-}
-
-.pick__label {
-  margin-top: var(--s4);
-}
-
-.pick__foot {
-  margin-top: var(--s4);
 }
 </style>

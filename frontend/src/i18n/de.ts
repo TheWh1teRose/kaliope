@@ -704,7 +704,7 @@ export default {
       wordingKalliope: 'Kalliope-Standard',
       wordingPaper: 'Paper (VS-Standard) wörtlich',
       inputLead:
-        'Werte aus der Werkbank hineinkopieren. Sprecher, Zielgruppe und Belegstellen dürfen auch als JSON eingefügt werden.',
+        'Aus einem Lauf laden oder Werte aus der Werkbank hineinkopieren. Sprecher, Zielgruppe und Belegstellen dürfen auch als JSON eingefügt werden.',
       k: 'Fassungen (k)',
       kHint: 'Wie viele Fassungen der VS-Aufruf liefern soll, 2 bis 8. Das Paper nutzt 5.',
       variant: 'Variante',

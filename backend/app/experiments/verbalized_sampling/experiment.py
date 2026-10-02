@@ -6,9 +6,10 @@ one plain call (the same base prompt, production's closing line, production's
 schema). The screen shows all drafts blind, so the user judges them without
 knowing which method wrote which.
 
-The beat comes in by copy-paste: the same named fields and user template as
-"Direkter Stil". Speakers, passages and audience may be pasted as the JSON the
-Werkbank shows; they are turned into the text production would send.
+The beat comes in through the same named fields and user template as
+"Direkter Stil": loaded from a finished run with the same loader, or pasted.
+Speakers, passages and audience may be pasted as the JSON the Werkbank shows;
+they are turned into the text production would send.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import re
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session
 
 from app.experiments.base import (
     FIELD_NAME,
@@ -27,11 +29,13 @@ from app.experiments.base import (
     ItemRef,
     ModelSettings,
     PromptExperiment,
+    SourceIn,
+    SourceOut,
     TemplateError,
     render,
 )
 from app.experiments.registry import register_experiment
-from app.experiments.sources import BEAT_TEMPLATE, SAMPLE_BEAT
+from app.experiments.sources import BEAT_TEMPLATE, SAMPLE_BEAT, load_beat_source
 from app.experiments.verbalized_sampling.checks import check_citations, parse_passages
 from app.experiments.verbalized_sampling.cost import BASELINE_NODE, VS_NODE, summarize
 from app.experiments.verbalized_sampling.options import MAX_K, MIN_K, VSOptions
@@ -51,6 +55,7 @@ from app.experiments.verbalized_sampling.prompts import (
 )
 from app.experiments.verbalized_sampling.schema import baseline_schema, vs_schema
 from app.llm.base import LLMClient, LLMError
+from app.pipeline.framework.artifacts import ArtifactStore
 
 #: The script node pins this model in both shipped flows.
 PRODUCTION_MODEL = "claude-opus-5"
@@ -333,6 +338,9 @@ class VerbalizedSampling(PromptExperiment):
                     )
                 )
         return refs
+
+    def load_source(self, session: Session, store: ArtifactStore, source: SourceIn) -> SourceOut:
+        return load_beat_source(session, store, source)
 
 
 register_experiment(VerbalizedSampling())
