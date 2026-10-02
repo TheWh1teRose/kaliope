@@ -29,6 +29,12 @@ describe('experimentation routes', () => {
   it('serves the experiment collection', () => {
     expect(freshRouter().resolve('/experiments').name).toBe('experiments')
   })
+
+  it('opens the compare view before any experiment key', () => {
+    const route = freshRouter().resolve('/experiments/compare?ids=a,b')
+    expect(route.name).toBe('experiment-compare')
+    expect(route.query.ids).toBe('a,b')
+  })
 })
 
 describe('quality checks route', () => {

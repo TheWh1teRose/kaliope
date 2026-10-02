@@ -946,7 +946,15 @@ export interface ExperimentOutput<Setup = PromptSetup> {
   folder_path: string[]
   /** Who collected it. */
   created_by: string | null
+  /** The decision record: a status and a short note, and who set them last. */
+  status: OutputStatus | null
+  note: string | null
+  decided_by: string | null
+  decided_at: string | null
 }
+
+/** A decision on a collected output. No ranking, no scores. */
+export type OutputStatus = 'kandidat' | 'gewaehlt' | 'verworfen'
 
 /** One page of the Sammlung: collected outputs of every experiment. */
 export interface OutputPage {

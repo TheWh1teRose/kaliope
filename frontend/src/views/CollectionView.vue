@@ -12,12 +12,18 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
-import type { ExperimentOutput, ExperimentSummary, OutputFolderOut } from '@/api/types'
+import type {
+  ExperimentOutput,
+  ExperimentSummary,
+  OutputFolderOut,
+  OutputStatus,
+} from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
 import FolderTree from '@/components/FolderTree.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import MoveToFolderDialog from '@/components/experiments/MoveToFolderDialog.vue'
 import OutputCard, { type OutputView } from '@/components/experiments/OutputCard.vue'
+import OutputDecision from '@/components/experiments/OutputDecision.vue'
 import OutputText from '@/components/experiments/OutputText.vue'
 import { experimentViews } from '@/experiments'
 import { deleteOutput, listAllOutputs, moveOutputs } from '@/experiments/api'
@@ -30,6 +36,7 @@ import { ROOT, useOutputFoldersStore } from '@/stores/folders'
 const props = defineProps<{ experiments: ExperimentSummary[] }>()
 
 const DRAG_TYPE = 'text/kalliope-output'
+const COMPARE_MAX = 4
 const PAGE = 50
 
 const labels = t.collection
@@ -50,6 +57,7 @@ const selected = ref<string | null>(queryValue('folder') || null)
 const experiment = ref(queryValue('experiment'))
 const search = ref('')
 const sort = ref<'new' | 'old'>('new')
+const status = ref<OutputStatus | 'none' | ''>('')
 const includeSub = ref(true)
 const view = ref<OutputView>('text')
 
@@ -124,6 +132,7 @@ async function load(append = false): Promise<void> {
       includeSub: includeSub.value,
       experiment: experiment.value || undefined,
       q: search.value.trim() || undefined,
+      status: status.value || undefined,
       sort: sort.value,
       offset: append ? items.value.length : 0,
       limit: PAGE,
@@ -148,7 +157,7 @@ watch(search, () => {
   clearTimeout(timer)
   timer = setTimeout(() => void load(), 250)
 })
-watch([selected, experiment, sort, includeSub], () => {
+watch([selected, experiment, sort, includeSub, status], () => {
   checked.value = new Set()
   void load()
   const query = { ...route.query }
@@ -188,6 +197,14 @@ function toggle(id: string, on: boolean): void {
   if (on) next.add(id)
   else next.delete(id)
   checked.value = next
+}
+
+function replace(updated: Output): void {
+  items.value = items.value.map((item) => (item.id === updated.id ? updated : item))
+}
+
+function compare(): void {
+  void router.push({ name: 'experiment-compare', query: { ids: [...checked.value].join(',') } })
 }
 
 function startDrag(event: DragEvent, output: Output): void {
@@ -297,6 +314,16 @@ async function confirmPrompt(): Promise<void> {
           </select>
         </div>
         <div class="field">
+          <label for="sammlung-status">{{ labels.status }}</label>
+          <select id="sammlung-status" v-model="status" class="select">
+            <option value="">{{ labels.allStatuses }}</option>
+            <option v-for="(name, key) in labels.statuses" :key="key" :value="key">
+              {{ name }}
+            </option>
+            <option value="none">{{ labels.noStatus }}</option>
+          </select>
+        </div>
+        <div class="field">
           <label for="sammlung-sort">{{ labels.sort }}</label>
           <select id="sammlung-sort" v-model="sort" class="select">
             <option value="new">{{ labels.newest }}</option>
@@ -311,6 +338,14 @@ async function confirmPrompt(): Promise<void> {
       <div v-if="checked.size" class="bulk" role="region" :aria-label="labels.selected">
         <span class="num">{{ checked.size }} {{ labels.selected }}</span>
         <span class="grow" />
+        <button
+          class="btn btn--sm btn--mark"
+          :disabled="checked.size < 2 || checked.size > COMPARE_MAX"
+          @click="compare"
+        >
+          {{ labels.compare }}
+          {{ checked.size > COMPARE_MAX ? `(${labels.compareMax})` : `(${checked.size})` }}
+        </button>
         <button class="btn btn--sm" @click="moving = [...checked]">{{ labels.moveTo }}</button>
         <button class="btn btn--sm" @click="checked = new Set()">
           {{ labels.clearSelection }}
@@ -399,6 +434,7 @@ async function confirmPrompt(): Promise<void> {
               <OutputText :payload="present(output).payloadOf(output)" :text="output.text" />
             </template>
             <template #foot>
+              <OutputDecision :output="output" @updated="replace" />
               <button class="btn btn--sm" @click="moving = [output.id]">
                 {{ labels.moveTo }}
               </button>
@@ -535,6 +571,12 @@ async function confirmPrompt(): Promise<void> {
   background: transparent;
   color: var(--chrome);
   border-color: var(--ink-3);
+}
+
+.bulk .btn--mark {
+  background: var(--mark);
+  border-color: var(--mark);
+  color: #fff;
 }
 
 .bulk .btn:hover:not(:disabled) {

@@ -13,6 +13,7 @@ import type {
   ExperimentSourceMeta,
   ExperimentSummary,
   OutputPage,
+  OutputStatus,
 } from '@/api/types'
 
 const BASE = '/api/experiments'
@@ -94,6 +95,10 @@ export interface OutputQuery {
   includeSub?: boolean
   experiment?: string
   q?: string
+  /** `none` means outputs without a status. */
+  status?: OutputStatus | 'none'
+  /** Only these outputs (the compare view). */
+  ids?: string[]
   sort?: 'new' | 'old'
   offset?: number
   limit?: number
@@ -106,6 +111,8 @@ export function listAllOutputs(query: OutputQuery = {}): Promise<OutputPage> {
   if (query.includeSub === false) params.set('include_sub', 'false')
   if (query.experiment) params.set('experiment', query.experiment)
   if (query.q) params.set('q', query.q)
+  if (query.status) params.set('status', query.status)
+  if (query.ids) params.set('ids', query.ids.join(','))
   if (query.sort) params.set('sort', query.sort)
   if (query.offset) params.set('offset', String(query.offset))
   if (query.limit) params.set('limit', String(query.limit))
@@ -124,4 +131,12 @@ export function listOutputs<Setup>(key: string): Promise<ExperimentOutput<Setup>
 
 export function deleteOutput(id: string): Promise<void> {
   return api.delete<void>(`${BASE}/outputs/${id}`)
+}
+
+/** Rename an output or record a decision; only the fields given change. */
+export function updateOutput(
+  id: string,
+  patch: { label?: string | null; status?: OutputStatus | null; note?: string | null },
+): Promise<ExperimentOutput<unknown>> {
+  return api.patch<ExperimentOutput<unknown>>(`${BASE}/outputs/${id}`, patch)
 }

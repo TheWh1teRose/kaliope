@@ -84,6 +84,10 @@ function output(overrides: Partial<ExperimentOutput<unknown>> = {}): ExperimentO
     folder_id: 'f-opus',
     folder_path: ['Ton & Stil', 'Opus'],
     created_by: 'felix@example.com',
+    status: null,
+    note: null,
+    decided_by: null,
+    decided_at: null,
     ...overrides,
   }
 }
@@ -262,7 +266,7 @@ describe('Sammlung', () => {
     await boxes[1].setValue(true)
     expect(wrapper.find('.bulk').text()).toContain('2 ausgewählt')
 
-    await wrapper.find('.bulk .btn').trigger('click')
+    await wrapper.findAll('.bulk .btn').find((b) => b.text().includes('In Ordner'))!.trigger('click')
     await settle()
     const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement
     const target = [...dialog.querySelectorAll('label')].find((l) => l.textContent?.includes('Opus'))
@@ -361,7 +365,7 @@ describe('per-experiment collection', () => {
     await settle()
     const move = calls.find((call) => call.url === '/api/experiments/outputs/move')
     expect(JSON.parse(move!.body!)).toEqual({ ids: ['o-1'], folder_id: null })
-    expect(wrapper.emitted('moved')).toHaveLength(1)
+    expect(wrapper.emitted('changed')).toHaveLength(1)
   })
 })
 

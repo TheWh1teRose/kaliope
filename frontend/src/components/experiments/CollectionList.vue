@@ -2,7 +2,7 @@
 /**
  * "Gesammelte Ausgaben": the collected outputs of one experiment, newest
  * first, readable as text or JSON. No ranking, no scores: read, adopt a
- * setup, file into a Sammlung folder, or delete. The `text` slot renders an
+ * setup, file into a Sammlung folder, record a decision, or delete. The `text` slot renders an
  * output's Text view.
  */
 import { ref } from 'vue'
@@ -11,6 +11,7 @@ import { RouterLink } from 'vue-router'
 import type { ExperimentOutput } from '@/api/types'
 import MoveToFolderDialog from '@/components/experiments/MoveToFolderDialog.vue'
 import OutputCard, { type OutputView } from '@/components/experiments/OutputCard.vue'
+import OutputDecision from '@/components/experiments/OutputDecision.vue'
 import { moveOutputs } from '@/experiments/api'
 import { type Badge, outputBadges, outputFacts, outputWarnings } from '@/experiments/outputMeta'
 import { t } from '@/i18n'
@@ -36,8 +37,8 @@ withDefaults(
 const emit = defineEmits<{
   (e: 'adopt', output: ExperimentOutput<unknown>): void
   (e: 'delete', output: ExperimentOutput<unknown>): void
-  /** An output was filed into another folder; reload the list. */
-  (e: 'moved'): void
+  /** An output was filed elsewhere or got a decision; reload the list. */
+  (e: 'changed'): void
   (e: 'error', message: string): void
 }>()
 
@@ -49,7 +50,7 @@ async function file(folderId: string | null): Promise<void> {
   if (!output) return
   try {
     await moveOutputs([output.id], folderId)
-    emit('moved')
+    emit('changed')
   } catch (exc) {
     emit('error', exc instanceof Error ? exc.message : t.errors.generic)
   }
@@ -112,6 +113,7 @@ function remove(output: ExperimentOutput<unknown>): void {
         <slot name="text" :output="output" />
       </template>
       <template #foot>
+        <OutputDecision :output="output" @updated="emit('changed')" />
         <button class="btn btn--sm" @click="emit('adopt', output)">{{ t.experiments.adopt }}</button>
         <button class="btn btn--sm" @click="moving = output">{{ t.collection.moveTo }}</button>
         <span class="grow" />
