@@ -131,11 +131,13 @@ the control condition every later flow is compared against.
 instead of producing invented filler. It computes what the narratable word count
 can actually support and refuses below three minutes, citing the numbers.
 
-`script` writes one beat at a time. Factual assertions come only from the
-provided blocks and carry anchors; analogies, transitions and framing are free
-but introduce no new facts. The model returns a **quote** per citation rather
-than character offsets — a model cannot count characters, so the node locates
-the quote in the block and turns it into an anchor. Gate G1 verifies the result.
+`script` writes one beat at a time. Each call sees the running order and the
+text of every earlier beat, so the episode stays one conversation; facts still
+come only from that beat's blocks and carry anchors. Analogies, transitions and
+framing are free but introduce no new facts. The model returns a **quote** per
+citation rather than character offsets — a model cannot count characters, so the
+node locates the quote in the block and turns it into an anchor. Gate G1
+verifies the result.
 
 ### Gates
 

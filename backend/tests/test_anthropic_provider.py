@@ -197,3 +197,32 @@ def test_models_without_sampling_drop_temperature(max_tokens: int) -> None:
         "model 'claude-opus-5' does not accept a temperature; the request "
         "was sent without one. Determinism comes from artifact caching instead."
     ]
+
+
+def test_cache_breaks_split_the_message_and_mark_the_last_stable_block() -> None:
+    provider, messages = _provider()
+    content = "running order\n" + "beat one\n" + "this beat"
+    first, second = len("running order\n"), len("running order\nbeat one\n")
+    provider.complete(
+        CompletionRequest(
+            model="claude-opus-5",
+            messages=[Message(role="user", content=content, cache_breaks=[first, second])],
+            max_tokens=1_000,
+        )
+    )
+
+    sent = messages.create_calls[0]["messages"][0]
+    assert sent["role"] == "user"
+    assert [block["text"] for block in sent["content"]] == [
+        "running order\n",
+        "beat one\n",
+        "this beat",
+    ]
+    assert [("cache_control" in block) for block in sent["content"]] == [False, True, False]
+    assert sent["content"][1]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_a_message_without_cache_breaks_is_sent_as_plain_text() -> None:
+    provider, messages = _provider()
+    provider.complete(_request("claude-opus-5", max_tokens=1_000, temperature=None))
+    assert messages.create_calls[0]["messages"] == [{"role": "user", "content": "label the blocks"}]

@@ -195,6 +195,7 @@ class FlowRunner:
                 document_path=self.document_path,
                 document_id=document_id,
                 progress=_progress_for(self.progress, node.name),
+                force=self.force,
             )
 
             try:

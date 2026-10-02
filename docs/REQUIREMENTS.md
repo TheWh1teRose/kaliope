@@ -436,6 +436,13 @@ are free but introduce no new facts. The model receives block IDs alongside bloc
 text and is instructed to cite them. The node does not verify anchors — gate G1
 does.
 
+Beats are written in order, one call per beat. Each call sees the whole running
+order, the text of every earlier beat (without block IDs, for continuity only)
+and how the previous beat ended, so a beat picks up where the last one stopped
+and keeps the examples already chosen. Facts still come only from the beat's own
+blocks. Each beat is cached under a key that chains the previous beat's key and
+result: changing a beat rewrites it and every later beat, never an earlier one.
+
 ### 6.5 FormatSpec
 
 Ships with exactly one instance (two-host dialogue, host asks / expert explains,

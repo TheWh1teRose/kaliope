@@ -89,8 +89,7 @@ class OutlineNode:
         detail=[
             "A beat is one coherent idea: a title, the passage ids it draws on, the learning "
             "goal it serves, and how many words it may spend. The script node later writes "
-            "each beat separately, so this plan is what keeps a long episode coherent instead "
-            "of drifting.",
+            "each beat from this plan.",
             "Ordering is explicitly pedagogic — set up before payoff, general before specific "
             "— because the listener has no way to skip back.",
             "The returned budgets are then normalised, not taken as given. If their sum misses "
