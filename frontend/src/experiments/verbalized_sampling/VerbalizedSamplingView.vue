@@ -4,7 +4,7 @@
  * to one plain call, compared blind.
  *
  * Left: the setup (shared base prompt, VS instruction, user template, the
- * pasted input fields, model settings, k). Right: the current run with its
+ * input fields, pasted or loaded from a run, model settings, k). Right: the current run with its
  * drafts, blind until revealed, and the collected drafts with a tally by
  * method. Nothing here creates a run, a note or a pipeline node.
  */
@@ -16,6 +16,8 @@ import type {
   ExperimentDetail,
   ExperimentOutput,
   ExperimentRun,
+  ExperimentSource,
+  ExperimentSourceMeta,
   ModelCatalogue,
   ModelSettings as SharedSettings,
   VSSetup,
@@ -25,6 +27,7 @@ import ExperimentFrame from '@/components/experiments/ExperimentFrame.vue'
 import FieldCard, { type FieldOrigin } from '@/components/experiments/FieldCard.vue'
 import ModelSettings from '@/components/experiments/ModelSettings.vue'
 import OutputCard from '@/components/experiments/OutputCard.vue'
+import SourceLoader from '@/components/experiments/SourceLoader.vue'
 import {
   collect,
   deleteOutput,
@@ -37,7 +40,7 @@ import {
 } from '@/experiments/api'
 import { loadModelCatalogue, settingsState } from '@/experiments/modelSettings'
 import { type Badge, runBadges } from '@/experiments/outputMeta'
-import { FIELD_NAME, originsFor, placeholders } from '@/experiments/promptSetup'
+import { FIELD_NAME, originsFor, placeholders, refill } from '@/experiments/promptSetup'
 import {
   type VSDraft,
   asOutput,
@@ -69,6 +72,7 @@ const detail = ref<ExperimentDetail<VSSetup> | null>(null)
 const catalogue = ref<ModelCatalogue | null>(null)
 const setup = ref<VSSetup | null>(null)
 const origins = ref<Record<string, FieldOrigin>>({})
+const source = ref<ExperimentSourceMeta | null>(null)
 const current = ref<ExperimentRun<VSSetup> | null>(null)
 const outputs = ref<ExperimentOutput<VSSetup>[]>([])
 const revealed = ref<Set<string>>(readRevealed())
@@ -138,7 +142,11 @@ const summaryChips = computed(() => {
     `max ${s.max_tokens.toLocaleString('de-DE')}`,
     `k ${setup.value.k} · ${vsLabels.variantStandard}`,
     vsLabels.comparisonValue,
-    pasted.value ? labels.edited : labels.sample,
+    pasted.value
+      ? labels.edited
+      : source.value?.beat_title
+        ? `${labels.sourceBeat} ${source.value.beat_position}/${source.value.beat_total}`
+        : labels.sample,
   ]
 })
 
@@ -304,6 +312,23 @@ function addField(): void {
   origins.value = { ...origins.value, [name]: 'custom' }
 }
 
+function applySource(loaded: ExperimentSource): void {
+  if (!setup.value) return
+  const next = refill(setup.value.fields, origins.value, loaded.fields, 'run')
+  setup.value.fields = next.fields
+  origins.value = next.origins
+  source.value = loaded.source
+  flash(labels.loaded)
+}
+
+function useSample(): void {
+  if (!setup.value || !defaults.value) return
+  const next = refill(setup.value.fields, origins.value, defaults.value.fields, 'sample')
+  setup.value.fields = next.fields
+  origins.value = next.origins
+  source.value = null
+}
+
 function reset(field: 'base_prompt' | 'vs_instruction' | 'user_template'): void {
   if (setup.value && defaults.value) setup.value[field] = defaults.value[field]
 }
@@ -338,7 +363,7 @@ async function run(): Promise<void> {
   if (!setup.value || !canRun.value) return
   error.value = ''
   try {
-    const started = await startRun<VSSetup>(KEY, setup.value, null)
+    const started = await startRun<VSSetup>(KEY, setup.value, source.value)
     // Every new run opens blind.
     setRevealed(started.id, false)
     await follow(started)
@@ -368,6 +393,8 @@ function adopt(output: ExperimentOutput<unknown>): void {
   const adopted = output.setup as VSSetup
   setup.value = JSON.parse(JSON.stringify(adopted)) as VSSetup
   origins.value = originsFor(adopted.fields, [...fieldSpecs.value.keys()], 'edited')
+  const meta = output.meta.source
+  source.value = meta && typeof meta === 'object' ? (meta as ExperimentSourceMeta) : null
   flash(labels.adopted)
 }
 
@@ -401,9 +428,11 @@ async function refreshStats(): Promise<void> {
 // -------------------------------------------------------------------- load
 
 watch(
-  [setup, origins],
+  [setup, origins, source],
   () => {
-    if (setup.value) writeSetupDraft({ setup: setup.value, origins: origins.value })
+    if (setup.value) {
+      writeSetupDraft({ setup: setup.value, origins: origins.value, source: source.value })
+    }
   },
   { deep: true },
 )
@@ -423,6 +452,7 @@ onMounted(async () => {
     if (draft) {
       setup.value = draft.setup
       origins.value = (draft.origins ?? {}) as Record<string, FieldOrigin>
+      source.value = draft.source ?? null
     } else {
       setup.value = freshSetup()
       origins.value = originsFor(setup.value.fields, Object.keys(setup.value.fields), 'sample')
@@ -593,6 +623,13 @@ onBeforeRouteLeave(() => {
 
         <!-- input -->
         <div v-else-if="tab === 'input'" class="stack">
+          <SourceLoader
+            experiment-key="verbalized_sampling"
+            :source="source"
+            @loaded="applySource"
+            @sample="useSample"
+            @error="fail"
+          />
           <p class="hint">{{ vsLabels.inputLead }}</p>
           <FieldCard
             v-for="name in fieldNames"

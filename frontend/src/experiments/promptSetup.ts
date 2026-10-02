@@ -70,3 +70,25 @@ export function originsFor(
     Object.keys(fields).map((name) => [name, known.includes(name) ? loaded : 'custom']),
   )
 }
+
+/**
+ * Replace the loaded fields (from a run or the sample) and keep the custom
+ * ones, so a hand-added field survives loading another beat.
+ */
+export function refill(
+  fields: Record<string, string>,
+  origins: Record<string, FieldOrigin>,
+  loaded: Record<string, string>,
+  origin: FieldOrigin,
+): { fields: Record<string, string>; origins: Record<string, FieldOrigin> } {
+  const custom = Object.fromEntries(
+    Object.entries(fields).filter(([name]) => origins[name] === 'custom'),
+  )
+  return {
+    fields: { ...loaded, ...custom },
+    origins: {
+      ...originsFor(loaded, Object.keys(loaded), origin),
+      ...Object.fromEntries(Object.keys(custom).map((name) => [name, 'custom' as const])),
+    },
+  }
+}

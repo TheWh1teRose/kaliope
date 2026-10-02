@@ -1,9 +1,9 @@
-"""Checks a draft gets without a real parse: citations against pasted passages.
+"""Checks a draft gets without a real parse: citations against the beat's passages.
 
-The passages arrive by copy-paste from the Werkbank, either as JSON blocks
-(``[{"id": …, "text": …}]``, or a parsed document with ``blocks``) or as text
-with ``[block-id]`` headers, which is what the script prompt itself shows the
-model. Quotes are located with the script node's own ``locate_quote``, so a
+The passages are loaded from a run as text with ``[block-id]`` headers, which
+is what the script prompt itself shows the model, or pasted from the Werkbank
+in that form or as JSON blocks (``[{"id": …, "text": …}]``, or a parsed
+document with ``blocks``). Quotes are located with the script node's own ``locate_quote``, so a
 quote counts as found here exactly when production would anchor it.
 """
 

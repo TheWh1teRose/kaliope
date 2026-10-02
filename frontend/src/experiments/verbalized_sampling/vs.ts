@@ -6,7 +6,7 @@
  * of revealed runs lives in the browser, so a draft collected blind stays
  * blind in the collection until its run is revealed.
  */
-import type { ExperimentOutput, VSSetup } from '@/api/types'
+import type { ExperimentOutput, ExperimentSourceMeta, VSSetup } from '@/api/types'
 import type { Badge } from '@/experiments/outputMeta'
 
 export type DraftSource = 'vs' | 'baseline'
@@ -194,6 +194,8 @@ export function writeRevealed(revealed: Set<string>): void {
 export interface VSDraftState {
   setup: VSSetup
   origins: Record<string, string>
+  /** The run and beat the fields were loaded from; none when pasted or the sample. */
+  source?: ExperimentSourceMeta | null
 }
 
 export function readSetupDraft(): VSDraftState | null {

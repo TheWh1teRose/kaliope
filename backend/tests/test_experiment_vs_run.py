@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Iterator
@@ -22,10 +23,11 @@ from app.experiments.verbalized_sampling.prompts import (
 )
 from app.llm import registry
 from app.main import create_app
-from app.models import LLMCall, User
+from app.models import Document, LLMCall, Run, User
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.security import hash_password
-from tests.support import StubProvider
+from app.worker import worker
+from tests.support import StubProvider, write_learning_pdf
 
 PASSWORD = "vs-experiment-password-1"
 EMAIL = "vs-experiments@kalliope.test"
@@ -110,14 +112,57 @@ def signed_in(provider: StubProvider) -> Iterator[TestClient]:
         yield client
 
 
+@pytest.fixture(scope="module")
+def finished_run(signed_in: TestClient, tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A completed production run of the learning PDF, to load a beat from."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    settings.ensure_dirs()
+    pdf = write_learning_pdf(tmp_path_factory.mktemp("vs") / "vs.pdf")
+    payload = pdf.read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    (settings.uploads_dir / f"{digest}.pdf").write_bytes(payload)
+    with session_scope() as session:
+        document = Document(filename="vs.pdf", sha256=digest, parse_status="pending")
+        session.add(document)
+        session.flush()
+        document_id = document.id
+    worker.parse_document(document_id)
+    with session_scope() as session:
+        run = Run(
+            document_id=document_id,
+            flow_id="baseline_v0",
+            flow_version="1.0",
+            config_json={"target_minutes": 15},
+            format_spec_json=get_format("two_host_dialogue").model_dump(mode="json"),
+            audience_spec_json=DEFAULT_AUDIENCE.model_dump(mode="json"),
+            status="queued",
+        )
+        session.add(run)
+        session.flush()
+        run_id = run.id
+    worker.execute_run(run_id)
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run is not None and run.status == "completed", run.error
+    return run_id
+
+
 def _setup(**changes: Any) -> dict[str, Any]:
     setup = get_experiment(KEY).defaults().model_dump(mode="json")
     setup.update(changes)
     return setup
 
 
-def _run(client: TestClient, setup: dict[str, Any]) -> dict[str, Any]:
-    created = client.post(f"/api/experiments/{KEY}/runs", json={"setup": setup})
+def _run(
+    client: TestClient, setup: dict[str, Any], source: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"setup": setup}
+    if source is not None:
+        payload["source"] = {"run_id": source["run_id"], "beat_id": source["beat_id"]}
+        payload["source_meta"] = source
+    created = client.post(f"/api/experiments/{KEY}/runs", json=payload)
     assert created.status_code == 201, created.text
     body: dict[str, Any] = {}
     for _ in range(200):
@@ -216,3 +261,46 @@ def test_collect_single_drafts_with_their_source(signed_in: TestClient) -> None:
     refreshed = signed_in.get(f"/api/experiments/runs/{run_id}").json()
     collected = {item["item"] for item in refreshed["items"] if item["output_id"]}
     assert collected == {"vs:1", "baseline:0"}
+
+
+def test_load_fields_from_a_run_like_direct_style(signed_in: TestClient, finished_run: str) -> None:
+    vs = signed_in.post(f"/api/experiments/{KEY}/source", json={"run_id": finished_run})
+    assert vs.status_code == 200, vs.text
+    direct = signed_in.post("/api/experiments/direct_style/source", json={"run_id": finished_run})
+    assert vs.json() == direct.json(), "both experiments use the same loader"
+
+    body = vs.json()
+    assert set(body["fields"]) == set(SAMPLE_BEAT)
+    second = body["beats"][1]["id"]
+    other = signed_in.post(
+        f"/api/experiments/{KEY}/source", json={"run_id": finished_run, "beat_id": second}
+    ).json()
+    assert other["source"]["beat_id"] == second
+    assert other["fields"]["beat_title"] == body["beats"][1]["title"]
+
+    missing = signed_in.post(f"/api/experiments/{KEY}/source", json={"run_id": "nope"})
+    assert missing.status_code == 422
+
+
+def test_run_with_loaded_input_checks_citations_and_keeps_its_source(
+    signed_in: TestClient, finished_run: str
+) -> None:
+    loaded = signed_in.post(f"/api/experiments/{KEY}/source", json={"run_id": finished_run}).json()
+    body = _run(signed_in, _setup(k=2, fields=loaded["fields"]), source=loaded["source"])
+    assert body["status"] == "completed", body["error"]
+    assert body["source"]["run_id"] == finished_run
+    assert body["source"]["beat_id"] == loaded["source"]["beat_id"]
+
+    user = body["calls"][0]["messages"][0]["content"]
+    assert loaded["fields"]["passages"] in user
+    output = body["output"]
+    assert output["citation_check"] is True
+    assert output["word_budget"] == int(loaded["fields"]["word_budget"])
+    citations = output["vs"]["drafts"][0]["citations"]
+    assert citations["cited"] >= 1 and citations["located"] == citations["cited"]
+
+    saved = signed_in.post(f"/api/experiments/runs/{body['id']}/save", json={"item": "vs:0"})
+    assert saved.status_code == 201, saved.text
+    meta = saved.json()["meta"]["source"]
+    assert (meta["run_id"], meta["beat_id"]) == (finished_run, loaded["source"]["beat_id"])
+    assert saved.json()["setup"]["fields"] == loaded["fields"]
