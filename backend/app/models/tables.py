@@ -370,3 +370,64 @@ class BenchNode(Base):
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     model_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ExperimentRun(Base):
+    """One click on "Ausführen" in an experiment: one or more model calls.
+
+    Like ``BenchRun`` it is kept off ``runs``: experiments never appear in review
+    or the eval export. Every run is kept, so a paid answer is never lost; the
+    user collects the ones worth keeping into ``experiment_outputs``.
+    """
+
+    __tablename__ = "experiment_runs"
+    __table_args__ = (Index("ix_experiment_runs_key_created", "experiment_key", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    experiment_key: Mapped[str] = mapped_column(String(100))
+    experiment_version: Mapped[str] = mapped_column(String(20))
+    #: ``queued`` → ``running`` → ``completed`` | ``failed``.
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    #: The experiment's setup as posted (prompts, fields, settings, schema).
+    setup_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    #: Provenance only (run, document, beat); no foreign key on purpose.
+    source_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    warnings_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    #: ``{"llm_traces": [...]}``, as in ``bench_runs.manifest_json``.
+    manifest_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ExperimentOutput(Base):
+    """One collected item of an experiment run. Holds copies so it reads on its own."""
+
+    __tablename__ = "experiment_outputs"
+    __table_args__ = (
+        UniqueConstraint("run_id", "item", name="uq_experiment_output_item"),
+        Index("ix_experiment_outputs_key_created", "experiment_key", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    experiment_key: Mapped[str] = mapped_column(String(100))
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("experiment_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    #: Which item of the run: ``main`` for single-answer experiments.
+    item: Mapped[str] = mapped_column(String(100), default="main")
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Per-item facts: model, settings sent, tokens, cost, warnings, source.
+    meta_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    #: Copy of the run's setup, so "Setup übernehmen" works on its own.
+    setup_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
