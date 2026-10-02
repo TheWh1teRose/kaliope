@@ -8,8 +8,22 @@ import {
   readBeat,
   readOutline,
   readScript,
+  readSelection,
   setArtifactMode,
 } from './artifactView'
+
+const selectionPayload = {
+  learning_goals: [
+    { id: 'g0', text: 'Die Lichtreaktion erklären', source: 'generated' },
+    { id: 'g1', text: 'Den Calvin-Zyklus beschreiben', source: 'generated' },
+  ],
+  selected_blocks: [
+    { block_id: 'b12', salience: 1, reason: null, goal_ids: ['g0', 'g1'] },
+    { block_id: 'b14', salience: 1, reason: 'Ort', goal_ids: ['g0'] },
+    { block_id: 'b30', salience: 1, reason: null, goal_ids: ['g9'] },
+  ],
+  rationale: 'Erklärende Passagen gewählt.',
+}
 
 const beat = {
   id: 'b2',
@@ -57,14 +71,14 @@ const scriptPayload = {
 }
 
 describe('pickRenderer', () => {
-  it('names the three models that have a text view', () => {
+  it('names the four models that have a text view', () => {
     expect(pickRenderer('Outline')).toBe('outline')
     expect(pickRenderer('Beat')).toBe('beat')
     expect(pickRenderer('Script')).toBe('script')
+    expect(pickRenderer('Selection')).toBe('selection')
   })
 
   it('returns none for every other model name', () => {
-    expect(pickRenderer('Selection')).toBeNull()
     expect(pickRenderer('ParsedDocument')).toBeNull()
     expect(pickRenderer('unknown')).toBeNull()
   })
@@ -80,6 +94,15 @@ describe('payload shape', () => {
   it('rejects an outline that has no beats array, without keeping a partial beat', () => {
     expect(readOutline({ title: 'kaputt', beats: [{ title: 'halb' }] })).toBeNull()
     expect(readOutline({ title: 'kaputt' })).toBeNull()
+  })
+
+  it('reads a selection as goals with the passages that serve them', () => {
+    const read = readSelection(selectionPayload)
+    expect(read?.goals.map((goal) => goal.block_ids)).toEqual([['b12', 'b14'], ['b12']])
+    expect(read?.unassigned).toEqual(['b30'])
+    expect(read?.rationale).toBe('Erklärende Passagen gewählt.')
+    expect(readSelection({ learning_goals: [] })).toBeNull()
+    expect(readSelection({ learning_goals: [{ id: 'g0' }], selected_blocks: [] })).toBeNull()
   })
 
   it('rejects a preview string that is not an object', () => {
@@ -188,6 +211,19 @@ describe('ArtifactView', () => {
     expect(wrapper.find('.beat').exists()).toBe(true)
     expect(wrapper.find('[aria-pressed]').exists()).toBe(false)
     expect(localStorage.getItem('kalliope-artifact-view')).toBe('json')
+  })
+
+  it('renders a selection as goals with their passage ids', () => {
+    const wrapper = mount(ArtifactView, {
+      props: { model: 'Selection', payload: selectionPayload, mode: 'text' },
+    })
+    const goals = wrapper.findAll('.beat')
+    expect(goals).toHaveLength(2)
+    expect(goals[0].text()).toContain('g0')
+    expect(goals[0].text()).toContain('Die Lichtreaktion erklären')
+    expect(goals[0].findAll('.chip').map((chip) => chip.text())).toEqual(['b12', 'b14'])
+    expect(wrapper.text()).toContain('Ohne Lernziel')
+    expect(wrapper.text()).toContain('Erklärende Passagen gewählt.')
   })
 
   it('offers no text view for an unknown model', () => {

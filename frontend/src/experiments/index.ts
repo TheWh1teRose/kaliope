@@ -10,6 +10,7 @@ import type { Component } from 'vue'
 export const experimentViews: Record<string, () => Promise<Component>> = {
   direct_style: () => import('@/experiments/direct_style/DirectStyleView.vue'),
   outline: () => import('@/experiments/outline/OutlineView.vue'),
+  selection: () => import('@/experiments/selection/SelectionView.vue'),
   verbalized_sampling: () =>
     import('@/experiments/verbalized_sampling/VerbalizedSamplingView.vue'),
 }

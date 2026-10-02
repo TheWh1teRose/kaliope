@@ -7,7 +7,7 @@
  */
 import { ref } from 'vue'
 
-export type RendererName = 'outline' | 'beat' | 'script'
+export type RendererName = 'outline' | 'beat' | 'script' | 'selection'
 
 export interface BeatView {
   id: string
@@ -16,6 +16,20 @@ export interface BeatView {
   word_budget: number
   goal_id: string | null
   summary: string | null
+}
+
+export interface GoalView {
+  id: string
+  text: string
+  /** The chosen passages that serve this goal, in the answer's order. */
+  block_ids: string[]
+}
+
+export interface SelectionView {
+  goals: GoalView[]
+  /** Chosen passages that serve no known goal. */
+  unassigned: string[]
+  rationale: string
 }
 
 export interface AnchorView {
@@ -37,6 +51,7 @@ const RENDERERS: Record<string, RendererName> = {
   Outline: 'outline',
   Beat: 'beat',
   Script: 'script',
+  Selection: 'selection',
 }
 
 const STORAGE_KEY = 'kalliope-artifact-view'
@@ -126,6 +141,32 @@ export function readScript(value: unknown): SegmentView[] | null {
     })
   }
   return segments
+}
+
+/** `null` when the payload is not a selection: learning goals and the chosen block ids. */
+export function readSelection(value: unknown): SelectionView | null {
+  if (!isRecord(value)) return null
+  if (!Array.isArray(value.learning_goals) || !Array.isArray(value.selected_blocks)) return null
+  const goals: GoalView[] = []
+  for (const item of value.learning_goals) {
+    if (!isRecord(item) || typeof item.id !== 'string' || typeof item.text !== 'string') {
+      return null
+    }
+    goals.push({ id: item.id, text: item.text, block_ids: [] })
+  }
+  const byId = new Map(goals.map((goal) => [goal.id, goal] as const))
+  const unassigned: string[] = []
+  for (const item of value.selected_blocks) {
+    if (!isRecord(item) || typeof item.block_id !== 'string') return null
+    if (item.goal_ids != null && !Array.isArray(item.goal_ids)) return null
+    const served = ((item.goal_ids as unknown[] | undefined) ?? []).filter(
+      (id): id is string => typeof id === 'string' && byId.has(id),
+    )
+    for (const id of served) byId.get(id)?.block_ids.push(item.block_id)
+    if (!served.length) unassigned.push(item.block_id)
+  }
+  const rationale = typeof value.rationale === 'string' ? value.rationale : ''
+  return { goals, unassigned, rationale }
 }
 
 export function parsePreview(preview: string | null | undefined): unknown {
