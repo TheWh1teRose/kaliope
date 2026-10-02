@@ -2,18 +2,24 @@
 /**
  * "Gesammelte Ausgaben": the collected outputs of one experiment, newest
  * first, readable as text or JSON. No ranking, no scores: read, adopt a
- * setup, or delete. The `text` slot renders an output's Text view.
+ * setup, file into a Sammlung folder, or delete. The `text` slot renders an
+ * output's Text view.
  */
 import { ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import type { ExperimentOutput } from '@/api/types'
+import MoveToFolderDialog from '@/components/experiments/MoveToFolderDialog.vue'
 import OutputCard, { type OutputView } from '@/components/experiments/OutputCard.vue'
+import { moveOutputs } from '@/experiments/api'
 import { type Badge, outputBadges, outputFacts, outputWarnings } from '@/experiments/outputMeta'
 import { t } from '@/i18n'
 
 withDefaults(
   defineProps<{
     outputs: ExperimentOutput<unknown>[]
+    /** Shows "In der Sammlung ansehen", filtered to this experiment. */
+    experimentKey?: string
     /** Which part of an output is the answer to render. */
     payloadOf?: (output: ExperimentOutput<unknown>) => unknown
     /** Card title; defaults to the label. */
@@ -30,7 +36,24 @@ withDefaults(
 const emit = defineEmits<{
   (e: 'adopt', output: ExperimentOutput<unknown>): void
   (e: 'delete', output: ExperimentOutput<unknown>): void
+  /** An output was filed into another folder; reload the list. */
+  (e: 'moved'): void
+  (e: 'error', message: string): void
 }>()
+
+const moving = ref<ExperimentOutput<unknown> | null>(null)
+
+async function file(folderId: string | null): Promise<void> {
+  const output = moving.value
+  moving.value = null
+  if (!output) return
+  try {
+    await moveOutputs([output.id], folderId)
+    emit('moved')
+  } catch (exc) {
+    emit('error', exc instanceof Error ? exc.message : t.errors.generic)
+  }
+}
 
 const view = ref<OutputView>('text')
 
@@ -48,6 +71,13 @@ function remove(output: ExperimentOutput<unknown>): void {
   <section class="collection">
     <div class="listhead">
       <p class="eyebrow grow">{{ t.experiments.collection }} · {{ outputs.length }}</p>
+      <RouterLink
+        v-if="experimentKey"
+        class="btn btn--sm btn--ghost"
+        :to="{ name: 'experiments', query: { tab: 'collection', experiment: experimentKey } }"
+      >
+        {{ t.collection.viewInCollection }} →
+      </RouterLink>
       <span class="meta">{{ t.experiments.showAs }}</span>
       <span class="seg" role="group">
         <button :aria-pressed="view === 'text'" @click="view = 'text'">{{ t.experiments.text }}</button>
@@ -69,6 +99,13 @@ function remove(output: ExperimentOutput<unknown>): void {
       collapsible
     >
       <template #head>
+        <button
+          class="folderchip"
+          :title="t.collection.moveTitle"
+          @click="moving = output"
+        >
+          {{ output.folder_path.length ? `▸ ${output.folder_path.join(' / ')}` : t.collection.root }}
+        </button>
         <span class="meta">{{ when(output.created_at) }}</span>
       </template>
       <template v-if="$slots.text" #text>
@@ -76,12 +113,20 @@ function remove(output: ExperimentOutput<unknown>): void {
       </template>
       <template #foot>
         <button class="btn btn--sm" @click="emit('adopt', output)">{{ t.experiments.adopt }}</button>
+        <button class="btn btn--sm" @click="moving = output">{{ t.collection.moveTo }}</button>
         <span class="grow" />
         <button class="btn btn--ghost btn--sm btn--danger" @click="remove(output)">
           {{ t.experiments.delete }}
         </button>
       </template>
     </OutputCard>
+    <MoveToFolderDialog
+      :open="Boolean(moving)"
+      :count="1"
+      :current="moving?.folder_id ?? null"
+      @close="moving = null"
+      @move="file"
+    />
   </section>
 </template>
 
@@ -129,5 +174,31 @@ function remove(output: ExperimentOutput<unknown>): void {
 
 .small {
   font-size: var(--t-sm);
+}
+
+a.btn {
+  text-decoration: none;
+}
+
+.folderchip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.folderchip:hover {
+  border-color: var(--mark);
+  color: var(--mark-deep);
 }
 </style>

@@ -3,7 +3,8 @@
  * One model answer as a card: title, badges, facts, warnings, the answer as
  * Text or JSON, what the model was sent, and actions in the footer slot.
  * Used for the current output and for every collected output. The `text`
- * slot replaces only the Text view; `body` replaces both views.
+ * slot replaces only the Text view; `body` replaces both views. `lead` sits
+ * before the title (the Sammlung's selection checkbox).
  */
 import { computed, ref, watch } from 'vue'
 
@@ -48,6 +49,7 @@ const jsonText = computed(() =>
 <template>
   <article class="out" :class="{ 'out--current': current, 'out--collapsed': !open }">
     <div class="out__head">
+      <slot name="lead" />
       <span class="out__title grow truncate" :title="title">{{ title }}</span>
       <slot name="head" />
       <span class="seg" role="group">

@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
@@ -100,6 +101,9 @@ vi.mock('@/api/client', async (original) => ({
         flow_id: 'baseline_v0',
         status: 'completed',
         created_at: '2026-10-01T10:00:00Z',
+        folder_id: null,
+        folder_path: [],
+        created_by: null,
       },
     ]),
   },
@@ -146,7 +150,7 @@ async function mountView() {
   })
   await router.push('/outline')
   const wrapper = mount(OutlineView, {
-    global: { plugins: [router], stubs: { teleport: true } },
+    global: { plugins: [router, createPinia()], stubs: { teleport: true, CollectFolder: true } },
   })
   await flushPromises()
   return wrapper
@@ -205,6 +209,9 @@ describe('Ablaufplan experiment screen', () => {
         meta: { model: 'claude-opus-5', temperature: 0.3 },
         setup: { ...setup, system_prompt: 'Eigener Prompt.' },
         created_at: '2026-10-02T11:00:00Z',
+        folder_id: null,
+        folder_path: [],
+        created_by: null,
       },
     ]
     const wrapper = await mountView()
