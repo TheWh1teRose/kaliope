@@ -42,6 +42,7 @@ describe('German UI strings', () => {
       'nodeCatalogue',
       'bench',
       'experiments',
+      'modelSettings',
       'notes',
     ]) {
       expect(de).toHaveProperty(key)
@@ -75,6 +76,16 @@ describe('German UI strings', () => {
     for (const status of ['pending', 'parsing', 'parsed', 'failed']) {
       expect(de.documents.parseStatus).toHaveProperty(status)
     }
+  })
+
+  it('labels every effort level in German', () => {
+    expect(de.modelSettings.effortLevels).toEqual({
+      low: 'niedrig',
+      medium: 'mittel',
+      high: 'hoch',
+      xhigh: 'extra hoch',
+      max: 'maximal',
+    })
   })
 
   it('falls back to the path when a key is missing', () => {

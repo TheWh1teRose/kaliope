@@ -16,6 +16,9 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, Field
 
 Role = Literal["user", "assistant"]
+#: ``default`` sends no thinking setting, so the model runs its own default.
+ThinkingMode = Literal["default", "adaptive", "off", "budget"]
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class Message(BaseModel):
@@ -46,6 +49,16 @@ class CompletionRequest(BaseModel):
     #: Requested sampling temperature. Dropped, with a warning, for models whose
     #: API rejects sampling parameters (§ registry ``supports_sampling``).
     temperature: float | None = None
+    #: The parameters below are ``None``/``default`` unless an experiment sets
+    #: them; production nodes never do, so nothing new is sent for them. A
+    #: provider drops what the model rejects and records a warning
+    #: (§ registry capabilities).
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    top_k: int | None = Field(default=None, ge=1)
+    thinking: ThinkingMode = "default"
+    #: Thinking tokens, only with ``thinking="budget"``.
+    thinking_budget: int | None = Field(default=None, ge=0)
+    effort: Effort | None = None
     #: JSON Schema for a structured response. Providers that support native
     #: structured outputs use it; the rest fall back to prompt instruction plus
     #: tolerant parsing.
@@ -225,6 +238,10 @@ class LLMClient:
         self.traces: list[dict[str, Any]] = []
 
     def complete(self, request: CompletionRequest) -> Completion:
+        # Local import: registry imports this module.
+        from app.llm.registry import adapt_parameters
+
+        adapted = adapt_parameters(request)
         provider = self._resolve(request.model)
         started = time.perf_counter()
         completion = provider.complete(request)
@@ -241,7 +258,12 @@ class LLMClient:
                 "model": request.model,
                 "system": request.system,
                 "messages": [message.model_dump(mode="json") for message in request.messages],
-                "temperature": request.temperature,
+                "temperature": adapted.temperature,
+                "top_p": adapted.top_p,
+                "top_k": adapted.top_k,
+                "thinking": adapted.thinking,
+                "thinking_budget": adapted.thinking_budget,
+                "effort": adapted.effort,
                 "max_tokens": request.max_tokens,
                 "response_text": completion.text,
                 "latency_ms": completion.latency_ms,

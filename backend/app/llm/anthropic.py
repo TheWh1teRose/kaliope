@@ -3,13 +3,13 @@
 Requests are adapted to the model's declared capabilities before they are sent:
 current frontier models reject sampling parameters outright, so ``temperature``
 is dropped with a recorded warning rather than raising a 400 in the middle of a
-run. Models that still sample receive ``temperature`` through ``extra_body``,
-because SDK 1.x no longer accepts ``temperature``, ``top_p``, or ``top_k`` as
-``messages.create`` keyword arguments. A ``max_tokens`` above the SDK's
-non-streaming budget is sent with ``messages.stream`` and read back via
-``get_final_message`` so the completion, usage, and cost path stay the same.
-Structured outputs are used where available, which is what makes the JSON
-contracts in §5.6 and §6 reliable.
+run. Sampling parameters (``temperature``, ``top_p``, ``top_k``) go through
+``extra_body``, because SDK 1.x no longer accepts them as ``messages.create``
+keyword arguments; thinking and ``output_config.effort`` are sent per model as
+the registry allows. A ``max_tokens`` above the SDK's non-streaming budget is
+sent with ``messages.stream`` and read back via ``get_final_message`` so the
+completion, usage, and cost path stay the same. Structured outputs are used
+where available, which is what makes the JSON contracts in §5.6 and §6 reliable.
 """
 
 from __future__ import annotations
@@ -70,27 +70,41 @@ class AnthropicProvider:
             else:
                 kwargs["system"] = request.system
 
-        if request.temperature is not None:
-            if registry.supports_sampling(request.model):
-                # SDK 1.x rejects temperature/top_p/top_k as keywords. extra_body
-                # is merged into the JSON body, which is where the API still reads them.
-                kwargs["extra_body"] = {"temperature": request.temperature}
-            else:
-                warnings.append(
-                    f"model '{request.model}' does not accept a temperature; the request "
-                    "was sent without one. Determinism comes from artifact caching instead."
-                )
+        params = registry.adapt_parameters(request)
+        warnings.extend(params.warnings)
+        # SDK 1.x has no temperature/top_p/top_k keywords; the API still reads
+        # them from the JSON body.
+        sampling = {
+            name: value
+            for name, value in (
+                ("temperature", params.temperature),
+                ("top_p", params.top_p),
+                ("top_k", params.top_k),
+            )
+            if value is not None
+        }
+        if sampling:
+            kwargs["extra_body"] = sampling
+        if params.thinking == "adaptive":
+            kwargs["thinking"] = {"type": "adaptive"}
+        elif params.thinking == "off":
+            kwargs["thinking"] = {"type": "disabled"}
+        elif params.thinking == "budget":
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": params.thinking_budget}
 
+        output_config: dict[str, Any] = {}
+        if params.effort is not None:
+            output_config["effort"] = params.effort
         if request.json_schema is not None:
             if registry.supports_structured_outputs(request.model):
-                kwargs["output_config"] = {
-                    "format": {"type": "json_schema", "schema": request.json_schema}
-                }
+                output_config["format"] = {"type": "json_schema", "schema": request.json_schema}
             else:
                 warnings.append(
                     f"model '{request.model}' has no native structured outputs; "
                     "falling back to prompt-instructed JSON."
                 )
+        if output_config:
+            kwargs["output_config"] = output_config
 
         started = time.perf_counter()
         try:

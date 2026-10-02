@@ -42,11 +42,12 @@ class OpenAIProvider:
             "messages": messages,
             "max_completion_tokens": registry.max_output_for(request.model, request.max_tokens),
         }
-        if request.temperature is not None:
-            if registry.supports_sampling(request.model):
-                kwargs["temperature"] = request.temperature
-            else:
-                warnings.append(f"model '{request.model}' does not accept a temperature")
+        params = registry.adapt_parameters(request)
+        warnings.extend(params.warnings)
+        if params.temperature is not None:
+            kwargs["temperature"] = params.temperature
+        if params.top_p is not None:
+            kwargs["top_p"] = params.top_p
         if request.json_schema is not None:
             kwargs["response_format"] = {
                 "type": "json_schema",

@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.llm.base import Effort, ThinkingMode
 from app.schemas.api import NodeValueOut, PauseOut
 from app.schemas.authoring import FlowNodeIn
 from app.schemas.pipeline import AudienceSpec, FormatSpec
@@ -88,6 +89,11 @@ class LLMTraceOut(BaseModel):
     system: str | None = None
     messages: list[dict[str, Any]] = Field(default_factory=list)
     temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    thinking: ThinkingMode | None = None
+    thinking_budget: int | None = None
+    effort: Effort | None = None
     max_tokens: int = 0
     response_text: str = ""
     latency_ms: int = 0
