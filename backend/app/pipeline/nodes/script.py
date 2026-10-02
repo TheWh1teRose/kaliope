@@ -8,21 +8,29 @@ model to do arithmetic.
 
 The node does not verify anchors — gate G1 does. What it does guarantee is that
 every anchor it emits points into a block that exists.
+
+Beats are written in order, and each call sees the whole running order and the
+text of every earlier beat, so the episode reads as one conversation. That
+makes each beat depend on the ones before it, and the node caches them that
+way: a beat's key chains the previous beat's key and result, so changing beat
+k rewrites k and everything after it while the beats before it are reused.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel
 
 from app.llm.base import CompletionRequest, Message
+from app.pipeline.framework.artifacts import hash_payload
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
 from app.schemas.document import Anchor, Block, ParsedDocument
-from app.schemas.pipeline import AudienceSpec, FormatSpec, Outline, Script, Segment
+from app.schemas.pipeline import AudienceSpec, Beat, FormatSpec, Outline, Script, Segment
 
 #: Shortest quote worth trying to locate; below this, matches are coincidental.
 MIN_QUOTE_CHARS = 12
@@ -51,9 +59,25 @@ Style:
 - Write in the document's language.
 - Stay close to the word budget for this beat.
 
+Continuity — the episode is one conversation:
+- You see the whole running order and everything already written. Use them for
+  continuity only. Facts still come only from this beat's passages; never
+  restate a fact from the earlier text as a claim.
+- Pick up where the previous beat ended. Answer its open question or bridge in
+  one or two sentences. Do not recap it, do not repeat its lines, do not greet
+  again.
+- Reuse the examples, images and terms the earlier text already introduced
+  when they fit. Do not bring in a second image for an idea that already has
+  one, and do not explain a term again.
+- Do not cover what a later beat covers. You may end with a short pointer
+  towards the next beat.
+
 Return JSON only.
 """
 )
+
+#: Longest stretch of the previous beat's ending that is quoted back to the model.
+ENDING_CHARS = 400
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -99,7 +123,7 @@ class ScriptInput(BaseModel):
 class ScriptNode:
     name = "script"
     title = "Skript schreiben"
-    version = "1.0"
+    version = "2.0"
     Input: type[BaseModel] = ScriptInput
     Output: type[BaseModel] = Script
     produces = "script"
@@ -108,9 +132,18 @@ class ScriptNode:
         summary="Writes the spoken segments, one beat at a time, and turns every citation "
         "into an exact anchor into the source.",
         detail=[
-            "Calls the model once per beat rather than once per episode. Each call sees only "
-            "that beat's passages, its word budget and its position in the running order, so "
-            "the model cannot borrow facts from material the beat does not cover.",
+            "Calls the model once per beat rather than once per episode, in order. Each call "
+            "sees the whole running order, the full text of every earlier beat and how the "
+            "previous beat ended, so it can pick up from there and keep the examples already "
+            "chosen. Facts still come only from that beat's own passages: the earlier text is "
+            "sent without block ids, for continuity only.",
+            "Each beat is cached on its own, under a key that chains the previous beat's key "
+            "and result. Changing a beat in the outline rewrites that beat and every later one "
+            "and reuses the earlier ones; a run that failed half-way resumes at the beat that "
+            "failed. Forcing the run ignores this cache too.",
+            "The running order, the frame and the earlier text come first and only grow from "
+            "beat to beat, so the provider can cache that prefix and later beats read it "
+            "cheaply.",
             "Segments come back in two kinds. A 'claim' carries facts and must cite the "
             "passage it took them from. A 'pedagogy' segment — an analogy, a transition, a "
             "question — is written freely but may introduce no new fact, and carries no "
@@ -138,8 +171,9 @@ class ScriptNode:
             "No segment survived — every beat's passage ids were missing from the parse, or "
             "the model answered with empty text throughout.",
         ],
-        cost="One call per beat: the most expensive step of the flow, and the one where the "
-        "model choice matters most.",
+        cost="One call per beat that is not cached: the most expensive step of the flow, and "
+        "the one where the model choice matters most. Later beats carry the earlier text, "
+        "mostly read from the provider's prompt cache.",
     )
 
     params = [
@@ -190,53 +224,57 @@ class ScriptNode:
         if not speaker_names:
             raise NodeError("the format spec declares no speakers")
 
+        model = ctx.model("claude-opus-5")
         segments: list[Segment] = []
+        written: list[tuple[int, Beat, list[Segment]]] = []
         unlocated = 0
+        reused = 0
         beat_count = len(inp.outline.beats)
+        previous_key = ""
+        previous_result = ""
 
         for position, beat in enumerate(inp.outline.beats):
-            ctx.progress(f"writing beat {position + 1} of {beat_count}: {beat.title}")
             beat_blocks = [blocks[bid] for bid in beat.block_ids if bid in blocks]
+            key = _beat_key(
+                inp,
+                ctx,
+                model=model,
+                beat=beat,
+                position=position,
+                is_last=position == beat_count - 1,
+                beat_blocks=beat_blocks,
+                previous_key=previous_key,
+                previous_result=previous_result,
+            )
             if not beat_blocks:
+                previous_key = key
                 continue
 
-            data = ctx.llm.complete(
-                CompletionRequest(
-                    model=ctx.model("claude-opus-5"),
-                    system=str(ctx.get("system_prompt") or _SYSTEM),
-                    messages=[
-                        Message(
-                            role="user",
-                            content=_beat_prompt(inp, beat, beat_blocks, position, beat_count),
-                        )
-                    ],
-                    max_tokens=int(ctx.get("max_tokens", 8000)),
-                    temperature=ctx.get("temperature"),
-                    json_schema=_SCHEMA,
-                    cache_system=True,
+            cached = None if ctx.force else ctx.artifacts.get_step(key)
+            if cached is not None:
+                ctx.progress(f"reusing beat {position + 1} of {beat_count}: {beat.title}")
+                payload = ctx.artifacts.get_raw(cached)
+                reused += 1
+            else:
+                ctx.progress(f"writing beat {position + 1} of {beat_count}: {beat.title}")
+                payload = self._write_beat(
+                    inp, ctx, model, beat, beat_blocks, position, written, len(segments)
                 )
-            ).json_payload()
+                cached = ctx.artifacts.put_raw("script_beat", payload).hash
+                ctx.artifacts.put_step(key, cached)
 
-            for entry in data.get("segments", []):
-                text = str(entry.get("text", "")).strip()
-                if not text:
-                    continue
-                kind = "claim" if str(entry.get("kind")) == "claim" else "pedagogy"
-                anchors, missed = _resolve_citations(entry.get("citations", []), blocks, inp.parsed)
-                unlocated += missed
-                segments.append(
-                    Segment(
-                        id=f"{beat.id}-s{len(segments):04d}",
-                        speaker=_closest_speaker(str(entry.get("speaker", "")), speaker_names),
-                        text=text,
-                        kind=kind,  # type: ignore[arg-type]
-                        anchors=anchors,
-                        beat_id=beat.id,
-                    )
-                )
+            beat_segments = [Segment.model_validate(item) for item in payload["segments"]]
+            unlocated += int(payload.get("unlocated", 0))
+            segments.extend(beat_segments)
+            if beat_segments:
+                written.append((position, beat, beat_segments))
+            previous_key = key
+            previous_result = cached
 
         if not segments:
             raise NodeError("the script node produced no segments")
+        if reused:
+            ctx.progress(f"{reused} beat(s) reused from an earlier run")
         if unlocated:
             ctx.progress(
                 f"{unlocated} citation quote(s) could not be located exactly; those "
@@ -244,15 +282,111 @@ class ScriptNode:
             )
         return Script(segments=segments)
 
+    def _write_beat(
+        self,
+        inp: ScriptInput,
+        ctx: NodeContext,
+        model: str,
+        beat: Beat,
+        beat_blocks: list[Block],
+        position: int,
+        written: Sequence[tuple[int, Beat, Sequence[Segment]]],
+        first_index: int,
+    ) -> dict[str, Any]:
+        """One model call for one beat; the segments as stored in the step cache."""
+        blocks = {b.id: b for b in inp.parsed.blocks}
+        speaker_names = inp.format_spec.speaker_names()
+        content, breaks = _beat_message(inp, position, beat_blocks, written)
+        data = ctx.llm.complete(
+            CompletionRequest(
+                model=model,
+                system=str(ctx.get("system_prompt") or _SYSTEM),
+                messages=[Message(role="user", content=content, cache_breaks=breaks)],
+                max_tokens=int(ctx.get("max_tokens", 8000)),
+                temperature=ctx.get("temperature"),
+                json_schema=_SCHEMA,
+                cache_system=True,
+            )
+        ).json_payload()
 
-def _beat_prompt(
-    inp: ScriptInput, beat: Any, beat_blocks: list[Block], position: int, total: int
+        segments: list[Segment] = []
+        unlocated = 0
+        for entry in data.get("segments", []):
+            text = str(entry.get("text", "")).strip()
+            if not text:
+                continue
+            kind = "claim" if str(entry.get("kind")) == "claim" else "pedagogy"
+            anchors, missed = _resolve_citations(entry.get("citations", []), blocks, inp.parsed)
+            unlocated += missed
+            segments.append(
+                Segment(
+                    id=f"{beat.id}-s{first_index + len(segments):04d}",
+                    speaker=_closest_speaker(str(entry.get("speaker", "")), speaker_names),
+                    text=text,
+                    kind=kind,  # type: ignore[arg-type]
+                    anchors=anchors,
+                    beat_id=beat.id,
+                )
+            )
+        return {
+            "segments": [segment.model_dump(mode="json") for segment in segments],
+            "unlocated": unlocated,
+        }
+
+
+def _beat_key(
+    inp: ScriptInput,
+    ctx: NodeContext,
+    *,
+    model: str,
+    beat: Beat,
+    position: int,
+    is_last: bool,
+    beat_blocks: list[Block],
+    previous_key: str,
+    previous_result: str,
 ) -> str:
-    speakers = "\n".join(
-        f"- {s.name} ({s.role})" + (f": {s.voice_note}" if s.voice_note else "")
-        for s in inp.format_spec.speakers
+    """Cache key for one beat.
+
+    It covers everything this beat's call depends on except the later beats:
+    their titles appear in the running order, but changing them must not
+    rewrite the beats before them. The previous beat's key and result chain the
+    beats, so a change to any earlier beat reaches every later one.
+    """
+    return hash_payload(
+        {
+            "node": ScriptNode.name,
+            "version": ScriptNode.version,
+            "config": ctx.config,
+            "model": model,
+            "format_spec": inp.format_spec.model_dump(mode="json"),
+            "audience_spec": inp.audience_spec.model_dump(mode="json"),
+            "document": [inp.parsed.document_id, inp.parsed.parse_version, inp.parsed.language],
+            "beat": beat.model_dump(mode="json"),
+            "position": position,
+            "is_last": is_last,
+            "passages": [[b.id, b.llm_text()] for b in beat_blocks],
+            "previous_key": previous_key,
+            "previous_result": previous_result,
+        }
     )
-    passages = "\n\n".join(f"[{b.id}]\n{b.llm_text()}" for b in beat_blocks)
+
+
+def beat_prompt_fields(
+    inp: ScriptInput,
+    position: int,
+    beat_blocks: list[Block],
+    written: Sequence[tuple[int, Beat, Sequence[Segment]]],
+) -> dict[str, str]:
+    """The named values the user message for one beat is built from.
+
+    ``written`` holds the earlier beats that produced text, with their
+    positions, in order. ``experiments/sources.BEAT_TEMPLATE`` renders these
+    same fields, so an experiment sends exactly what production sends.
+    """
+    beats = inp.outline.beats
+    total = len(beats)
+    beat = beats[position]
 
     opening = ""
     if position == 0 and inp.format_spec.opening:
@@ -261,17 +395,107 @@ def _beat_prompt(
     if position == total - 1 and inp.format_spec.closing:
         closing = f"\nThis is the final beat. Closing guidance: {inp.format_spec.closing}\n"
 
+    transition = ""
+    if written:
+        last = written[-1][2][-1]
+        ending = last.text if len(last.text) <= ENDING_CHARS else "…" + last.text[-ENDING_CHARS:]
+        transition += (
+            f"\nThe previous beat ended with:\n{last.speaker}: {ending}\nPick up from there.\n"
+        )
+    if position < total - 1:
+        upcoming = beats[position + 1]
+        transition += (
+            f"\nNext comes beat {position + 2}: {upcoming.title}. Leave its content to it.\n"
+        )
+
+    return {
+        "running_order": _running_order(inp.outline),
+        "register": inp.format_spec.register,
+        "language": inp.parsed.language,
+        "audience": inp.audience_spec.description,
+        "speakers": "\n".join(
+            f"- {s.name} ({s.role})" + (f": {s.voice_note}" if s.voice_note else "")
+            for s in inp.format_spec.speakers
+        ),
+        "written_so_far": "".join(_written_blocks(written)),
+        "beat_position": str(position + 1),
+        "beat_total": str(total),
+        "beat_title": beat.title,
+        "beat_summary_line": f"Beat summary: {beat.summary}\n" if beat.summary else "",
+        "word_budget": str(beat.word_budget),
+        "opening_closing": f"{opening}{closing}",
+        "transition": transition,
+        "passages": "\n\n".join(f"[{b.id}]\n{b.llm_text()}" for b in beat_blocks),
+    }
+
+
+def _beat_message(
+    inp: ScriptInput,
+    position: int,
+    beat_blocks: list[Block],
+    written: Sequence[tuple[int, Beat, Sequence[Segment]]],
+) -> tuple[str, list[int]]:
+    """The user message for one beat, and where its stable stretches end.
+
+    The frame (running order, register, audience, speakers) is the same for
+    every beat, and each earlier beat's text is appended as its own stretch,
+    so every call's prefix is the previous call's prefix plus one beat. The
+    beat-specific part comes last.
+    """
+    fields = beat_prompt_fields(inp, position, beat_blocks, written)
+    stable = [_frame(fields), *_written_blocks(written)]
+    breaks: list[int] = []
+    offset = 0
+    for part in stable:
+        offset += len(part)
+        breaks.append(offset)
+    return "".join(stable) + _this_beat(fields), breaks
+
+
+def _frame(fields: dict[str, str]) -> str:
     return (
-        f"Beat {position + 1} of {total}: {beat.title}\n"
-        + (f"Beat summary: {beat.summary}\n" if beat.summary else "")
-        + f"Word budget for this beat: about {beat.word_budget} words.\n"
-        f"Register: {inp.format_spec.register}\n"
-        f"Document language: {inp.parsed.language}\n"
-        f"Audience: {inp.audience_spec.description}\n"
-        f"{opening}{closing}\n"
-        f"Speakers:\n{speakers}\n\n"
-        f"Passages you may draw facts from:\n{passages}"
+        f"{fields['running_order']}\n"
+        f"Register: {fields['register']}\n"
+        f"Document language: {fields['language']}\n"
+        f"Audience: {fields['audience']}\n\n"
+        f"Speakers:\n{fields['speakers']}\n\n"
     )
+
+
+def _this_beat(fields: dict[str, str]) -> str:
+    return (
+        f"▶ You are writing beat {fields['beat_position']} of {fields['beat_total']}: "
+        f"{fields['beat_title']}\n"
+        f"{fields['beat_summary_line']}"
+        f"Word budget for this beat: about {fields['word_budget']} words.\n"
+        f"{fields['opening_closing']}{fields['transition']}\n"
+        f"Passages you may draw facts from:\n{fields['passages']}"
+    )
+
+
+def _running_order(outline: Outline) -> str:
+    total_words = sum(beat.word_budget for beat in outline.beats)
+    lines = [f"Episode running order ({len(outline.beats)} beats, about {total_words} words):"]
+    for index, beat in enumerate(outline.beats):
+        lines.append(f"{index + 1}. {beat.title} · {beat.word_budget} words")
+        if beat.summary:
+            lines.append(f"   {beat.summary}")
+    return "\n".join(lines) + "\n"
+
+
+def _written_blocks(written: Sequence[tuple[int, Beat, Sequence[Segment]]]) -> list[str]:
+    """Earlier beats as plain dialogue, one stretch per beat, without block ids."""
+    parts: list[str] = []
+    for index, (position, beat, beat_segments) in enumerate(written):
+        header = (
+            "Written so far, for continuity only. Do not cite it; facts must still come "
+            "from this beat's passages.\n\n"
+            if index == 0
+            else ""
+        )
+        lines = "\n".join(f"{segment.speaker}: {segment.text}" for segment in beat_segments)
+        parts.append(f"{header}[Beat {position + 1}: {beat.title}]\n{lines}\n\n")
+    return parts
 
 
 def _closest_speaker(requested: str, names: list[str]) -> str:

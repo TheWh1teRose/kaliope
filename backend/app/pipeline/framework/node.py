@@ -60,6 +60,9 @@ class NodeContext:
     document_id: str | None = None
     #: Called with a short human-readable progress line.
     progress: Callable[[str], None] = field(default=lambda _message: None)
+    #: Set when the run ignores the cache; a node with its own step cache
+    #: (``ArtifactStore.get_step``) skips it too.
+    force: bool = False
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)

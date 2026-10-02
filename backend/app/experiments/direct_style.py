@@ -69,6 +69,24 @@ class DirectStyle(PromptExperiment):
                 multiline=True,
                 hint="nur im ersten und letzten Abschnitt",
             ),
+            FieldSpec(
+                key="running_order",
+                label="Ablaufplan",
+                multiline=True,
+                hint="alle Abschnitte der Folge, wie das Modell sie sieht",
+            ),
+            FieldSpec(
+                key="written_so_far",
+                label="Bisher geschrieben",
+                multiline=True,
+                hint="Text der früheren Abschnitte; leer im ersten Abschnitt",
+            ),
+            FieldSpec(
+                key="transition",
+                label="Übergang",
+                multiline=True,
+                hint="wie der vorige Abschnitt endete und was als Nächstes kommt",
+            ),
         ]
 
     def load_source(self, session: Session, store: ArtifactStore, source: SourceIn) -> SourceOut:

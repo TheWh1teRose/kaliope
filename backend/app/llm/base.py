@@ -24,6 +24,10 @@ Effort = Literal["low", "medium", "high", "xhigh", "max"]
 class Message(BaseModel):
     role: Role
     content: str
+    #: Character offsets into ``content`` where a stable stretch ends. The text
+    #: before the last offset is sent unchanged by later calls, so a provider
+    #: with prompt caching may cache it. Providers without caching ignore it.
+    cache_breaks: list[int] = Field(default_factory=list)
 
 
 class Usage(BaseModel):
@@ -257,7 +261,10 @@ class LLMClient:
                 "node_name": self.node_name,
                 "model": request.model,
                 "system": request.system,
-                "messages": [message.model_dump(mode="json") for message in request.messages],
+                "messages": [
+                    message.model_dump(mode="json", exclude_defaults=True)
+                    for message in request.messages
+                ],
                 "temperature": adapted.temperature,
                 "top_p": adapted.top_p,
                 "top_k": adapted.top_k,

@@ -20,7 +20,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.llm import registry
-from app.llm.base import Completion, CompletionRequest, LLMError, Usage
+from app.llm.base import Completion, CompletionRequest, LLMError, Message, Usage
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,10 @@ class AnthropicProvider:
         kwargs: dict[str, Any] = {
             "model": request.model,
             "max_tokens": registry.max_output_for(request.model, request.max_tokens),
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": [
+                _message(m, cache=registry.spec_for(request.model) is not None)
+                for m in request.messages
+            ],
         }
 
         if request.system:
@@ -136,6 +139,28 @@ class AnthropicProvider:
             stop_reason=stop_reason,
             warnings=warnings,
         )
+
+
+def _message(message: Message, *, cache: bool) -> dict[str, Any]:
+    """One message, split into text blocks at its cache breaks.
+
+    Only the block that ends at the last break carries ``cache_control``. The
+    earlier block boundaries still matter: the API looks back over them for a
+    prefix an earlier call cached, so a prompt that grows call by call reads
+    everything up to the previous call's breakpoint from the cache.
+    """
+    breaks = sorted({b for b in message.cache_breaks if 0 < b <= len(message.content)})
+    if not cache or not breaks:
+        return {"role": message.role, "content": message.content}
+    blocks: list[dict[str, Any]] = []
+    start = 0
+    for end in [*breaks, len(message.content)]:
+        if end > start:
+            blocks.append({"type": "text", "text": message.content[start:end]})
+            if end == breaks[-1]:
+                blocks[-1]["cache_control"] = {"type": "ephemeral"}
+        start = end
+    return {"role": message.role, "content": blocks}
 
 
 def _send(client: Any, kwargs: dict[str, Any]) -> Any:

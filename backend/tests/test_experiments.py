@@ -22,7 +22,7 @@ from app.models import Document, LLMCall, Run, User
 from app.pipeline.bench import coerce_value, load_values
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.pipeline.framework.artifacts import ArtifactStore
-from app.pipeline.nodes.script import _SCHEMA, _SYSTEM, ScriptInput, _beat_prompt
+from app.pipeline.nodes.script import _SCHEMA, _SYSTEM, ScriptInput, _beat_message
 from app.security import hash_password
 from app.worker import worker
 from tests.support import StubProvider, write_learning_pdf
@@ -169,7 +169,7 @@ def test_default_template_renders_exactly_what_production_sends(
             session,
             store,
             run_id=finished_run,
-            keys=["parsed", "outline", "format_spec", "audience_spec"],
+            keys=["parsed", "outline", "format_spec", "audience_spec", "script"],
             include_payload=True,
         )
     data = {v.key: coerce_value(v.key, v.payload) for v in values}
@@ -178,6 +178,7 @@ def test_default_template_renders_exactly_what_production_sends(
     )
     outline = data["outline"]
     outline.beats[0] = outline.beats[0].model_copy(update={"summary": "What it covers."})
+    script = data["script"]
     script_input = ScriptInput(
         parsed=data["parsed"],
         outline=outline,
@@ -187,13 +188,18 @@ def test_default_template_renders_exactly_what_production_sends(
     blocks = {b.id: b for b in script_input.parsed.blocks}
     total = len(outline.beats)
     assert total >= 2
+    written = []
     for index, beat in enumerate(outline.beats):
         beat_blocks = [blocks[bid] for bid in beat.block_ids if bid in blocks]
-        expected = _beat_prompt(script_input, beat, beat_blocks, index, total)
+        expected, _breaks = _beat_message(script_input, index, beat_blocks, written)
         fields = beat_fields(
-            script_input.parsed, outline, format_spec, script_input.audience_spec, index
+            script_input.parsed, outline, format_spec, script_input.audience_spec, index, script
         )
         assert render(BEAT_TEMPLATE, fields).text == expected, beat.id
+        segments = [s for s in script.segments if s.beat_id == beat.id]
+        if segments:
+            written.append((index, beat, segments))
+    assert written, "the finished run wrote no segments to carry forward"
 
 
 # ------------------------------------------------------------------------ API

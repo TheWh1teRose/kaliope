@@ -16,23 +16,48 @@ from app.experiments.base import BeatOut, SourceIn, SourceOut
 from app.models import Document, Run
 from app.pipeline.bench import coerce_value, load_values
 from app.pipeline.framework.artifacts import ArtifactStore
+from app.pipeline.nodes.script import ScriptInput, beat_prompt_fields
 from app.schemas.document import Block, ParsedDocument
-from app.schemas.pipeline import AudienceSpec, Beat, FormatSpec, Outline, Script
+from app.schemas.pipeline import AudienceSpec, Beat, FormatSpec, Outline, Script, Segment
 
-#: The script node's user message (``nodes/script._beat_prompt``) as a template.
+#: The script node's user message (``nodes/script._beat_message``) as a template.
 BEAT_TEMPLATE = (
-    "Beat {{beat_position}} of {{beat_total}}: {{beat_title}}\n"
-    "{{beat_summary_line}}Word budget for this beat: about {{word_budget}} words.\n"
+    "{{running_order}}\n"
     "Register: {{register}}\n"
     "Document language: {{language}}\n"
-    "Audience: {{audience}}\n"
-    "{{opening_closing}}\n"
+    "Audience: {{audience}}\n\n"
     "Speakers:\n{{speakers}}\n\n"
+    "{{written_so_far}}"
+    "▶ You are writing beat {{beat_position}} of {{beat_total}}: {{beat_title}}\n"
+    "{{beat_summary_line}}Word budget for this beat: about {{word_budget}} words.\n"
+    "{{opening_closing}}{{transition}}\n"
     "Passages you may draw facts from:\n{{passages}}"
 )
 
 #: A small, self-contained beat so an experiment runs before any run is loaded.
 SAMPLE_BEAT: dict[str, str] = {
+    "running_order": (
+        "Episode running order (5 beats, about 1100 words):\n"
+        "1. Wovon lebt eine Pflanze? · 200 words\n"
+        "2. Die Lichtreaktion · 220 words\n"
+        "3. Der Calvin-Zyklus · 260 words\n"
+        "4. Wohin der Zucker wandert · 240 words\n"
+        "5. Rückblick · 180 words\n"
+    ),
+    "written_so_far": (
+        "Written so far, for continuity only. Do not cite it; facts must still come "
+        "from this beat's passages.\n\n"
+        "[Beat 1: Wovon lebt eine Pflanze?]\n"
+        "Moderator: Wir essen, Tiere fressen. Aber wovon lebt eigentlich eine Eiche?\n"
+        "Expertin: Stell dir das Blatt wie eine kleine Küche vor: Die Zutaten sind Wasser "
+        "und Kohlenstoffdioxid, und gekocht wird mit Licht.\n"
+        "Moderator: Und wo steht in dieser Küche der Herd?\n\n"
+    ),
+    "transition": (
+        "\nThe previous beat ended with:\nModerator: Und wo steht in dieser Küche der Herd?\n"
+        "Pick up from there.\n"
+        "\nNext comes beat 3: Der Calvin-Zyklus. Leave its content to it.\n"
+    ),
     "beat_position": "2",
     "beat_total": "5",
     "beat_title": "Die Lichtreaktion",
@@ -67,36 +92,36 @@ def beat_fields(
     format_spec: FormatSpec,
     audience_spec: AudienceSpec,
     beat_index: int,
+    script: Script | None = None,
 ) -> dict[str, str]:
-    """The values ``_beat_prompt`` puts into the message for one beat."""
-    beat = outline.beats[beat_index]
-    total = len(outline.beats)
+    """The values the script node puts into the message for one beat.
+
+    ``script`` supplies the text of the earlier beats, as the node would have
+    seen it while writing this beat; without it the beat reads as if nothing
+    was written before.
+    """
     blocks = {b.id: b for b in parsed.blocks}
+    beat = outline.beats[beat_index]
     beat_blocks: list[Block] = [blocks[bid] for bid in beat.block_ids if bid in blocks]
+    inp = ScriptInput(
+        parsed=parsed, outline=outline, format_spec=format_spec, audience_spec=audience_spec
+    )
+    return beat_prompt_fields(
+        inp, beat_index, beat_blocks, _written_before(outline, script, beat_index)
+    )
 
-    opening = ""
-    if beat_index == 0 and format_spec.opening:
-        opening = f"\nThis is the first beat. Opening guidance: {format_spec.opening}\n"
-    closing = ""
-    if beat_index == total - 1 and format_spec.closing:
-        closing = f"\nThis is the final beat. Closing guidance: {format_spec.closing}\n"
 
-    return {
-        "beat_position": str(beat_index + 1),
-        "beat_total": str(total),
-        "beat_title": beat.title,
-        "beat_summary_line": f"Beat summary: {beat.summary}\n" if beat.summary else "",
-        "word_budget": str(beat.word_budget),
-        "register": format_spec.register,
-        "language": parsed.language,
-        "audience": audience_spec.description,
-        "opening_closing": f"{opening}{closing}",
-        "speakers": "\n".join(
-            f"- {s.name} ({s.role})" + (f": {s.voice_note}" if s.voice_note else "")
-            for s in format_spec.speakers
-        ),
-        "passages": "\n\n".join(f"[{b.id}]\n{b.llm_text()}" for b in beat_blocks),
-    }
+def _written_before(
+    outline: Outline, script: Script | None, beat_index: int
+) -> list[tuple[int, Beat, list[Segment]]]:
+    if script is None:
+        return []
+    written: list[tuple[int, Beat, list[Segment]]] = []
+    for position, beat in enumerate(outline.beats[:beat_index]):
+        segments = [s for s in script.segments if s.beat_id == beat.id]
+        if segments:
+            written.append((position, beat, segments))
+    return written
 
 
 def load_beat_source(session: Session, store: ArtifactStore, source: SourceIn) -> SourceOut:
@@ -139,8 +164,9 @@ def load_beat_source(session: Session, store: ArtifactStore, source: SourceIn) -
 
     document = session.get(Document, run.document_id)
     reference: list[dict[str, Any]] = []
+    script: Script | None = None
     if "script" in payloads:
-        script: Script = coerce_value("script", payloads["script"])
+        script = coerce_value("script", payloads["script"])
         reference = [
             {"speaker": s.speaker, "text": s.text, "kind": s.kind}
             for s in script.segments
@@ -148,7 +174,7 @@ def load_beat_source(session: Session, store: ArtifactStore, source: SourceIn) -
         ]
 
     return SourceOut(
-        fields=beat_fields(parsed, outline, format_spec, audience_spec, index),
+        fields=beat_fields(parsed, outline, format_spec, audience_spec, index, script),
         beats=[
             BeatOut(
                 id=b.id,

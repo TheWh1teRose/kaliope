@@ -68,6 +68,31 @@ class ArtifactStore:
     def get(self, digest: str, model_type: type[BaseModel]) -> Any:
         return model_type.model_validate(self.get_raw(digest))
 
+    # ------------------------------------------------------------- steps
+
+    def step_path(self, key: str) -> Path:
+        return self.root / "steps" / key[:2] / f"{key}.ref"
+
+    def get_step(self, key: str) -> str | None:
+        """The artifact a node stored for one of its own steps, if it still exists.
+
+        A step is a unit of work inside a node, such as one beat of the script,
+        cached under a key the node computes itself. The runner's cache covers
+        whole nodes; this lets a node reuse the steps whose inputs did not change.
+        """
+        path = self.step_path(key)
+        if not path.exists():
+            return None
+        digest = path.read_text(encoding="utf-8").strip()
+        return digest if digest and self.exists(digest) else None
+
+    def put_step(self, key: str, digest: str) -> None:
+        path = self.step_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(digest, encoding="utf-8")
+        temporary.replace(path)
+
     def kind_of(self, digest: str) -> str:
         path = self.path_for(digest)
         if not path.exists():
