@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Read-only text view for an outline, a beat, or a script, with the raw JSON
+ * Read-only text view for an outline, a beat, a script, or a selection, with the raw JSON
  * one click away. The model name picks the renderer. Anything else, and any
  * payload that does not match, stays JSON.
  */
@@ -16,10 +16,12 @@ import {
   readBeat,
   readOutline,
   readScript,
+  readSelection,
   setArtifactMode,
   type ArtifactMode,
   type BeatView,
   type SegmentView,
+  type SelectionView,
 } from './artifactView'
 
 const props = defineProps<{
@@ -61,7 +63,14 @@ const segments = computed<SegmentView[] | null>(() => {
   return readScript(parsed.value)
 })
 
-const rendered = computed(() => beats.value !== null || segments.value !== null)
+const selection = computed<SelectionView | null>(() => {
+  if (props.truncated || kind.value !== 'selection' || parsed.value === undefined) return null
+  return readSelection(parsed.value)
+})
+
+const rendered = computed(
+  () => beats.value !== null || segments.value !== null || selection.value !== null,
+)
 const showText = computed(() => viewMode.value === 'text' && rendered.value)
 const mismatch = computed(() => {
   if (kind.value === null || viewMode.value !== 'text' || rendered.value) return false
@@ -166,6 +175,24 @@ async function copyJson(): Promise<void> {
           </span>
         </footer>
       </article>
+    </div>
+
+    <div v-else-if="showText && selection" class="beats">
+      <p v-if="selection.rationale" class="beat__sum prose">{{ selection.rationale }}</p>
+      <article v-for="goal in selection.goals" :key="goal.id" class="beat">
+        <div class="beat__head">
+          <span class="meta">{{ goal.id }}</span>
+          <span class="beat__title">{{ goal.text }}</span>
+        </div>
+        <div class="chips">
+          <span class="meta">{{ t.artifact.passages }}</span>
+          <span v-for="id in goal.block_ids" :key="id" class="chip">{{ id }}</span>
+        </div>
+      </article>
+      <div v-if="selection.unassigned.length" class="chips">
+        <span class="meta">{{ t.artifact.noGoal }}</span>
+        <span v-for="id in selection.unassigned" :key="id" class="chip">{{ id }}</span>
+      </div>
     </div>
 
     <div v-else class="jsonpane">

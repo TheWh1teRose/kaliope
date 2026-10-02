@@ -872,6 +872,8 @@ export interface ExperimentSourceMeta {
   reference?: { speaker: string; text: string; kind: string }[]
   /** The run's outline, for experiments that load the outline step's input. */
   outline?: unknown
+  /** The run's selection, for experiments that load the selection step's input. */
+  selection?: unknown
 }
 
 export interface ExperimentSource {

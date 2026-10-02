@@ -746,6 +746,17 @@ export default {
       reference: 'Ablaufplan dieses Laufs',
       beats: 'Abschnitte',
     },
+    selection: {
+      systemPromptHint: 'Startet mit dem Prompt des Knotens select, wie er in der Produktion läuft.',
+      shapeHint:
+        'Andere JSON-Form ausprobieren: im Tab Modell die strukturierte Ausgabe ausschalten und die Form im System-Prompt beschreiben. Passt die Antwort nicht zur Auswahl, erscheint sie als Rohtext mit Hinweis.',
+      structuredHint:
+        'Das Modell antwortet im JSON-Schema des Auswahl-Schritts. Aus: freier Text; JSON in der Antwort wird trotzdem gelesen.',
+      sourceSample: 'Beispiel-Eingabe (kein Lauf geladen)',
+      loadFromRunLead:
+        'Ein fertiger Lauf liefert Kandidaten, Längenbudget, Zielgruppe und Lernziel-Anweisung, so wie der Auswahl-Schritt sie bekam.',
+      reference: 'Auswahl dieses Laufs',
+    },
   },
   notes: {
     title: 'Anmerkungen',
@@ -788,6 +799,7 @@ export default {
     words: 'Wörter',
     passages: 'Stellen',
     goal: 'Lernziel',
+    noGoal: 'Ohne Lernziel',
   },
   modelSettings: {
     provider: 'Anbieter',
