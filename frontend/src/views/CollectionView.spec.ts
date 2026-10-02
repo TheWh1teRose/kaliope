@@ -374,6 +374,8 @@ describe('output presenters', () => {
 
     const outline = output({ experiment_key: 'outline', output: { outline: { beats: [] } } })
     expect(presenterFor('outline', new Set()).artifactOf(outline)?.model).toBe('Outline')
+    const selection = output({ experiment_key: 'selection', output: { selection: { picks: [] } } })
+    expect(presenterFor('selection', new Set()).artifactOf(selection)?.model).toBe('Selection')
     expect(presenterFor('direct_style', new Set()).artifactOf(output())).toBeNull()
   })
 

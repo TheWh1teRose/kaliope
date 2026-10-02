@@ -19,7 +19,7 @@ export interface OutputPresenter {
   payloadOf: (output: Output) => unknown
   titleOf: (output: Output) => string
   badgesOf: (output: Output) => Badge[]
-  /** A rendered artifact for the Text view (the outline), when the output has one. */
+  /** A rendered artifact for the Text view (outline, selection), when the output has one. */
   artifactOf: (output: Output) => { model: string; payload: unknown } | null
 }
 
@@ -45,6 +45,13 @@ export function presenterFor(key: string, revealed: Set<string>): OutputPresente
       ...fallback,
       artifactOf: (output) =>
         output.output?.outline ? { model: 'Outline', payload: output.output.outline } : null,
+    }
+  }
+  if (key === 'selection') {
+    return {
+      ...fallback,
+      artifactOf: (output) =>
+        output.output?.selection ? { model: 'Selection', payload: output.output.selection } : null,
     }
   }
   return fallback
