@@ -102,8 +102,7 @@ class ObjectiveOutlineNode:
         detail=[
             "A beat is one coherent idea: a title, the passage ids it draws on, the "
             "listener objective it serves, and how many words it may spend. The script "
-            "node later writes each beat separately, so this plan is what keeps a long "
-            "episode coherent instead of drifting.",
+            "node later writes each beat from this plan.",
             "The document's own learning goals are not shown and are not copied off the "
             "selection. What this node plans against is the listener-objective list "
             "published upstream, together with the passages already tagged as serving "
