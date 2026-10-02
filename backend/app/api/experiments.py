@@ -6,7 +6,7 @@ paid answer is stored even when the browser goes away. The page polls the run.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Response
@@ -40,6 +40,7 @@ from app.schemas.experiments import (
     OutputMoveIn,
     OutputOut,
     OutputPageOut,
+    OutputPatchIn,
     SaveIn,
 )
 from app.security import current_user
@@ -61,6 +62,8 @@ def list_all_outputs(
     include_sub: bool = True,
     experiment: str | None = None,
     q: str | None = None,
+    status: Literal["kandidat", "gewaehlt", "verworfen", "none"] | None = None,
+    ids: str | None = None,
     sort: Literal["new", "old"] = "new",
     offset: int = 0,
     limit: int = 50,
@@ -72,9 +75,17 @@ def list_all_outputs(
     ``folder_id`` absent means every output; the literal ``root`` means those in
     no folder; a folder id shows that folder, with its subfolders unless
     ``include_sub`` is false. ``q`` searches each output's own text, its label
-    and its note.
+    and its note. ``status=none`` means outputs without a status. ``ids`` (comma
+    separated, as the compare view sends them) limits the list to those outputs.
     """
     statement = select(ExperimentOutput)
+    if ids is not None:
+        wanted = [part for part in ids.split(",") if part][:200]
+        statement = statement.where(ExperimentOutput.id.in_(wanted))
+    if status == "none":
+        statement = statement.where(ExperimentOutput.status.is_(None))
+    elif status:
+        statement = statement.where(ExperimentOutput.status == status)
     if folder_id == ROOT:
         statement = statement.where(ExperimentOutput.folder_id.is_(None))
     elif folder_id:
@@ -199,6 +210,31 @@ def save_item(
         ).one()
         return _output_out(existing, _labels(db))
     return _output_out(output, _labels(db))
+
+
+@router.patch("/outputs/{output_id}", response_model=OutputOut)
+def update_output(
+    output_id: str,
+    payload: OutputPatchIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> OutputOut:
+    """Rename an output, or record a decision on it: a status and a short note."""
+    row = db.get(ExperimentOutput, output_id)
+    if row is None:
+        raise problem(404, "No such output", f"Output '{output_id}' does not exist.")
+    sent = payload.model_fields_set
+    if "label" in sent:
+        row.label = (payload.label or "").strip() or None
+    if "status" in sent or "note" in sent:
+        if "status" in sent:
+            row.status = payload.status
+        if "note" in sent:
+            row.note = (payload.note or "").strip() or None
+        row.decided_by = user.id
+        row.decided_at = datetime.now(UTC)
+    db.commit()
+    return _output_out(row, _labels(db))
 
 
 @router.delete("/outputs/{output_id}", status_code=204)
@@ -484,6 +520,10 @@ def _output_out(row: ExperimentOutput, labels: _Labels) -> OutputOut:
         folder_id=row.folder_id,
         folder_path=labels.paths.get(row.folder_id, []) if row.folder_id else [],
         created_by=labels.authors.get(row.created_by) if row.created_by else None,
+        status=row.status,  # type: ignore[arg-type]
+        note=row.note,
+        decided_by=labels.authors.get(row.decided_by) if row.decided_by else None,
+        decided_at=_iso(row.decided_at),
     )
 
 

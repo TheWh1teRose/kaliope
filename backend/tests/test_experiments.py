@@ -61,7 +61,7 @@ def test_registry_lists_direct_style_with_production_defaults() -> None:
     assert get_experiment("direct_style").validate_setup(setup) == []
 
 
-@pytest.mark.parametrize("key", ["bench", "runs", "outputs", "Bad-Key"])
+@pytest.mark.parametrize("key", ["bench", "runs", "outputs", "compare", "Bad-Key"])
 def test_registry_refuses_keys_that_collide_with_routes(key: str) -> None:
     class Clash:
         pass

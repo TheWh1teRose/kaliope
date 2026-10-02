@@ -6,8 +6,8 @@ from app.experiments.base import FIELD_NAME, Experiment
 
 _EXPERIMENTS: dict[str, Experiment] = {}
 
-#: Path segments the workbench page and the experiments API already use.
-_RESERVED = frozenset({"bench", "runs", "outputs"})
+#: Path segments the workbench, the compare page and the experiments API already use.
+_RESERVED = frozenset({"bench", "runs", "outputs", "compare"})
 
 
 def register_experiment(experiment: Experiment) -> Experiment:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -97,6 +97,10 @@ class ExperimentRunOut(BaseModel):
     calls: list[LLMCallOut] = Field(default_factory=list)
 
 
+#: A decision on a collected output. No ranking, no scores.
+OutputStatus = Literal["kandidat", "gewaehlt", "verworfen"]
+
+
 class SaveIn(BaseModel):
     item: str = "main"
     label: str | None = Field(default=None, max_length=200)
@@ -122,6 +126,19 @@ class OutputOut(BaseModel):
     folder_path: list[str] = Field(default_factory=list)
     #: Who collected it (an email, or a placeholder for a removed account).
     created_by: str | None = None
+    #: The decision record: a status and a short note, and who set them last.
+    status: OutputStatus | None = None
+    note: str | None = None
+    decided_by: str | None = None
+    decided_at: str | None = None
+
+
+class OutputPatchIn(BaseModel):
+    """Only the fields sent change; ``null`` clears a status, note or label."""
+
+    label: str | None = Field(default=None, max_length=200)
+    status: OutputStatus | None = None
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class OutputPageOut(BaseModel):

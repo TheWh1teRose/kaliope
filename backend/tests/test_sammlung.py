@@ -346,3 +346,56 @@ def test_search_finds_an_items_own_text_label_and_note(signed_in: TestClient) ->
     assert found("100%") == ["vs:1"]
     assert found("e_1") == ["vs:1"]
     assert found("%") == ["vs:1"], "a % in the query matches only itself"
+
+
+def test_a_decision_is_a_status_and_a_note(signed_in: TestClient) -> None:
+    first = signed_in.post(f"/api/experiments/runs/{_run(signed_in)}/save", json={}).json()
+    second = signed_in.post(f"/api/experiments/runs/{_run(signed_in)}/save", json={}).json()
+    assert first["status"] is None and first["note"] is None and first["decided_by"] is None
+
+    decided = signed_in.patch(
+        f"/api/experiments/outputs/{first['id']}",
+        json={"status": "gewaehlt", "note": "  Bester Einstieg bisher.  "},
+    )
+    assert decided.status_code == 200, decided.text
+    body = decided.json()
+    assert body["status"] == "gewaehlt" and body["note"] == "Bester Einstieg bisher."
+    assert body["decided_by"] == EMAIL and body["decided_at"]
+
+    # Only the fields sent change.
+    renamed = signed_in.patch(
+        f"/api/experiments/outputs/{first['id']}", json={"label": "Ruhig"}
+    ).json()
+    assert renamed["label"] == "Ruhig" and renamed["status"] == "gewaehlt"
+    assert renamed["note"] == "Bester Einstieg bisher."
+
+    assert (
+        signed_in.patch(
+            f"/api/experiments/outputs/{first['id']}", json={"status": "rang-1"}
+        ).status_code
+        == 422
+    ), "there is no ranking, only the three statuses"
+    assert (
+        signed_in.patch("/api/experiments/outputs/nope", json={"status": "kandidat"}).status_code
+        == 404
+    )
+
+    def listed(**params: str) -> list[str]:
+        page = signed_in.get(
+            "/api/experiments/outputs", params={"experiment": "direct_style", **params}
+        ).json()
+        return [o["id"] for o in page["items"]]
+
+    assert listed(status="gewaehlt") == [first["id"]]
+    assert first["id"] not in listed(status="none") and second["id"] in listed(status="none")
+    assert listed(q="bester einstieg") == [first["id"]], "the note is searched too"
+    assert sorted(listed(ids=f"{first['id']},{second['id']}")) == sorted(
+        [first["id"], second["id"]]
+    )
+    assert listed(ids="nope") == []
+
+    cleared = signed_in.patch(
+        f"/api/experiments/outputs/{first['id']}", json={"status": None, "note": None}
+    ).json()
+    assert cleared["status"] is None and cleared["note"] is None
+    assert first["id"] in listed(status="none")
