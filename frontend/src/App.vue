@@ -69,7 +69,10 @@ onMounted(async () => {
           <RouterLink
             :to="{ name: 'experiments' }"
             class="rail__link"
-            :class="{ 'router-link-active': route.name === 'experiment' }"
+            :class="{
+              'router-link-active':
+                route.name === 'experiment' || route.name === 'experiment-compare',
+            }"
             :title="t.nav.experiments"
           >
             <span class="rail__label">{{ t.nav.experiments }}</span>

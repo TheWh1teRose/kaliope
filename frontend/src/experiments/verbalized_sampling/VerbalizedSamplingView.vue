@@ -790,7 +790,7 @@ onBeforeRouteLeave(() => {
 
       <CollectionList
         :experiment-key="KEY"
-        @moved="reloadOutputs"
+        @changed="reloadOutputs"
         @error="error = $event"
         :outputs="outputs"
         :payload-of="collectedPayload"

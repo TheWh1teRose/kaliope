@@ -101,9 +101,6 @@ vi.mock('@/api/client', async (original) => ({
         flow_id: 'baseline_v0',
         status: 'completed',
         created_at: '2026-10-01T10:00:00Z',
-        folder_id: null,
-        folder_path: [],
-        created_by: null,
       },
     ]),
   },
@@ -212,6 +209,10 @@ describe('Ablaufplan experiment screen', () => {
         folder_id: null,
         folder_path: [],
         created_by: null,
+        status: null,
+        note: null,
+        decided_by: null,
+        decided_at: null,
       },
     ]
     const wrapper = await mountView()

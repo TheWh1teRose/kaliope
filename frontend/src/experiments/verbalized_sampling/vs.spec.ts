@@ -68,6 +68,10 @@ function collected(item: string, runId: string, source: string): ExperimentOutpu
     folder_id: null,
     folder_path: [],
     created_by: null,
+    status: null,
+    note: null,
+    decided_by: null,
+    decided_at: null,
   }
 }
 

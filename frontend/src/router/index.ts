@@ -93,6 +93,11 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/BenchView.vue'),
   },
   {
+    path: '/experiments/compare',
+    name: 'experiment-compare',
+    component: () => import('@/views/CompareView.vue'),
+  },
+  {
     path: '/experiments/:key',
     name: 'experiment',
     component: () => import('@/views/ExperimentView.vue'),

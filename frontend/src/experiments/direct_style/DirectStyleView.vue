@@ -554,7 +554,7 @@ onBeforeRouteLeave(() => {
         :experiment-key="KEY"
         @adopt="adopt"
         @delete="remove"
-        @moved="reloadOutputs"
+        @changed="reloadOutputs"
         @error="error = $event"
       />
     </template>
