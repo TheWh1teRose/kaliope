@@ -178,11 +178,89 @@ MODELS: dict[str, ModelSpec] = {
             small=True,
         ),
         # --- OpenAI ----------------------------------------------------
+        # Prices are USD per million tokens for prompts up to 272K input
+        # tokens (OpenAI models and pricing pages, 2026-10-02); longer prompts
+        # cost 2x input and 1.5x output, which is not modelled. Cached input
+        # is 0.1x input unless noted. GPT-6 and GPT-5.6 bill cache writes at
+        # 1.25x input; GPT-5.5 and GPT-4.1 have no cache-write price.
+        ModelSpec(
+            id="gpt-6-astra",
+            provider="openai",
+            input_usd_per_mtok=10.0,
+            output_usd_per_mtok=50.0,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
+        ),
+        ModelSpec(
+            id="gpt-6.1-sol",
+            provider="openai",
+            input_usd_per_mtok=2.0,
+            output_usd_per_mtok=10.0,
+            # Cached input is $0.10/MTok, 5% of the input rate.
+            cache_read_multiplier=0.05,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
+        ),
+        ModelSpec(
+            id="gpt-6-sol",
+            provider="openai",
+            input_usd_per_mtok=2.0,
+            output_usd_per_mtok=10.0,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+        ),
+        ModelSpec(
+            id="gpt-6-luna",
+            provider="openai",
+            input_usd_per_mtok=0.1,
+            output_usd_per_mtok=0.5,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+            small=True,
+        ),
+        ModelSpec(
+            id="gpt-5.6-sol",
+            provider="openai",
+            # Promotional price, available at least through 2026-11-21.
+            input_usd_per_mtok=4.0,
+            output_usd_per_mtok=20.0,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+        ),
+        ModelSpec(
+            id="gpt-5.6-terra",
+            provider="openai",
+            input_usd_per_mtok=2.0,
+            output_usd_per_mtok=12.0,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+        ),
+        ModelSpec(
+            id="gpt-5.6-luna",
+            provider="openai",
+            input_usd_per_mtok=0.2,
+            output_usd_per_mtok=1.2,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+            small=True,
+        ),
+        ModelSpec(
+            id="gpt-5.5",
+            provider="openai",
+            input_usd_per_mtok=5.0,
+            output_usd_per_mtok=30.0,
+            cache_write_multiplier=1.0,
+            context_window=1_050_000,
+            max_output_tokens=128_000,
+        ),
         ModelSpec(
             id="gpt-4.1",
             provider="openai",
             input_usd_per_mtok=2.0,
             output_usd_per_mtok=8.0,
+            cache_write_multiplier=1.0,
             context_window=1_000_000,
             max_output_tokens=32_000,
         ),
@@ -191,6 +269,7 @@ MODELS: dict[str, ModelSpec] = {
             provider="openai",
             input_usd_per_mtok=0.4,
             output_usd_per_mtok=1.6,
+            cache_write_multiplier=1.0,
             context_window=1_000_000,
             max_output_tokens=32_000,
             small=True,
@@ -218,6 +297,7 @@ MODELS: dict[str, ModelSpec] = {
 
 _EFFORT_ALL: list[Effort] = ["low", "medium", "high", "xhigh", "max"]
 _EFFORT_46: list[Effort] = ["low", "medium", "high", "max"]
+_EFFORT_NO_MAX: list[Effort] = ["low", "medium", "high", "xhigh"]
 
 #: Request parameters per model beyond sampling (Claude API reference, cached
 #: 2026-09-25). Kept apart from the price table so model and price updates do
@@ -278,7 +358,38 @@ _CAPABILITIES: dict[str, dict[str, object]] = {
         model_id: {"supports_top_k": True, "thinking_modes": ["budget"]}
         for model_id in ("claude-haiku-4-5", "claude-haiku-4-5-20251001")
     },
-    # No registered OpenAI model is a reasoning model: no top_k, thinking or effort.
+    # OpenAI reasoning models (OpenAI model pages and GPT-6 guide, 2026-10-02).
+    # ``reasoning_effort`` is the only thinking control: thinking "off" sends
+    # ``none``. Temperature and top_p are accepted only at ``none``; OpenAI
+    # has no top_k. GPT-6 Astra and GPT-6.1 Sol reject ``none``. Astra's
+    # default effort is not documented.
+    "gpt-6-astra": {
+        "supports_sampling": False,
+        "thinking_default": "on",
+        "effort_levels": _EFFORT_ALL,
+    },
+    "gpt-6.1-sol": {
+        "supports_sampling": False,
+        "thinking_default": "on",
+        "effort_levels": _EFFORT_ALL,
+        "default_effort": "medium",
+    },
+    **{
+        model_id: {
+            "thinking_modes": ["off"],
+            "thinking_default": "on",
+            "effort_levels": _EFFORT_ALL,
+            "default_effort": "medium",
+        }
+        for model_id in ("gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+    },
+    "gpt-5.5": {
+        "thinking_modes": ["off"],
+        "thinking_default": "on",
+        "effort_levels": _EFFORT_NO_MAX,
+        "default_effort": "medium",
+    },
+    # GPT-4.1 does not reason: no top_k, thinking or effort.
     "gpt-4.1": {},
     "gpt-4.1-mini": {},
     # Gemini 2.5 thinks dynamically unless given a budget; only Flash can stop.
@@ -495,6 +606,13 @@ def adapt_parameters(request: CompletionRequest) -> Parameters:
             warnings.append(
                 f"model '{model}' does not accept an effort; the request was sent without one."
             )
+    if spec.provider == "openai" and out.thinking == "off" and out.effort is not None:
+        # One parameter carries both: thinking off is reasoning effort "none".
+        warnings.append(
+            f"model '{model}' turns thinking off with reasoning effort 'none'; "
+            f"effort '{out.effort}' was not sent."
+        )
+        out.effort = None
     if out.thinking == "off" and spec.thinking_off_max_effort is not None:
         effective = out.effort or spec.default_effort
         if effective is not None and _EFFORT_ALL.index(effective) > _EFFORT_ALL.index(

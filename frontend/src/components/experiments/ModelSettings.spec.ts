@@ -52,6 +52,17 @@ const catalogue: ModelCatalogue = {
       effort_levels: [],
       default_effort: null,
     },
+    {
+      ...base,
+      id: 'gpt-6-astra',
+      provider: 'openai',
+      supports_sampling: false,
+      supports_top_k: false,
+      thinking_modes: [],
+      thinking_default: 'on',
+      effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      default_effort: null,
+    },
   ],
   providers: [{ name: 'anthropic' }, { name: 'openai' }, { name: 'google' }],
 }
@@ -179,6 +190,11 @@ describe('ModelSettings', () => {
     expect(byValue.max).toBe('maximal')
     expect(wrapper.find('.note--fail').text()).toContain('hoch')
     expect(wrapper.find('.note--fail').text()).not.toMatch(/\bhigh\b/)
+  })
+
+  it('names no effort level as the default when the provider documents none', () => {
+    const wrapper = render(defaultSettings(catalogue.models[4]))
+    expect(wrapper.find('#ms-effort option').text()).toBe('Standard')
   })
 
   it('fits the settings to a newly selected model', async () => {

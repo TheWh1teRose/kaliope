@@ -287,9 +287,11 @@ const changed = computed(() => {
       >
         <option value="">
           {{
-            state.effortLevels.length
-              ? `${labels.effortDefault} (${effortLabel(current.default_effort)})`
-              : labels.effortUnsupported
+            !state.effortLevels.length
+              ? labels.effortUnsupported
+              : current.default_effort
+                ? `${labels.effortDefault} (${effortLabel(current.default_effort)})`
+                : labels.effortDefault
           }}
         </option>
         <option v-for="level in state.effortLevels" :key="level" :value="level">
