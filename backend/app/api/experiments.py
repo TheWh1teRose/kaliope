@@ -131,6 +131,7 @@ def get_experiment_detail(
         **summary.model_dump(),
         defaults=experiment.defaults().model_dump(mode="json"),
         fields=experiment.field_specs(),
+        extras=experiment.extras(),
     )
 
 

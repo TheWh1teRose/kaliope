@@ -64,8 +64,10 @@ const jsonText = computed(() =>
     </div>
     <p v-for="warning in warnings ?? []" :key="warning" class="warnline">{{ warning }}</p>
     <div class="out__body">
-      <OutputText v-if="mode === 'text'" :payload="payload" :text="text" />
-      <pre v-else class="json">{{ jsonText }}</pre>
+      <slot name="body" :mode="mode">
+        <OutputText v-if="mode === 'text'" :payload="payload" :text="text" />
+        <pre v-else class="json">{{ jsonText }}</pre>
+      </slot>
     </div>
     <template v-if="calls?.length">
       <button class="fold" :aria-expanded="promptOpen" @click="promptOpen = !promptOpen">
