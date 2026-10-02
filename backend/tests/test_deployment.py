@@ -158,6 +158,7 @@ def test_dockerfile_matches_the_deployment_contract() -> None:
     assert "HEALTHCHECK" in dockerfile
     assert "/api/health" in dockerfile
     assert "USER kalliope" in dockerfile
+    assert "SQLITE_JOURNAL_MODE=DELETE" in dockerfile
 
 
 def test_default_model_env_var_is_actually_used() -> None:

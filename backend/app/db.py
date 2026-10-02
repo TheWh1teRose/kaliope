@@ -5,7 +5,7 @@ enforcement are set on every connection; both are per-connection PRAGMAs in
 SQLite, so they belong on the ``connect`` event rather than in a migration.
 
 The journal mode is ``SQLITE_JOURNAL_MODE`` (default WAL). WAL does not work on
-a Cloud Storage FUSE mount, so Cloud Run sets DELETE (see README).
+a Cloud Storage FUSE mount, so the container image sets DELETE (see README).
 """
 
 from __future__ import annotations

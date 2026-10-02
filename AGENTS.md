@@ -10,9 +10,7 @@ Workflow: `.github/workflows/deploy.yml`.
 3. `gcloud run deploy kalliope --image <sha-tag> --region europe-west1`. Only the image changes; env (`DATA_DIR=/data`), secrets (`app-secret-key`, `anthropic-api-key`), the GCS FUSE volume (bucket `qlug-kalliope-data` at `/data`), scaling and resources stay as configured on the service.
 4. Look up the service URL and poll `<url>/api/health` for `"status":"ok"` (about 2 min). The job fails otherwise. This assumes the service allows unauthenticated requests.
 
-The service must also have `SQLITE_JOURNAL_MODE=DELETE` as an env var: SQLite's default WAL mode cannot write `kalliope.db-wal` on the GCS FUSE mount (`stale file handle`, logins return 500). Set it once, outside the workflow (deploys keep it):
-`gcloud run services update kalliope --region europe-west1 --update-env-vars SQLITE_JOURNAL_MODE=DELETE`
-On the next start the app (and `alembic upgrade head` in the entrypoint) checkpoints any leftover `kalliope.db-wal` into the database, then removes it.
+The image defaults to `SQLITE_JOURNAL_MODE=DELETE` for the GCS FUSE mount at `/data` (local development stays on WAL). SQLite's WAL mode cannot write `kalliope.db-wal` there (`stale file handle`, logins return 500). On the next start the app (and `alembic upgrade head` in the entrypoint) checkpoints any leftover `kalliope.db-wal` into the database, then removes it.
 
 Runs are serialized (`concurrency: deploy`, no cancel). The service runs with max 1 instance because the data is SQLite on a mounted bucket; do not raise it. Cloud Run keeps old revisions, so a failed health check leaves the bad revision serving: roll back (below).
 

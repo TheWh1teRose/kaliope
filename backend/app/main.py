@@ -32,7 +32,7 @@ from app.api import (
     runs,
     users,
 )
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db import session_scope
 from app.errors import (
     ProblemException,
@@ -58,6 +58,21 @@ def _configure_logging(level: str) -> None:
     )
 
 
+def _log_storage(settings: Settings) -> None:
+    """One startup line for the journal mode and data directory.
+
+    Alembic's ``fileConfig`` disables loggers it does not name, which includes
+    this one, so turn it back on after migrations or the line never appears.
+    """
+    logger.disabled = False
+    logger.setLevel(getattr(logging, settings.log_level, logging.INFO))
+    logger.info(
+        "sqlite journal mode %s, data dir %s",
+        settings.sqlite_journal_mode,
+        settings.data_dir,
+    )
+
+
 def _sync_flows() -> list[str]:
     """Seed the catalogue from what the build ships, then report what runs."""
     with session_scope() as session:
@@ -74,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     bootstrap_nodes()
     ensure_schema()
+    _log_storage(settings)
     flow_ids = _sync_flows()
     logger.info("flows available: %s", ", ".join(flow_ids) or "none")
 

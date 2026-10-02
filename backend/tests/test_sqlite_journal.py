@@ -1,13 +1,15 @@
-"""``SQLITE_JOURNAL_MODE``: WAL by default, rollback journal on Cloud Run.
+"""``SQLITE_JOURNAL_MODE``: WAL by default, DELETE in the shipped image.
 
 A Cloud Storage FUSE mount cannot host a write-ahead log (stale file handle on
-``kalliope.db-wal``), so the service sets ``SQLITE_JOURNAL_MODE=DELETE``. These
-tests cover the setting, the durability pragma that goes with it, and a ``-wal``
-left on the volume by an earlier WAL run being folded in rather than dropped.
+``kalliope.db-wal``), so the container image sets ``SQLITE_JOURNAL_MODE=DELETE``.
+These tests cover the setting, the durability pragma that goes with it, and a
+``-wal`` left on the volume by an earlier WAL run being folded in rather than
+dropped.
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 from collections.abc import Iterator
@@ -15,10 +17,14 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.config import Settings, get_settings, set_settings
 from app.db import get_engine, reset_engine
+from app.main import create_app
+
+ROOT = Path(__file__).resolve().parents[2]
 
 DB_NAME = "kalliope.db"
 
@@ -56,12 +62,27 @@ def _leave_committed_wal(data_dir: Path) -> None:
         # Copy while the writer is still open, so the rows live only in -wal.
         shutil.copy(source / DB_NAME, data_dir / DB_NAME)
         shutil.copy(source / f"{DB_NAME}-wal", data_dir / f"{DB_NAME}-wal")
+        shutil.copy(source / f"{DB_NAME}-shm", data_dir / f"{DB_NAME}-shm")
     finally:
         writer.close()
     assert (data_dir / f"{DB_NAME}-wal").stat().st_size > 0
+    assert (data_dir / f"{DB_NAME}-shm").stat().st_size > 0
 
 
 def test_default_journal_mode_is_wal() -> None:
+    assert Settings(app_secret_key="k" * 32).sqlite_journal_mode == "WAL"
+
+
+def test_image_env_resolves_delete_and_an_unset_variable_stays_wal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Dockerfile sets DELETE; a process without that variable stays on WAL."""
+    dockerfile = re.sub(r"\\\n", " ", (ROOT / "Dockerfile").read_text(encoding="utf-8"))
+    match = re.search(r"^ENV\b.*\bSQLITE_JOURNAL_MODE=(\S+)", dockerfile, re.MULTILINE)
+    assert match is not None
+    monkeypatch.setenv("SQLITE_JOURNAL_MODE", match.group(1))
+    assert Settings(app_secret_key="k" * 32).sqlite_journal_mode == "DELETE"
+    monkeypatch.delenv("SQLITE_JOURNAL_MODE", raising=False)
     assert Settings(app_secret_key="k" * 32).sqlite_journal_mode == "WAL"
 
 
@@ -115,6 +136,15 @@ def test_existing_wal_is_checkpointed_not_dropped(tmp_path: Path) -> None:
         assert check.execute("SELECT count(*) FROM kept").fetchone() == (3,)
     finally:
         check.close()
+
+
+def test_startup_logs_the_journal_mode_and_data_dir(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    data_dir = tmp_path / "logged"
+    with _data_dir(data_dir, sqlite_journal_mode="DELETE"), TestClient(create_app()):
+        pass
+    assert f"sqlite journal mode DELETE, data dir {data_dir}" in capfd.readouterr().err
 
 
 def test_alembic_converts_a_leftover_wal_before_the_app_starts(tmp_path: Path) -> None:
