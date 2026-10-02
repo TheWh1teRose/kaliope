@@ -28,6 +28,43 @@ class UserOut(BaseModel):
     active: bool
 
 
+class AccountUpdate(BaseModel):
+    """Profile edits. A field left out stays as it is.
+
+    Email and name are trimmed and checked by the endpoint, like the login
+    address, so a refusal comes back as the same problem+json as every other.
+    """
+
+    name: str | None = Field(default=None, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(max_length=1024)
+
+
+class MemberOut(BaseModel):
+    """A workspace member as the settings page lists them. Never a hash."""
+
+    id: str
+    email: str
+    name: str
+    created_at: str
+    #: The signed-in user, who cannot remove themselves.
+    is_self: bool
+
+
+class MemberCreate(BaseModel):
+    email: str = Field(max_length=320)
+    name: str = Field(max_length=200)
+    password: str = Field(max_length=1024)
+
+
+class PasswordSet(BaseModel):
+    password: str = Field(max_length=1024)
+
+
 class DocumentOut(BaseModel):
     id: str
     filename: str

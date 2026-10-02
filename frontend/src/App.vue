@@ -71,10 +71,6 @@ onMounted(async () => {
           </RouterLink>
         </div>
       </div>
-      <RouterLink :to="{ name: 'exports' }" class="rail__link" :title="t.nav.exports">
-        <span class="rail__icon" aria-hidden="true">↧</span>
-        <span class="rail__label">{{ t.nav.exports }}</span>
-      </RouterLink>
 
       <div class="grow" />
 
@@ -86,9 +82,19 @@ onMounted(async () => {
         <span class="rail__icon" aria-hidden="true">⏻</span>
         <span class="rail__label">{{ t.nav.logout }}</span>
       </button>
-      <span class="rail__who" :title="auth.user?.email">{{
-        (auth.user?.name ?? '?').slice(0, 2).toUpperCase()
-      }}</span>
+      <RouterLink
+        :to="{ name: 'settings' }"
+        class="rail__link rail__user"
+        :title="`${t.nav.settings} · ${auth.user?.email ?? ''}`"
+      >
+        <span class="rail__who" aria-hidden="true">{{
+          (auth.user?.name ?? '?').slice(0, 2).toUpperCase()
+        }}</span>
+        <span class="rail__label">
+          <span class="rail__name">{{ auth.user?.name }}</span>
+          <span class="rail__sub-label">{{ t.nav.settings }}</span>
+        </span>
+      </RouterLink>
     </nav>
 
     <main class="content scroll">
@@ -214,9 +220,31 @@ onMounted(async () => {
   color: var(--chrome);
 }
 
-.rail__who {
+.rail__user {
   margin-top: var(--s3);
-  align-self: center;
+  min-height: 42px;
+  padding: var(--s1) var(--s2);
+}
+
+.rail__user .rail__label {
+  display: grid;
+  line-height: 1.25;
+}
+
+.rail__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+  font-weight: 560;
+}
+
+.rail__sub-label {
+  font-size: var(--t-xs);
+  opacity: 0.75;
+}
+
+.rail__who {
+  flex: none;
   display: grid;
   place-items: center;
   width: 28px;

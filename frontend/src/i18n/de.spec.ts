@@ -36,6 +36,7 @@ describe('German UI strings', () => {
       'gate',
       'review',
       'exports',
+      'settings',
       'errors',
       'pipelines',
       'formats',

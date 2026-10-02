@@ -3,16 +3,15 @@ import { t } from '@/i18n'
 </script>
 
 <template>
-  <div class="page">
+  <section class="stack" aria-labelledby="export-title">
     <header>
-      <p class="eyebrow">{{ t.app.name }}</p>
-      <h1 class="h-page">{{ t.exports.title }}</h1>
+      <h2 id="export-title" class="h-section">{{ t.exports.title }}</h2>
       <p class="muted lead">{{ t.exports.lead }}</p>
     </header>
 
     <div class="sheet export">
       <div class="grow">
-        <h2 class="h-section">{{ t.exports.editEvents }}</h2>
+        <h3 class="h-section">{{ t.exports.editEvents }}</h3>
         <p class="muted hint">{{ t.exports.editEventsHint }}</p>
         <code class="path">GET /api/exports/edit-events.jsonl</code>
       </div>
@@ -20,19 +19,10 @@ import { t } from '@/i18n'
         {{ t.exports.download }}
       </a>
     </div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.page {
-  padding: var(--s6);
-  max-width: 820px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s5);
-}
-
 .lead {
   margin-top: 6px;
   font-size: var(--t-sm);
