@@ -574,6 +574,17 @@ export default {
     editTitle: 'Anmerkung bearbeiten',
     ungrouped: 'Ohne Abschnitt',
   },
+  artifact: {
+    view: 'Ansicht',
+    text: 'Text',
+    json: 'JSON',
+    copyJson: 'JSON kopieren',
+    noTextView: 'Für diesen Typ gibt es keine Textansicht.',
+    mismatch: 'Diese Struktur passt nicht zur Textansicht.',
+    words: 'Wörter',
+    passages: 'Stellen',
+    goal: 'Lernziel',
+  },
   modelSettings: {
     provider: 'Anbieter',
     model: 'Modell',

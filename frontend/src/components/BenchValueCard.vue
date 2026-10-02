@@ -1,15 +1,18 @@
 <script setup lang="ts">
 /**
- * One value in the bench bag: summary, preview, and an editable JSON body.
+ * One value in the bench bag: summary, and a text or JSON body.
  *
- * Large artifacts (a full parse) stay behind their hash until someone asks to
- * edit them, so opening the bench over a real document does not dump megabytes
- * into a textarea.
+ * Outline, beat, and script open as read-only text. JSON mode is the editable
+ * textarea. Large artifacts (a full parse) stay behind their hash until someone
+ * asks to edit them, so opening the bench over a real document does not dump
+ * megabytes into a textarea.
  */
 import { computed, ref, watch } from 'vue'
 
 import type { BenchValueOut } from '@/api/types'
 import { t } from '@/i18n'
+
+import ArtifactView from './ArtifactView.vue'
 
 const props = defineProps<{
   value: BenchValueOut
@@ -102,15 +105,25 @@ function onInput(event: Event): void {
 
       <p v-if="value.truncated && !dirty" class="muted small">{{ t.graph.truncated }}</p>
 
-      <textarea
-        class="textarea json"
-        spellcheck="false"
-        rows="14"
-        :value="draft"
-        :placeholder="t.bench.emptyHint"
-        @input="onInput"
-      />
-      <p v-if="jsonError" class="err">{{ t.bench.jsonInvalid }} {{ jsonError }}</p>
+      <ArtifactView
+        :model="value.model"
+        :preview="draft"
+        :payload="value.payload"
+        :truncated="value.truncated && !dirty"
+        editable
+      >
+        <template #json>
+          <textarea
+            class="textarea json"
+            spellcheck="false"
+            rows="14"
+            :value="draft"
+            :placeholder="t.bench.emptyHint"
+            @input="onInput"
+          />
+          <p v-if="jsonError" class="err">{{ t.bench.jsonInvalid }} {{ jsonError }}</p>
+        </template>
+      </ArtifactView>
 
       <div class="row wrap">
         <button
