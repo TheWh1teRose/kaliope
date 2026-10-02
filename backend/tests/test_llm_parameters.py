@@ -57,16 +57,22 @@ class _FakeAnthropic:
 
 
 class _FakeOpenAI:
-    def __init__(self) -> None:
+    def __init__(self, usage: Any = None) -> None:
+        import openai
+
+        self._signature = inspect.signature(openai.resources.chat.Completions.create)
+        self._usage = usage
         self.calls: list[dict[str, Any]] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, **kwargs: Any) -> Any:
+        # Raises TypeError for keywords the installed SDK does not take.
+        self._signature.bind(None, **kwargs)
         self.calls.append(kwargs)
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="ok"), finish_reason="stop")],
             model=kwargs["model"],
-            usage=None,
+            usage=self._usage,
         )
 
 
@@ -198,6 +204,69 @@ def test_openai_sends_temperature_and_top_p_only() -> None:
     assert len(completion.warnings) == 3
 
 
+def _openai(usage: Any = None) -> tuple[OpenAIProvider, _FakeOpenAI]:
+    provider = OpenAIProvider()
+    fake = _FakeOpenAI(usage)
+    provider._client = fake
+    return provider, fake
+
+
+def test_openai_sends_reasoning_effort_and_none_for_thinking_off() -> None:
+    provider, fake = _openai()
+    completion = provider.complete(_request("gpt-6-sol", effort="max"))
+    assert fake.calls[-1]["reasoning_effort"] == "max"
+    assert completion.warnings == []
+
+    completion = provider.complete(_request("gpt-6-luna", thinking="off", effort="high"))
+    assert fake.calls[-1]["reasoning_effort"] == "none"
+    assert any("effort 'high' was not sent" in warning for warning in completion.warnings)
+
+    provider.complete(_request("gpt-5.6-terra"))
+    assert "reasoning_effort" not in fake.calls[-1]
+
+
+def test_openai_samples_only_with_thinking_off() -> None:
+    provider, fake = _openai()
+    completion = provider.complete(_request("gpt-5.6-sol", temperature=0.3, top_p=0.8))
+    assert not {"temperature", "top_p"} & set(fake.calls[-1])
+    assert any("thinking" in warning for warning in completion.warnings)
+
+    provider.complete(_request("gpt-5.6-sol", thinking="off", temperature=0.3, top_p=0.8))
+    sent = fake.calls[-1]
+    assert (sent["temperature"], sent["top_p"], sent["reasoning_effort"]) == (0.3, 0.8, "none")
+
+
+@pytest.mark.parametrize("model_id", ["gpt-6-astra", "gpt-6.1-sol"])
+def test_openai_models_without_none_effort_keep_thinking(model_id: str) -> None:
+    provider, fake = _openai()
+    completion = provider.complete(_request(model_id, thinking="off", temperature=0.2))
+    sent = fake.calls[-1]
+    assert not {"reasoning_effort", "temperature"} & set(sent)
+    assert any("thinking" in warning for warning in completion.warnings)
+    assert any("temperature" in warning for warning in completion.warnings)
+
+
+def test_openai_drops_an_effort_the_model_lacks() -> None:
+    provider, fake = _openai()
+    completion = provider.complete(_request("gpt-5.5", effort="max"))
+    assert "reasoning_effort" not in fake.calls[-1]
+    assert any("effort 'max'" in warning for warning in completion.warnings)
+
+
+def test_openai_usage_separates_cache_reads_and_writes() -> None:
+    usage = SimpleNamespace(
+        prompt_tokens=1000,
+        completion_tokens=50,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=600, cache_write_tokens=300),
+    )
+    provider, _fake = _openai(usage)
+    completion = provider.complete(_request("gpt-6-astra"))
+    assert completion.usage.input_tokens == 100
+    assert completion.usage.cache_read_tokens == 600
+    assert completion.usage.cache_write_tokens == 300
+    assert completion.usage.output_tokens == 50
+
+
 def test_google_maps_sampling_and_thinking_budget() -> None:
     provider = GoogleProvider()
     fake = _FakeGoogle()
@@ -253,13 +322,21 @@ def test_every_model_declares_consistent_capabilities(spec: registry.ModelSpec) 
     if spec.supports_top_k:
         assert spec.supports_sampling
     assert "default" not in spec.thinking_modes
-    assert (spec.default_effort is None) == (not spec.effort_levels)
+    if not spec.effort_levels:
+        assert spec.default_effort is None
+    elif spec.default_effort is None:
+        # Only where the provider does not document the default.
+        assert spec.id == "gpt-6-astra"
     if spec.default_effort is not None:
         assert spec.default_effort in spec.effort_levels
     if spec.thinking_off_max_effort is not None:
         assert "off" in spec.thinking_modes
     if spec.provider == "openai":
-        assert not (spec.supports_top_k or spec.thinking_modes or spec.effort_levels)
+        # Reasoning effort is the only thinking control; "off" sends "none".
+        assert not spec.supports_top_k
+        assert set(spec.thinking_modes) <= {"off"}
+        if spec.thinking_modes:
+            assert spec.supports_sampling
 
 
 @pytest.mark.parametrize(
@@ -318,8 +395,14 @@ def test_models_that_cannot_stop_thinking_say_so() -> None:
     for model_id in ("claude-opus-5", "claude-sonnet-5"):
         assert registry.MODELS[model_id].thinking_default == "on"
     assert registry.MODELS["claude-opus-4-8"].thinking_default == "off"
-    for model_id in ("claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"):
-        assert "off" not in registry._CAPABILITIES[model_id]["thinking_modes"]  # type: ignore[operator]
+    for model_id in (
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+    ):
+        assert "off" not in registry._CAPABILITIES[model_id].get("thinking_modes", [])  # type: ignore[operator]
 
 
 def test_catalogue_exposes_capabilities() -> None:

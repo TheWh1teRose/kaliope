@@ -245,8 +245,23 @@ _ANTHROPIC_PRICES: dict[str, tuple[float, float, int]] = {
     "claude-haiku-4-5-20251001": (1.0, 5.0, 200_000),
 }
 
+#: USD per million tokens (input, cached input, output), context window and
+#: max output. OpenAI model and pricing pages, 2026-10-02, prompts <= 272K.
+_OPENAI_PRICES: dict[str, tuple[float, float, float, int, int]] = {
+    "gpt-6-astra": (10.0, 1.0, 50.0, 1_050_000, 128_000),
+    "gpt-6.1-sol": (2.0, 0.1, 10.0, 1_050_000, 128_000),
+    "gpt-6-sol": (2.0, 0.2, 10.0, 1_050_000, 128_000),
+    "gpt-6-luna": (0.1, 0.01, 0.5, 1_050_000, 128_000),
+    "gpt-5.6-sol": (4.0, 0.4, 20.0, 1_050_000, 128_000),
+    "gpt-5.6-terra": (2.0, 0.2, 12.0, 1_050_000, 128_000),
+    "gpt-5.6-luna": (0.2, 0.02, 1.2, 1_050_000, 128_000),
+    "gpt-5.5": (5.0, 0.5, 30.0, 1_050_000, 128_000),
+}
+
 #: These reject non-default temperature/top_p/top_k.
 _NO_SAMPLING = {
+    "gpt-6-astra",
+    "gpt-6.1-sol",
     "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-5-5",
@@ -270,6 +285,13 @@ def test_every_model_has_a_price_and_context_window() -> None:
         assert spec.output_usd_per_mtok == output_rate
         assert spec.context_window == window
         assert spec.max_output_tokens == (32_000 if spec.small else 128_000)
+    for model_id, (input_rate, cached, output_rate, window, max_out) in _OPENAI_PRICES.items():
+        spec = MODELS[model_id]
+        assert spec.provider == "openai"
+        assert spec.input_usd_per_mtok == input_rate
+        assert spec.input_usd_per_mtok * spec.cache_read_multiplier == pytest.approx(cached)
+        assert spec.output_usd_per_mtok == output_rate
+        assert (spec.context_window, spec.max_output_tokens) == (window, max_out)
 
 
 def test_cost_is_computed_from_the_pricing_table() -> None:
@@ -284,6 +306,14 @@ def test_cost_is_computed_from_the_pricing_table() -> None:
     assert cost_usd("claude-fable-5", cached) == pytest.approx(1.00)
     assert cost_usd("claude-opus-5-5", cached) == pytest.approx(0.20)
     assert cost_usd("claude-sonnet-5-5", cached) == pytest.approx(0.20)
+    assert cost_usd("gpt-6-astra", usage) == pytest.approx(60.0)
+    assert cost_usd("gpt-5.6-terra", usage) == pytest.approx(14.0)
+    assert cost_usd("gpt-6.1-sol", cached) == pytest.approx(0.10)
+    # Cache writes cost 1.25x input on GPT-6 and GPT-5.6, plain input on GPT-5.5.
+    written = Usage(cache_write_tokens=1_000_000)
+    assert cost_usd("gpt-6-luna", written) == pytest.approx(0.125)
+    assert cost_usd("gpt-6.1-sol", written) == pytest.approx(2.5)
+    assert cost_usd("gpt-5.5", written) == pytest.approx(5.0)
     # An unknown model is usable, but its cost is recorded as zero rather than
     # invented.
     assert cost_usd("some-future-model", usage) == 0.0
@@ -299,6 +329,7 @@ def test_sampling_support_is_declared_per_model() -> None:
     assert supports_sampling("claude-haiku-4-5") is True
     assert supports_sampling("claude-opus-4-6") is True
     assert supports_sampling("claude-sonnet-4-6") is True
+    assert supports_sampling("gpt-6-sol") is True
     for model_id in _NO_SAMPLING:
         assert supports_sampling(model_id) is False
         assert MODELS[model_id].supports_sampling is False

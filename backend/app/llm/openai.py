@@ -48,6 +48,10 @@ class OpenAIProvider:
             kwargs["temperature"] = params.temperature
         if params.top_p is not None:
             kwargs["top_p"] = params.top_p
+        if params.thinking == "off":
+            kwargs["reasoning_effort"] = "none"
+        elif params.effort is not None:
+            kwargs["reasoning_effort"] = params.effort
         if request.json_schema is not None:
             kwargs["response_format"] = {
                 "type": "json_schema",
@@ -86,9 +90,11 @@ def _usage(response: Any) -> Usage:
         return Usage()
     details = getattr(raw, "prompt_tokens_details", None)
     cached = int(getattr(details, "cached_tokens", 0) or 0) if details else 0
+    written = int(getattr(details, "cache_write_tokens", 0) or 0) if details else 0
     prompt = int(getattr(raw, "prompt_tokens", 0) or 0)
     return Usage(
-        input_tokens=max(prompt - cached, 0),
+        input_tokens=max(prompt - cached - written, 0),
         output_tokens=int(getattr(raw, "completion_tokens", 0) or 0),
         cache_read_tokens=cached,
+        cache_write_tokens=written,
     )
