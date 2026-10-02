@@ -12,6 +12,7 @@ import type {
   ExperimentSource,
   ExperimentSourceMeta,
   ExperimentSummary,
+  OutputPage,
 } from '@/api/types'
 
 const BASE = '/api/experiments'
@@ -73,12 +74,48 @@ export async function waitForRun<Setup>(
   }
 }
 
+/** Collect one item; `folderId` is the page's "Sammeln in" folder. */
 export function collect<Setup>(
   runId: string,
   item = 'main',
   label: string | null = null,
+  folderId: string | null = null,
 ): Promise<ExperimentOutput<Setup>> {
-  return api.post<ExperimentOutput<Setup>>(`${BASE}/runs/${runId}/save`, { item, label })
+  return api.post<ExperimentOutput<Setup>>(`${BASE}/runs/${runId}/save`, {
+    item,
+    label,
+    folder_id: folderId,
+  })
+}
+
+export interface OutputQuery {
+  /** Absent: every output; `root`: those in no folder; else a folder id. */
+  folderId?: string | null
+  includeSub?: boolean
+  experiment?: string
+  q?: string
+  sort?: 'new' | 'old'
+  offset?: number
+  limit?: number
+}
+
+/** The Sammlung: collected outputs of every experiment. */
+export function listAllOutputs(query: OutputQuery = {}): Promise<OutputPage> {
+  const params = new URLSearchParams()
+  if (query.folderId) params.set('folder_id', query.folderId)
+  if (query.includeSub === false) params.set('include_sub', 'false')
+  if (query.experiment) params.set('experiment', query.experiment)
+  if (query.q) params.set('q', query.q)
+  if (query.sort) params.set('sort', query.sort)
+  if (query.offset) params.set('offset', String(query.offset))
+  if (query.limit) params.set('limit', String(query.limit))
+  const suffix = params.toString()
+  return api.get<OutputPage>(`${BASE}/outputs${suffix ? `?${suffix}` : ''}`)
+}
+
+/** File outputs into a folder; `null` moves them to "Ohne Ordner". */
+export function moveOutputs(ids: string[], folderId: string | null): Promise<void> {
+  return api.post<void>(`${BASE}/outputs/move`, { ids, folder_id: folderId })
 }
 
 export function listOutputs<Setup>(key: string): Promise<ExperimentOutput<Setup>[]> {

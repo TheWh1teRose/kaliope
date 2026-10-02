@@ -1,43 +1,62 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="Folder extends FolderRow">
 /**
- * The folder sidebar.
+ * The folder sidebar, shared by Dokumente and the Sammlung.
  *
- * Drop targets as well as filters: dragging a document card onto a folder is
- * the fastest way to file one, and the same rows serve both jobs. The server
+ * Drop targets as well as filters: dragging a card onto a folder is the
+ * fastest way to file it, and the same rows serve both jobs. The server
  * returns the tree already ordered with each row's depth, so indentation here
  * is presentation only — no hierarchy is rebuilt in the client.
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
-import type { FolderOut } from '@/api/types'
 import { t } from '@/i18n'
+import type { FolderRow } from '@/stores/folders'
 
-const props = defineProps<{
-  folders: FolderOut[]
-  /** `null` shows every document, `'root'` the unfiled ones, else a folder id. */
-  selected: string | null
-  /** `true` while a document is being dragged, so drop targets can light up. */
-  dropping?: boolean
-  totalCount: number
-  rootCount: number
-}>()
+export interface FolderTreeLabels {
+  title: string
+  all: string
+  root: string
+}
+
+const props = withDefaults(
+  defineProps<{
+    folders: Folder[]
+    /** `null` shows everything, `'root'` the unfiled items, else a folder id. */
+    selected: string | null
+    /** `true` while a card is being dragged, so drop targets can light up. */
+    dropping?: boolean
+    totalCount: number
+    rootCount: number
+    /** The rolled-up count shown on a folder row. */
+    countOf: (folder: Folder) => number
+    /** The drag data type a card sets; its value is one id or a comma-separated list. */
+    dragType?: string
+    labels?: FolderTreeLabels
+  }>(),
+  { dropping: false, dragType: 'text/kalliope-document', labels: undefined },
+)
 
 const emit = defineEmits<{
   (event: 'select', id: string | null): void
-  (event: 'drop-document', payload: { documentId: string; folderId: string | null }): void
+  (event: 'drop-items', payload: { ids: string[]; folderId: string | null }): void
   (event: 'create', parentId: string | null): void
-  (event: 'rename', folder: FolderOut): void
-  (event: 'move', folder: FolderOut): void
-  (event: 'remove', folder: FolderOut): void
+  (event: 'rename', folder: Folder): void
+  (event: 'move', folder: Folder): void
+  (event: 'remove', folder: Folder): void
 }>()
+
+const words = computed<FolderTreeLabels>(
+  () => props.labels ?? { title: t.folders.title, all: t.folders.all, root: t.folders.root },
+)
 
 /** `undefined` is "no row hovered"; `null` is the root row. */
 const over = ref<string | null | undefined>(undefined)
 
 function onDrop(event: DragEvent, folderId: string | null): void {
   over.value = undefined
-  const documentId = event.dataTransfer?.getData('text/kalliope-document')
-  if (documentId) emit('drop-document', { documentId, folderId })
+  const raw = event.dataTransfer?.getData(props.dragType) ?? ''
+  const ids = raw.split(',').filter(Boolean)
+  if (ids.length) emit('drop-items', { ids, folderId })
 }
 
 function allowDrop(event: DragEvent, folderId: string | null): void {
@@ -50,7 +69,7 @@ function allowDrop(event: DragEvent, folderId: string | null): void {
 <template>
   <nav class="tree">
     <div class="tree__head">
-      <p class="eyebrow">{{ t.folders.title }}</p>
+      <p class="eyebrow">{{ words.title }}</p>
       <button class="btn btn--sm btn--ghost" @click="emit('create', null)">
         + {{ t.folders.new }}
       </button>
@@ -64,7 +83,7 @@ function allowDrop(event: DragEvent, folderId: string | null): void {
           @click="emit('select', null)"
         >
           <span class="row__icon" aria-hidden="true">◫</span>
-          <span class="row__name grow">{{ t.folders.all }}</span>
+          <span class="row__name grow">{{ words.all }}</span>
           <span class="row__count num">{{ totalCount }}</span>
         </button>
       </li>
@@ -79,7 +98,7 @@ function allowDrop(event: DragEvent, folderId: string | null): void {
           @drop.prevent="onDrop($event, null)"
         >
           <span class="row__icon" aria-hidden="true">↥</span>
-          <span class="row__name grow">{{ t.folders.root }}</span>
+          <span class="row__name grow">{{ words.root }}</span>
           <span class="row__count num">{{ rootCount }}</span>
         </button>
       </li>
@@ -97,7 +116,7 @@ function allowDrop(event: DragEvent, folderId: string | null): void {
           >
             <span class="row__icon" aria-hidden="true">▸</span>
             <span class="row__name grow truncate">{{ folder.name }}</span>
-            <span class="row__count num">{{ folder.total_document_count }}</span>
+            <span class="row__count num">{{ countOf(folder) }}</span>
           </button>
 
           <div class="rowline__acts">
@@ -170,7 +189,8 @@ function allowDrop(event: DragEvent, folderId: string | null): void {
   padding-right: 2px;
 }
 
-.rowline:hover .rowline__acts {
+.rowline:hover .rowline__acts,
+.rowline:focus-within .rowline__acts {
   display: flex;
 }
 

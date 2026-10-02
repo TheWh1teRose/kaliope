@@ -431,3 +431,35 @@ class ExperimentOutput(Base):
     setup_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    #: ``None`` is "Ohne Ordner"; deleting a folder moves its outputs up, never deletes them.
+    folder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("output_folders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    #: The decision record: ``kandidat`` | ``gewaehlt`` | ``verworfen`` and a short note.
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: The readable text of this item alone, for the Sammlung's search. A VS run
+    #: keeps every draft in one ``output_json`` and no ``text``, so neither of
+    #: those can be searched per item.
+    search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class OutputFolder(Base):
+    """A folder in the Sammlung, the experiments' counterpart of ``Folder``.
+
+    Its own table, so a document can never be filed into an output folder and
+    each tree keeps its own foreign key. Sibling names are kept unique by the
+    API for the same reason as ``Folder``.
+    """
+
+    __tablename__ = "output_folders"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200))
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("output_folders.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

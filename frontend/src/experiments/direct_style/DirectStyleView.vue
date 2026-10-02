@@ -21,6 +21,7 @@ import type {
   ModelSettings as SharedSettings,
   PromptSetup,
 } from '@/api/types'
+import CollectFolder from '@/components/experiments/CollectFolder.vue'
 import CollectionList from '@/components/experiments/CollectionList.vue'
 import ExperimentFrame from '@/components/experiments/ExperimentFrame.vue'
 import FieldCard, { type FieldOrigin } from '@/components/experiments/FieldCard.vue'
@@ -65,6 +66,8 @@ const outputs = ref<ExperimentOutput[]>([])
 const tab = ref<Tab>('prompt')
 const loading = ref(true)
 const error = ref('')
+/** The "Sammeln in" folder; `null` files under "Ohne Ordner". */
+const collectFolder = ref<string | null>(null)
 const notice = ref('')
 const running = ref(false)
 const label = ref('')
@@ -236,7 +239,7 @@ async function run(): Promise<void> {
 async function collectCurrent(): Promise<void> {
   if (!current.value) return
   try {
-    await collect(current.value.id, 'main', label.value.trim() || null)
+    await collect(current.value.id, 'main', label.value.trim() || null, collectFolder.value)
     current.value = {
       ...current.value,
       items: current.value.items.map((item) =>
@@ -257,6 +260,14 @@ function adopt(output: ExperimentOutput<unknown>): void {
   const meta = output.meta.source
   source.value = meta && typeof meta === 'object' ? (meta as ExperimentSourceMeta) : null
   flash(labels.adopted)
+}
+
+async function reloadOutputs(): Promise<void> {
+  try {
+    outputs.value = await listOutputs<PromptSetup>(KEY)
+  } catch (exc) {
+    fail(exc)
+  }
 }
 
 async function remove(output: ExperimentOutput<unknown>): Promise<void> {
@@ -500,6 +511,7 @@ onBeforeRouteLeave(() => {
         <p class="eyebrow">{{ labels.current }}</p>
         <span class="meta">{{ labels.currentHint }}</span>
       </div>
+      <CollectFolder v-model="collectFolder" :experiment-key="KEY" />
       <p v-if="running" class="running"><span class="spinner" />{{ labels.runningHint }}</p>
       <p v-else-if="!current" class="muted small">{{ labels.noOutput }}</p>
       <template v-if="current && isFinished(current)">
@@ -537,7 +549,14 @@ onBeforeRouteLeave(() => {
         </OutputCard>
       </template>
 
-      <CollectionList :outputs="outputs" @adopt="adopt" @delete="remove" />
+      <CollectionList
+        :outputs="outputs"
+        :experiment-key="KEY"
+        @adopt="adopt"
+        @delete="remove"
+        @moved="reloadOutputs"
+        @error="error = $event"
+      />
     </template>
   </ExperimentFrame>
 

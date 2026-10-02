@@ -190,6 +190,13 @@ Documents are filed in **folders**: an ordinary tree, drag a card onto a folder
 to file it. Folders carry no permissions and no effect on parsing or runs, and
 deleting one never deletes a document — the contents move up to the parent.
 
+Collected experiment outputs get the same kind of tree in the **Sammlung**, a
+tab of the Experimente page: every collected output of every experiment in one
+list, filed into folders and subfolders by dragging a card onto a folder, by
+"In Ordner …", or many at once. Each experiment page has a "Sammeln in" folder
+that every "Sammeln" files into. The two trees are separate; both follow the
+rules in `app/folder_tree.py`.
+
 A run is also shown as its **flow graph**: every node with the values it
 consumes and the value it publishes, its status, cost, model and timing, and the
 gates that report on its output. A failed run marks the node that broke and
@@ -260,6 +267,9 @@ GET /api/flows/{id}/graph               # the flow's nodes, ports and wiring
 GET /api/runs/{id}/graph                # the same, as it actually ran
 GET /api/runs/{id}/nodes/{node}/io      # one node's real inputs and output
 GET /api/folders                        # the folder tree, with rolled-up counts
+GET /api/experiment-folders             # the Sammlung's folder tree, same rules
+GET /api/experiments/outputs            # every collected output; folder, experiment, q filters
+POST /api/experiments/outputs/move      # file one or many outputs into a folder
 ```
 
 The JSONL file is what the evaluation work consumes. Each line carries the

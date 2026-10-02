@@ -6,7 +6,6 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 
 import type { DocumentSummary, FolderOut, IngestionReport, StructureOut } from '@/api/types'
 import DocumentActions from '@/components/DocumentActions.vue'
-import FolderTree from '@/components/FolderTree.vue'
 import { useFoldersStore } from '@/stores/folders'
 import DocumentDetailView from '@/views/DocumentDetailView.vue'
 import DocumentsView from '@/views/DocumentsView.vue'
@@ -368,8 +367,8 @@ describe('document screens', () => {
     await settle()
 
     expect(wrapper.get('.doc').attributes('draggable')).toBe('true')
-    wrapper.getComponent(FolderTree).vm.$emit('drop-document', {
-      documentId: 'doc-1',
+    wrapper.getComponent({ name: 'FolderTree' }).vm.$emit('drop-items', {
+      ids: ['doc-1'],
       folderId: 'folder-1',
     })
     await settle()

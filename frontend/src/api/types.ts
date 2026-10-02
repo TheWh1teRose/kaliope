@@ -940,4 +940,30 @@ export interface ExperimentOutput<Setup = PromptSetup> {
   meta: Record<string, unknown>
   setup: Setup
   created_at: string
+  /** `null` is "Ohne Ordner". */
+  folder_id: string | null
+  /** Folder names from the root down; empty without a folder. */
+  folder_path: string[]
+  /** Who collected it. */
+  created_by: string | null
+}
+
+/** One page of the Sammlung: collected outputs of every experiment. */
+export interface OutputPage {
+  items: ExperimentOutput<unknown>[]
+  total: number
+  all_count: number
+  root_count: number
+}
+
+/** A folder of the Sammlung; same shape as `FolderOut` with output counts. */
+export interface OutputFolderOut {
+  id: string
+  name: string
+  parent_id: string | null
+  depth: number
+  path: string[]
+  output_count: number
+  total_output_count: number
+  created_at: string
 }

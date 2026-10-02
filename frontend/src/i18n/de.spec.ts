@@ -43,6 +43,7 @@ describe('German UI strings', () => {
       'nodeCatalogue',
       'bench',
       'experiments',
+      'collection',
       'modelSettings',
       'notes',
       'artifact',

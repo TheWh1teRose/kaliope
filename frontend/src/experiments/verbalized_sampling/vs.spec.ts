@@ -65,6 +65,9 @@ function collected(item: string, runId: string, source: string): ExperimentOutpu
     meta: { vs_source: source },
     setup: {},
     created_at: '2026-10-01T12:00:00Z',
+    folder_id: null,
+    folder_path: [],
+    created_by: null,
   }
 }
 

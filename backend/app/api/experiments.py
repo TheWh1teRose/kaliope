@@ -7,20 +7,24 @@ paid answer is stored even when the browser goes away. The page polls the run.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import app.experiments  # noqa: F401 - registers every experiment
+from app.accounts import author_labels
+from app.api.output_folders import tree as folder_tree
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
 from app.experiments.base import Experiment, SourceIn
 from app.experiments.registry import experiments, get_experiment
+from app.experiments.search import item_search_text
+from app.folder_tree import ROOT
 from app.llm import registry as llm_registry
 from app.models import ExperimentOutput, ExperimentRun, User
 from app.pipeline.framework.artifacts import ArtifactStore
@@ -33,7 +37,9 @@ from app.schemas.experiments import (
     ExperimentSummaryOut,
     ItemOut,
     LLMCallOut,
+    OutputMoveIn,
     OutputOut,
+    OutputPageOut,
     SaveIn,
 )
 from app.security import current_user
@@ -47,6 +53,88 @@ def list_experiments(
     db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> list[ExperimentSummaryOut]:
     return [_summary(db, experiment) for experiment in experiments()]
+
+
+@router.get("/outputs", response_model=OutputPageOut)
+def list_all_outputs(
+    folder_id: str | None = None,
+    include_sub: bool = True,
+    experiment: str | None = None,
+    q: str | None = None,
+    sort: Literal["new", "old"] = "new",
+    offset: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
+) -> OutputPageOut:
+    """The Sammlung: collected outputs of every experiment, newest first.
+
+    ``folder_id`` absent means every output; the literal ``root`` means those in
+    no folder; a folder id shows that folder, with its subfolders unless
+    ``include_sub`` is false. ``q`` searches each output's own text, its label
+    and its note.
+    """
+    statement = select(ExperimentOutput)
+    if folder_id == ROOT:
+        statement = statement.where(ExperimentOutput.folder_id.is_(None))
+    elif folder_id:
+        resolved = folder_tree.resolve(db, folder_id)
+        assert resolved is not None
+        scope = [resolved, *(folder_tree.descendants(db, resolved) if include_sub else [])]
+        statement = statement.where(ExperimentOutput.folder_id.in_(scope))
+    if experiment:
+        statement = statement.where(ExperimentOutput.experiment_key == experiment)
+    needle = (q or "").strip()
+    if needle:
+        pattern = _like(needle)
+        statement = statement.where(
+            or_(
+                ExperimentOutput.search_text.ilike(pattern, escape="\\"),
+                ExperimentOutput.label.ilike(pattern, escape="\\"),
+                ExperimentOutput.note.ilike(pattern, escape="\\"),
+            )
+        )
+
+    total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    order = (
+        (ExperimentOutput.created_at.desc(), ExperimentOutput.id.desc())
+        if sort == "new"
+        else (ExperimentOutput.created_at, ExperimentOutput.id)
+    )
+    rows = db.scalars(
+        statement.order_by(*order).offset(max(0, offset)).limit(max(1, min(limit, 200)))
+    ).all()
+    all_count = db.scalar(select(func.count(ExperimentOutput.id))) or 0
+    root_count = (
+        db.scalar(
+            select(func.count(ExperimentOutput.id)).where(ExperimentOutput.folder_id.is_(None))
+        )
+        or 0
+    )
+    labels = _labels(db)
+    return OutputPageOut(
+        items=[_output_out(row, labels) for row in rows],
+        total=int(total),
+        all_count=int(all_count),
+        root_count=int(root_count),
+    )
+
+
+@router.post("/outputs/move")
+def move_outputs(
+    payload: OutputMoveIn, db: Session = Depends(get_db), _user: User = Depends(current_user)
+) -> dict[str, object]:
+    """File one or many outputs into a folder, or back to "Ohne Ordner"."""
+    target = folder_tree.resolve(db, payload.folder_id)
+    ids = list(dict.fromkeys(payload.ids))
+    rows = db.scalars(select(ExperimentOutput).where(ExperimentOutput.id.in_(ids))).all()
+    missing = sorted(set(ids) - {row.id for row in rows})
+    if missing:
+        raise problem(404, "No such output", f"Output '{missing[0]}' does not exist.")
+    for row in rows:
+        row.folder_id = target
+    db.commit()
+    return {"moved": len(rows), "folder_id": target}
 
 
 @router.get("/runs/{run_id}", response_model=ExperimentRunOut)
@@ -67,6 +155,7 @@ def save_item(
     row = _require_run(db, run_id)
     if row.status != "completed" or row.output_json is None:
         raise problem(409, "Run not finished", "Only a completed run can be collected.")
+    folder_id = folder_tree.resolve(db, payload.folder_id)
     experiment = _experiment(row.experiment_key)
     items = {ref.item: ref for ref in experiment.items(row.output_json)}
     ref = items.get(payload.item)
@@ -82,18 +171,21 @@ def save_item(
         if payload.label is not None and payload.label != existing.label:
             existing.label = payload.label or None
             db.commit()
-        return _output_out(existing)
+        return _output_out(existing, _labels(db))
 
+    text = (row.manifest_json or {}).get("text")
     output = ExperimentOutput(
         experiment_key=row.experiment_key,
         run_id=row.id,
         item=payload.item,
         label=(payload.label or "").strip() or None,
         output_json=row.output_json,
-        text=(row.manifest_json or {}).get("text"),
+        text=text,
         meta_json={**_run_facts(row), **ref.meta},
         setup_json=row.setup_json,
         created_by=user.id,
+        folder_id=folder_id,
+        search_text=item_search_text(row.output_json, payload.item, text),
     )
     db.add(output)
     try:
@@ -105,8 +197,8 @@ def save_item(
                 ExperimentOutput.run_id == row.id, ExperimentOutput.item == payload.item
             )
         ).one()
-        return _output_out(existing)
-    return _output_out(output)
+        return _output_out(existing, _labels(db))
+    return _output_out(output, _labels(db))
 
 
 @router.delete("/outputs/{output_id}", status_code=204)
@@ -222,7 +314,8 @@ def list_outputs(
         .order_by(ExperimentOutput.created_at.desc())
         .limit(max(1, min(limit, 200)))
     ).all()
-    return [_output_out(row) for row in rows]
+    labels = _labels(db)
+    return [_output_out(row, labels) for row in rows]
 
 
 # ------------------------------------------------------------------ helpers
@@ -364,7 +457,19 @@ def _run_out(db: Session, row: ExperimentRun) -> ExperimentRunOut:
     )
 
 
-def _output_out(row: ExperimentOutput) -> OutputOut:
+class _Labels:
+    """Folder paths and author labels, looked up once per response."""
+
+    def __init__(self, paths: dict[str, list[str]], authors: dict[str, str]) -> None:
+        self.paths = paths
+        self.authors = authors
+
+
+def _labels(db: Session) -> _Labels:
+    return _Labels(folder_tree.paths(db), author_labels(db))
+
+
+def _output_out(row: ExperimentOutput, labels: _Labels) -> OutputOut:
     return OutputOut(
         id=row.id,
         experiment_key=row.experiment_key,
@@ -376,7 +481,16 @@ def _output_out(row: ExperimentOutput) -> OutputOut:
         meta=row.meta_json or {},
         setup=row.setup_json or {},
         created_at=_iso(row.created_at) or "",
+        folder_id=row.folder_id,
+        folder_path=labels.paths.get(row.folder_id, []) if row.folder_id else [],
+        created_by=labels.authors.get(row.created_by) if row.created_by else None,
     )
+
+
+def _like(needle: str) -> str:
+    """A LIKE pattern that matches ``needle`` literally, ``%`` and ``_`` included."""
+    escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 def _iso(value: datetime | None) -> str | None:

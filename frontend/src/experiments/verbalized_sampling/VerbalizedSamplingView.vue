@@ -22,6 +22,7 @@ import type {
   ModelSettings as SharedSettings,
   VSSetup,
 } from '@/api/types'
+import CollectFolder from '@/components/experiments/CollectFolder.vue'
 import CollectionList from '@/components/experiments/CollectionList.vue'
 import ExperimentFrame from '@/components/experiments/ExperimentFrame.vue'
 import FieldCard, { type FieldOrigin } from '@/components/experiments/FieldCard.vue'
@@ -44,10 +45,8 @@ import { FIELD_NAME, originsFor, placeholders, refill } from '@/experiments/prom
 import {
   type VSDraft,
   asOutput,
-  blindLetter,
   blindOrder,
   citationBadge,
-  collectedDraft,
   costFacts,
   draftBadges,
   drafts,
@@ -59,6 +58,11 @@ import {
   writeRevealed,
   writeSetupDraft,
 } from '@/experiments/verbalized_sampling/vs'
+import {
+  collectedBadges as collectedBadgesOf,
+  collectedPayload,
+  collectedTitle as collectedTitleOf,
+} from '@/experiments/verbalized_sampling/collected'
 import { t } from '@/i18n'
 
 const KEY = 'verbalized_sampling'
@@ -79,6 +83,8 @@ const revealed = ref<Set<string>>(readRevealed())
 const tab = ref<Tab>('prompt')
 const loading = ref(true)
 const error = ref('')
+/** The "Sammeln in" folder; `null` files under "Ohne Ordner". */
+const collectFolder = ref<string | null>(null)
 const notice = ref('')
 const running = ref(false)
 let leaving = false
@@ -210,46 +216,12 @@ function setRevealed(runId: string, on: boolean): void {
 
 const counts = computed(() => tally(outputs.value, revealed.value))
 
-function collectedBlind(output: ExperimentOutput<unknown>): boolean {
-  return !output.run_id || !revealed.value.has(output.run_id)
-}
-
 function collectedTitle(output: ExperimentOutput<unknown>): string {
-  const own = output.label ? ` · ${output.label}` : ''
-  if (collectedBlind(output)) {
-    const letter = blindLetter(output.run_id ?? '', asOutput(output.output), output.item)
-    return `${vsLabels.draft} ${letter} (${vsLabels.blindCollected})${own}`
-  }
-  const draft = collectedDraft(output)
-  const name =
-    draft?.source === 'vs'
-      ? `${vsLabels.withVs} #${draft.index + 1}`
-      : draft
-        ? vsLabels.withoutVs
-        : output.item
-  return `${name}${own}`
+  return collectedTitleOf(output, revealed.value)
 }
 
 function collectedBadges(output: ExperimentOutput<unknown>): Badge[] {
-  const draft = collectedDraft(output)
-  const out: Badge[] = []
-  if (draft && !collectedBlind(output)) {
-    out.push(
-      draft.source === 'vs'
-        ? { text: vsLabels.withVs, mark: true }
-        : { text: vsLabels.withoutVs },
-    )
-    if (draft.source === 'vs') out.push({ text: `p ${probabilityText(draft.probability)}` })
-  }
-  const model = output.meta.model
-  if (typeof model === 'string') out.push({ text: model })
-  if (draft) out.push(...draftBadges(draft, asOutput(output.output)?.word_budget ?? null))
-  return out
-}
-
-function collectedPayload(output: ExperimentOutput<unknown>): unknown {
-  const draft = collectedDraft(output)
-  return draft ? { segments: draft.segments } : null
+  return collectedBadgesOf(output, revealed.value)
 }
 
 function revealAll(): void {
@@ -375,7 +347,7 @@ async function run(): Promise<void> {
 async function collectDraft(draft: VSDraft): Promise<void> {
   if (!current.value) return
   try {
-    const saved = await collect<VSSetup>(current.value.id, draft.item)
+    const saved = await collect<VSSetup>(current.value.id, draft.item, null, collectFolder.value)
     current.value = {
       ...current.value,
       items: current.value.items.map((item) =>
@@ -396,6 +368,14 @@ function adopt(output: ExperimentOutput<unknown>): void {
   const meta = output.meta.source
   source.value = meta && typeof meta === 'object' ? (meta as ExperimentSourceMeta) : null
   flash(labels.adopted)
+}
+
+async function reloadOutputs(): Promise<void> {
+  try {
+    outputs.value = await listOutputs<VSSetup>(KEY)
+  } catch (exc) {
+    fail(exc)
+  }
 }
 
 async function remove(output: ExperimentOutput<unknown>): Promise<void> {
@@ -721,6 +701,7 @@ onBeforeRouteLeave(() => {
         <p class="eyebrow">{{ labels.current }}</p>
         <span class="meta">{{ labels.currentHint }}</span>
       </div>
+      <CollectFolder v-model="collectFolder" :experiment-key="KEY" />
       <p v-if="running" class="running"><span class="spinner" />{{ vsLabels.runningHint }}</p>
       <p v-else-if="!current" class="muted small">{{ labels.noOutput }}</p>
       <template v-if="current && isFinished(current)">
@@ -808,6 +789,9 @@ onBeforeRouteLeave(() => {
       </template>
 
       <CollectionList
+        :experiment-key="KEY"
+        @moved="reloadOutputs"
+        @error="error = $event"
         :outputs="outputs"
         :payload-of="collectedPayload"
         :title-of="collectedTitle"

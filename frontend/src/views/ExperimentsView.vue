@@ -1,18 +1,41 @@
 <script setup lang="ts">
 /**
- * The experiment collection.
+ * The experiment collection, with two tabs like Pipelines.
  *
- * Every experiment is coded on its own and shows up here as one card, with how
- * much it has been used. Opening a card opens that experiment's page.
+ * "Experimente": every experiment is coded on its own and shows up as one
+ * card, with how much it has been used; a card opens that experiment's page.
+ * "Sammlung": the collected outputs of all experiments, in folders. The tab is
+ * the `tab` query, so a link to the Sammlung opens it.
  */
-import { onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { ExperimentSummary } from '@/api/types'
 import { experimentViews } from '@/experiments'
 import { listExperiments } from '@/experiments/api'
 import { t } from '@/i18n'
+import CollectionView from '@/views/CollectionView.vue'
+
+const TABS = ['experiments', 'collection'] as const
+type Tab = (typeof TABS)[number]
+
+const route = useRoute()
+const router = useRouter()
+
+const tab = computed<Tab>(() => {
+  const raw = route.query.tab
+  const value = Array.isArray(raw) ? raw[0] : raw
+  return value && (TABS as readonly string[]).includes(value) ? (value as Tab) : 'experiments'
+})
+
+function selectTab(next: Tab): void {
+  if (next === tab.value) return
+  // Filters belong to the Sammlung; the experiment cards have none.
+  void router.replace({ name: 'experiments', query: next === 'collection' ? { tab: next } : {} })
+}
+
+const saved = computed(() => items.value.reduce((sum, item) => sum + item.stats.saved_count, 0))
 
 const items = ref<ExperimentSummary[]>([])
 const loading = ref(true)
@@ -39,10 +62,38 @@ onMounted(async () => {
     <header class="head">
       <p class="eyebrow">{{ t.nav.experimenting }}</p>
       <h1 class="h-page">{{ t.experiments.title }}</h1>
-      <p class="muted lead">{{ t.experiments.lead }}</p>
+      <p class="muted lead">
+        {{ tab === 'collection' ? t.collection.lead : t.experiments.lead }}
+      </p>
+      <div class="tabs" role="tablist" :aria-label="t.experiments.title">
+        <button
+          class="tab"
+          role="tab"
+          :aria-selected="tab === 'experiments'"
+          :class="{ 'tab--on': tab === 'experiments' }"
+          @click="selectTab('experiments')"
+        >
+          {{ t.collection.tabExperiments }}
+          <span class="tab__count num">{{ items.length }}</span>
+        </button>
+        <button
+          class="tab"
+          role="tab"
+          :aria-selected="tab === 'collection'"
+          :class="{ 'tab--on': tab === 'collection' }"
+          @click="selectTab('collection')"
+        >
+          {{ t.collection.tab }}
+          <span class="tab__count num">{{ saved }}</span>
+        </button>
+      </div>
     </header>
 
-    <div class="grid">
+    <div v-if="tab === 'collection'" class="body">
+      <CollectionView :experiments="items" />
+    </div>
+
+    <div v-else class="grid">
       <p v-if="error" class="banner">{{ error }}</p>
       <p v-if="loading" class="muted">{{ t.common.loading }}</p>
       <template v-else>
@@ -108,6 +159,47 @@ onMounted(async () => {
   max-width: 66ch;
   margin-top: var(--s2);
   font-size: var(--t-sm);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s4);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--chrome);
+  color: var(--ink);
+}
+
+.tab--on,
+.tab--on:hover {
+  background: var(--ink);
+  color: var(--chrome);
+}
+
+.tab__count {
+  font-size: var(--t-xs);
+  opacity: 0.72;
+}
+
+.body {
+  min-height: 0;
+  overflow: auto;
 }
 
 .grid {
