@@ -137,6 +137,11 @@ def parse_payload(
     return ParsedAnswer(candidates=candidates, warnings=warnings)
 
 
+def draft_segments(payload: Any, speakers: list[str] | None = None) -> list[CandidateSegment]:
+    """Segments of one plain (non-VS) answer, normalised like a VS version."""
+    return _segments(payload, speakers)
+
+
 # ------------------------------------------------------------------ helpers
 
 

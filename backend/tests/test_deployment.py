@@ -67,6 +67,8 @@ def test_ac_dep_2_empty_data_dir_creates_the_schema(tmp_path: Path) -> None:
             "segments",
             "edit_events",
             "review_sessions",
+            "experiment_runs",
+            "experiment_outputs",
         }
         assert expected <= tables
         assert current_revision() is not None, "the migration history was not recorded"

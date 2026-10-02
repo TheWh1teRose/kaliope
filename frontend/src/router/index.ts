@@ -92,6 +92,13 @@ export const routes: RouteRecordRaw[] = [
     name: 'bench',
     component: () => import('@/views/BenchView.vue'),
   },
+  {
+    path: '/experiments/:key',
+    name: 'experiment',
+    component: () => import('@/views/ExperimentView.vue'),
+    // `key` is reserved on components, so the param arrives as `experimentKey`.
+    props: (route) => ({ experimentKey: String(route.params.key) }),
+  },
   // The workbench used to live here; old links and bookmarks keep their query.
   { path: '/bench', redirect: (to) => ({ name: 'bench', query: to.query }) },
   { path: '/:pathMatch(.*)*', redirect: { name: 'documents' } },

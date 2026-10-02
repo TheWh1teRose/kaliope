@@ -796,3 +796,144 @@ export interface ModelSettings {
   effort: Effort | null
   max_tokens: number
 }
+
+// ---------------------------------------------------------- experiments
+
+/** Shared model settings plus what a prompt experiment adds. */
+export interface ExperimentSettings extends ModelSettings {
+  structured: boolean
+  cache_system: boolean
+}
+
+/** The setup of a prompt-shaped experiment (`PromptSetup` on the server). */
+export interface PromptSetup {
+  system_prompt: string
+  user_template: string
+  fields: Record<string, string>
+  settings: ExperimentSettings
+  json_schema: Record<string, unknown> | null
+}
+
+/** The setup of the Verbalized Sampling experiment (`VSSetup` on the server). */
+export interface VSSetup {
+  base_prompt: string
+  vs_instruction: string
+  user_template: string
+  fields: Record<string, string>
+  settings: ExperimentSettings
+  k: number
+}
+
+export interface ExperimentStats {
+  run_count: number
+  saved_count: number
+  spent_usd: number
+  last_run_at: string | null
+}
+
+export interface ExperimentSummary {
+  key: string
+  title: string
+  summary: string
+  target: string
+  version: string
+  stats: ExperimentStats
+}
+
+export interface ExperimentFieldSpec {
+  key: string
+  label: string
+  multiline: boolean
+  hint: string | null
+}
+
+export interface ExperimentDetail<Setup = PromptSetup> extends ExperimentSummary {
+  defaults: Setup
+  fields: ExperimentFieldSpec[]
+  /** Experiment-specific texts the page shows but the setup does not hold. */
+  extras: Record<string, unknown>
+}
+
+export interface ExperimentBeat {
+  id: string
+  title: string
+  word_budget: number
+  passage_count: number
+}
+
+export interface ExperimentSourceMeta {
+  run_id: string
+  document_id?: string
+  document_title?: string | null
+  beat_id?: string
+  beat_title?: string
+  beat_position?: number
+  beat_total?: number
+  reference?: { speaker: string; text: string; kind: string }[]
+}
+
+export interface ExperimentSource {
+  fields: Record<string, string>
+  beats: ExperimentBeat[]
+  source: ExperimentSourceMeta
+}
+
+export interface ExperimentCall {
+  node_name: string | null
+  model: string
+  system: string | null
+  messages: { role: string; content: string }[]
+  response_text: string
+  latency_ms: number
+  tokens_in: number
+  tokens_out: number
+  cost_usd: number
+  warnings: string[]
+  temperature: number | null
+  top_p: number | null
+  top_k: number | null
+  thinking: string | null
+  thinking_budget: number | null
+  effort: string | null
+  max_tokens: number
+}
+
+export interface ExperimentItem {
+  item: string
+  title: string | null
+  meta: Record<string, unknown>
+  output_id: string | null
+}
+
+export interface ExperimentRun<Setup = PromptSetup> {
+  id: string
+  experiment_key: string
+  experiment_version: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  setup: Setup
+  source: ExperimentSourceMeta | null
+  output: Record<string, unknown> | null
+  warnings: string[]
+  error: string | null
+  total_cost_usd: number
+  tokens_in: number
+  tokens_out: number
+  wall_ms: number | null
+  created_at: string
+  finished_at: string | null
+  items: ExperimentItem[]
+  calls: ExperimentCall[]
+}
+
+export interface ExperimentOutput<Setup = PromptSetup> {
+  id: string
+  experiment_key: string
+  run_id: string | null
+  item: string
+  label: string | null
+  output: Record<string, unknown> | null
+  text: string | null
+  meta: Record<string, unknown>
+  setup: Setup
+  created_at: string
+}
