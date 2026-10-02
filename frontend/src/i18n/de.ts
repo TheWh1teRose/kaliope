@@ -734,6 +734,18 @@ export default {
       revealAll: 'Alle aufdecken',
       runAgain: 'Erneut ausführen',
     },
+    outline: {
+      systemPromptHint: 'Startet mit dem Prompt des Knotens outline, wie er in der Produktion läuft.',
+      shapeHint:
+        'Andere JSON-Form ausprobieren: im Tab Modell die strukturierte Ausgabe ausschalten und die Form im System-Prompt beschreiben. Passt die Antwort nicht zum Ablaufplan, erscheint sie als Rohtext mit Hinweis.',
+      structuredHint:
+        'Das Modell antwortet im JSON-Schema des Ablaufplan-Schritts. Aus: freier Text; JSON in der Antwort wird trotzdem gelesen.',
+      sourceSample: 'Beispiel-Eingabe (kein Lauf geladen)',
+      loadFromRunLead:
+        'Ein fertiger Lauf liefert Belegstellen, Lernziele, Längenbudget und Format, so wie der Ablaufplan-Schritt sie bekam.',
+      reference: 'Ablaufplan dieses Laufs',
+      beats: 'Abschnitte',
+    },
   },
   notes: {
     title: 'Anmerkungen',

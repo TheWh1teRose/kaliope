@@ -180,6 +180,16 @@ describe('ArtifactView', () => {
     expect(wrapper.text()).toContain('JSON kopieren')
   })
 
+  it('follows a mode set by the parent and hides its own switch', () => {
+    setArtifactMode('json')
+    const wrapper = mount(ArtifactView, {
+      props: { model: 'Outline', payload: { beats: [beat] }, mode: 'text' },
+    })
+    expect(wrapper.find('.beat').exists()).toBe(true)
+    expect(wrapper.find('[aria-pressed]').exists()).toBe(false)
+    expect(localStorage.getItem('kalliope-artifact-view')).toBe('json')
+  })
+
   it('offers no text view for an unknown model', () => {
     const wrapper = mount(ArtifactView, {
       props: { model: 'ParsedDocument', payload: { pages: [] } },

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * Where an experiment's beat fields come from: the loaded run and beat, or
- * the sample. "Aus Lauf laden" picks a finished run and one of its beats and
- * hands the loaded fields to the page, which fills its field cards with them.
+ * Where an experiment's fields come from: the loaded run (and beat), or the
+ * sample. "Aus Lauf laden" picks a finished run and, when the experiment
+ * works on one beat, one of its beats, and hands the loaded fields to the
+ * page, which fills its field cards with them.
  */
 import { ref } from 'vue'
 
@@ -14,7 +15,13 @@ import { t } from '@/i18n'
 
 const FINISHED_RUN = new Set(['completed', 'in_review', 'reviewed', 'failed', 'paused'])
 
-const props = defineProps<{ experimentKey: string; source: ExperimentSourceMeta | null }>()
+const props = defineProps<{
+  experimentKey: string
+  source: ExperimentSourceMeta | null
+  /** Overrides the beat-shaped wording for experiments that load a whole run. */
+  lead?: string
+  sampleLabel?: string
+}>()
 const emit = defineEmits<{
   (e: 'loaded', value: ExperimentSource): void
   (e: 'sample'): void
@@ -79,7 +86,10 @@ async function applyPicked(): Promise<void> {
         <strong>{{ source.document_title }}</strong> · {{ labels.sourceBeat }}
         {{ source.beat_position }}/{{ source.beat_total }}: <em>{{ source.beat_title }}</em>
       </p>
-      <p v-else class="small muted">{{ labels.sourceSample }}</p>
+      <p v-else-if="source?.run_id" class="small">
+        <strong>{{ source.document_title }}</strong> · {{ labels.sourceRun }}
+      </p>
+      <p v-else class="small muted">{{ sampleLabel ?? labels.sourceSample }}</p>
     </div>
     <div class="row wrap">
       <button class="btn btn--sm" @click="openPicker">{{ labels.loadFromRun }}</button>
@@ -92,7 +102,7 @@ async function applyPicked(): Promise<void> {
   <ModalDialog
     :open="picking"
     :title="labels.loadFromRun"
-    :lead="labels.loadFromRunLead"
+    :lead="lead ?? labels.loadFromRunLead"
     @close="picking = false"
   >
     <p class="eyebrow">{{ labels.pickRun }}</p>
@@ -109,7 +119,7 @@ async function applyPicked(): Promise<void> {
         </button>
       </li>
     </ul>
-    <template v-if="pickedSource">
+    <template v-if="pickedSource?.beats.length">
       <p class="eyebrow pick__label">{{ labels.pickBeat }}</p>
       <ul class="pick">
         <li v-for="beat in pickedSource.beats" :key="beat.id">

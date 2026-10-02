@@ -2,7 +2,7 @@
 /**
  * "Gesammelte Ausgaben": the collected outputs of one experiment, newest
  * first, readable as text or JSON. No ranking, no scores: read, adopt a
- * setup, or delete.
+ * setup, or delete. The `text` slot renders an output's Text view.
  */
 import { ref } from 'vue'
 
@@ -70,6 +70,9 @@ function remove(output: ExperimentOutput<unknown>): void {
     >
       <template #head>
         <span class="meta">{{ when(output.created_at) }}</span>
+      </template>
+      <template v-if="$slots.text" #text>
+        <slot name="text" :output="output" />
       </template>
       <template #foot>
         <button class="btn btn--sm" @click="emit('adopt', output)">{{ t.experiments.adopt }}</button>

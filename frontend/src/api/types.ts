@@ -870,6 +870,8 @@ export interface ExperimentSourceMeta {
   beat_position?: number
   beat_total?: number
   reference?: { speaker: string; text: string; kind: string }[]
+  /** The run's outline, for experiments that load the outline step's input. */
+  outline?: unknown
 }
 
 export interface ExperimentSource {
