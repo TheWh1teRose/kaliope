@@ -17,6 +17,7 @@ import {
   readOutline,
   readScript,
   setArtifactMode,
+  type ArtifactMode,
   type BeatView,
   type SegmentView,
 } from './artifactView'
@@ -28,12 +29,15 @@ const props = defineProps<{
   truncated?: boolean
   /** JSON mode keeps an editable body, supplied by the parent slot. */
   editable?: boolean
+  /** Set when the parent has its own Text/JSON switch; hides this one. */
+  mode?: ArtifactMode
 }>()
 
 loadArtifactMode()
 
 const copied = ref(false)
 const kind = computed(() => pickRenderer(props.model))
+const viewMode = computed(() => props.mode ?? artifactMode.value)
 
 const parsed = computed(() => {
   if (props.truncated) return undefined
@@ -58,9 +62,9 @@ const segments = computed<SegmentView[] | null>(() => {
 })
 
 const rendered = computed(() => beats.value !== null || segments.value !== null)
-const showText = computed(() => artifactMode.value === 'text' && rendered.value)
+const showText = computed(() => viewMode.value === 'text' && rendered.value)
 const mismatch = computed(() => {
-  if (kind.value === null || artifactMode.value !== 'text' || rendered.value) return false
+  if (kind.value === null || viewMode.value !== 'text' || rendered.value) return false
   if (props.truncated) return true
   if (typeof props.preview === 'string' && props.preview !== '') return true
   return props.payload != null
@@ -101,7 +105,7 @@ async function copyJson(): Promise<void> {
 
 <template>
   <div class="artifact">
-    <div class="artifact__bar">
+    <div v-if="!mode" class="artifact__bar">
       <p v-if="!kind" class="hint" role="status">{{ t.artifact.noTextView }}</p>
       <div v-else class="seg" role="group" :aria-label="t.artifact.view">
         <button type="button" :aria-pressed="artifactMode === 'text'" @click="choose('text')">

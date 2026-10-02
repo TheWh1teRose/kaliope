@@ -2,7 +2,8 @@
 /**
  * One model answer as a card: title, badges, facts, warnings, the answer as
  * Text or JSON, what the model was sent, and actions in the footer slot.
- * Used for the current output and for every collected output.
+ * Used for the current output and for every collected output. The `text`
+ * slot replaces only the Text view; `body` replaces both views.
  */
 import { computed, ref, watch } from 'vue'
 
@@ -65,7 +66,9 @@ const jsonText = computed(() =>
     <p v-for="warning in warnings ?? []" :key="warning" class="warnline">{{ warning }}</p>
     <div class="out__body">
       <slot name="body" :mode="mode">
-        <OutputText v-if="mode === 'text'" :payload="payload" :text="text" />
+        <slot v-if="mode === 'text'" name="text">
+          <OutputText :payload="payload" :text="text" />
+        </slot>
         <pre v-else class="json">{{ jsonText }}</pre>
       </slot>
     </div>
