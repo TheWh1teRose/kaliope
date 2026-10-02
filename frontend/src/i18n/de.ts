@@ -225,6 +225,7 @@ export default {
     newRun: 'Lauf starten',
     openBench: 'In der Werkbank öffnen',
     openDetail: 'Struktur ansehen',
+    actions: 'Aktionen',
     renameTitle: 'Dokument umbenennen',
     renameLead:
       'Nur der angezeigte Name ändert sich. Datei, Einlesen und bisherige Läufe bleiben unberührt.',
