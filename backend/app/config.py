@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/data")
 
     # SQLite journal mode. WAL needs shared-memory and append semantics that a
-    # Cloud Storage FUSE mount does not provide; use DELETE there (README).
+    # Cloud Storage FUSE mount does not provide. The container image sets DELETE;
+    # a local process stays on WAL unless it sets the variable (README).
     sqlite_journal_mode: str = "WAL"
 
     anthropic_api_key: str = ""

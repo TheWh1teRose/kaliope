@@ -17,10 +17,13 @@ RUN npm run build
 # ----------------------------------------------------------------- backend
 FROM python:3.12-slim AS runtime
 
+# DELETE is the journal mode for the Cloud Storage mount. A process outside
+# this image (local development) keeps the WAL default unless it sets the variable.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DATA_DIR=/data \
+    SQLITE_JOURNAL_MODE=DELETE \
     UV_SYSTEM_PYTHON=1 \
     UV_LINK_MODE=copy
 
