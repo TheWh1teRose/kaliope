@@ -100,6 +100,9 @@ class ExperimentRunOut(BaseModel):
 class SaveIn(BaseModel):
     item: str = "main"
     label: str | None = Field(default=None, max_length=200)
+    #: The page's "Sammeln in" folder; ``None`` files it under "Ohne Ordner".
+    #: Only a new output is filed; one already collected keeps its folder.
+    folder_id: str | None = None
 
 
 class OutputOut(BaseModel):
@@ -112,4 +115,39 @@ class OutputOut(BaseModel):
     text: str | None
     meta: dict[str, Any]
     setup: dict[str, Any]
+    created_at: str
+    #: ``None`` is "Ohne Ordner".
+    folder_id: str | None = None
+    #: Folder names from the root down; empty without a folder.
+    folder_path: list[str] = Field(default_factory=list)
+    #: Who collected it (an email, or a placeholder for a removed account).
+    created_by: str | None = None
+
+
+class OutputPageOut(BaseModel):
+    """One page of the Sammlung: outputs of every experiment."""
+
+    items: list[OutputOut]
+    #: How many outputs match the filters, across all pages.
+    total: int
+    #: Every collected output, and those in no folder; the tree's two top rows.
+    all_count: int
+    root_count: int
+
+
+class OutputMoveIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    #: ``None`` (or ``"root"``) moves them to "Ohne Ordner".
+    folder_id: str | None = None
+
+
+class OutputFolderOut(BaseModel):
+    id: str
+    name: str
+    parent_id: str | None
+    depth: int
+    path: list[str]
+    output_count: int
+    #: Including every subfolder.
+    total_output_count: int
     created_at: str

@@ -28,6 +28,7 @@ from app.api import (
     feedback,
     folders,
     model_catalogue,
+    output_folders,
     review,
     runs,
     users,
@@ -128,6 +129,7 @@ def create_app() -> FastAPI:
     app.include_router(authoring.router)
     app.include_router(bench.router)
     app.include_router(experiments.router)
+    app.include_router(output_folders.router)
     app.include_router(feedback.router)
     app.include_router(model_catalogue.router)
     app.include_router(users.router)
