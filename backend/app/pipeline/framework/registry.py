@@ -64,7 +64,7 @@ class Flow(BaseModel):
 SERIES_PLAN_NODE = "series_plan"
 #: Nodes whose presence makes a flow an audio pipeline: it runs on a finished
 #: script and is chosen separately from the pipeline that writes the script.
-AUDIO_NODES: frozenset[str] = frozenset({"audio_script"})
+AUDIO_NODES: frozenset[str] = frozenset({"audio_script", "audio_approval", "audio_render"})
 
 
 def flow_purpose(flow: Flow) -> str:

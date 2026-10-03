@@ -3,6 +3,7 @@
 from app.models.base import Base
 from app.models.tables import (
     Artifact,
+    AudioTake,
     BenchNode,
     BenchRun,
     Document,
@@ -24,10 +25,12 @@ from app.models.tables import (
     Series,
     SessionToken,
     User,
+    VoiceCastRow,
 )
 
 __all__ = [
     "Artifact",
+    "AudioTake",
     "Base",
     "BenchNode",
     "BenchRun",
@@ -50,4 +53,5 @@ __all__ = [
     "Series",
     "SessionToken",
     "User",
+    "VoiceCastRow",
 ]

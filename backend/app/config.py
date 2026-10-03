@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     google_api_key: str = ""
+    # Speech synthesis for the audio pipelines. Optional: without it the audio
+    # panel explains the setup and nothing is sent.
+    elevenlabs_api_key: str = ""
 
     default_model: str = "claude-opus-4-6"
     zone_model: str = ""
@@ -112,6 +115,9 @@ class Settings(BaseSettings):
                 'Generate one with: python -c "import secrets; '
                 'print(secrets.token_urlsafe(48))"'
             )
+
+    def has_speech_key(self) -> bool:
+        return bool(self.elevenlabs_api_key.strip())
 
     def has_any_llm_key(self) -> bool:
         return bool(self.anthropic_api_key or self.openai_api_key or self.google_api_key)

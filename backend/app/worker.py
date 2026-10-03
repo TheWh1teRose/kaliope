@@ -30,6 +30,7 @@ from app.llm import registry as llm_registry
 from app.llm.base import LLMClient, Usage
 from app.models import (
     Artifact,
+    AudioTake,
     BenchNode,
     BenchRun,
     Document,
@@ -49,6 +50,7 @@ from app.pipeline.framework.registry import Flow, FlowNode, flow_directory
 from app.pipeline.framework.runner import FlowRunner, NodeRecord
 from app.pipeline.gates import GateContext, run_gates
 from app.pipeline.nodes.ingest import DocumentRef
+from app.schemas.audio import AudioRequest, VoiceCast
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
@@ -72,6 +74,8 @@ from app.series import (
     series_context_for,
     truncate_flow,
 )
+from app.speech.base import SpeechClient
+from app.speech.registry import speech_provider
 
 logger = logging.getLogger(__name__)
 
@@ -885,6 +889,120 @@ class Worker:
             cost_of=llm_registry.cost_usd,
             recorder=record,
         )
+
+    # ---------------------------------------------------------------- audio
+
+    def submit_take(self, take_id: str) -> Future[Any]:
+        return self.submit(self.execute_take, take_id)
+
+    def execute_take(self, take_id: str) -> None:
+        """Run an audio pipeline over a finished run's script: one take.
+
+        The take stops at the approval node; approving it stores the approval
+        and submits the take again, which resumes there. Tagged beats and spoken
+        chunks come from their step caches on every later execution, so a take
+        never pays twice for the same work.
+        """
+        settings = get_settings()
+        store = ArtifactStore(settings.artifacts_dir)
+        with session_scope() as session:
+            take = session.get(AudioTake, take_id)
+            if take is None:
+                logger.warning("audio take requested for unknown id %s", take_id)
+                return
+            run = session.get(Run, take.run_id)
+            if run is None:  # pragma: no cover - the take cascades with its run
+                take.status = "failed"
+                take.error = "the run this take belongs to no longer exists"
+                return
+            take.status = "running"
+            if take.started_at is None:
+                take.started_at = datetime.now(UTC)
+            take.error = None
+            flow_id = take.flow_id
+            script_hash = take.script_hash
+            format_spec = FormatSpec.model_validate(run.format_spec_json)
+            cast = VoiceCast.model_validate(take.voice_cast_json)
+            request = AudioRequest.model_validate(take.request_json)
+            previous = dict(take.manifest_json or {})
+            resume = resume_outputs(previous)
+            ingest = session.scalars(
+                sa_select(RunNode).where(RunNode.run_id == run.id, RunNode.node_name == "ingest")
+            ).first()
+            parsed_hash = ingest.artifact_hash if ingest is not None else None
+
+        bus.publish(take_id, "run.started", {"take_id": take_id, "flow": flow_id})
+        flow = self._load_flow(flow_id)
+        if flow is None:
+            self._end_take(take_id, "failed", error=f"audio pipeline '{flow_id}' is not available")
+            return
+
+        llm = self._build_llm(run_id=None)
+        provider = speech_provider()
+        speech = SpeechClient(provider) if provider is not None else None
+        runner = FlowRunner(
+            artifacts=store,
+            llm=llm,
+            progress=lambda event, data: bus.publish(take_id, event, data),
+            speech=speech,
+        )
+        try:
+            seeds: dict[str, Any] = {
+                "script": Script.model_validate(store.get_raw(script_hash)),
+                "format_spec": format_spec,
+                "voice_cast": cast,
+                "audio_request": request,
+            }
+            if parsed_hash and store.exists(parsed_hash):
+                seeds["parsed"] = ParsedDocument.model_validate(store.get_raw(parsed_hash))
+            result = runner.execute(flow, take_id, seeds, resume_outputs=resume)
+        except Exception as exc:  # noqa: BLE001 - recorded on the take
+            logger.exception("audio take %s failed", take_id)
+            self._end_take(take_id, "failed", error=f"{type(exc).__name__}: {exc}")
+            return
+
+        manifest = result.manifest.model_dump(mode="json")
+        manifest["bag_hashes"] = dict(result.artifact_hashes)
+        manifest["llm_traces"] = list(llm.traces)
+        manifest["speech_traces"] = list(speech.traces) if speech is not None else []
+        if result.status == "paused":
+            manifest = write_pause(
+                manifest,
+                node=result.paused_at or "",
+                payload=result.pause or {},
+                bag_hashes=result.artifact_hashes,
+                previous=previous,
+            )
+        spent = result.manifest.total_cost_usd
+        if result.status == "failed":
+            error = result.error or "the audio take failed"
+            self._end_take(take_id, "failed", error=error, manifest=manifest, spent=spent)
+        else:
+            self._end_take(take_id, result.status, manifest=manifest, spent=spent)
+
+    def _end_take(
+        self,
+        take_id: str,
+        status: str,
+        *,
+        error: str | None = None,
+        manifest: dict[str, Any] | None = None,
+        spent: float = 0.0,
+    ) -> None:
+        with session_scope() as session:
+            take = session.get(AudioTake, take_id)
+            if take is None:  # pragma: no cover - deleted mid-take
+                return
+            take.status = status
+            take.error = error
+            if manifest is not None:
+                take.manifest_json = manifest
+            # Each execution pays only for what it did; the take adds them up.
+            take.total_cost_usd = round((take.total_cost_usd or 0.0) + spent, 8)
+            if status in {"completed", "failed"}:
+                take.finished_at = datetime.now(UTC)
+        event = {"completed": "run.completed", "failed": "run.failed"}.get(status, "run.paused")
+        bus.publish(take_id, event, {"take_id": take_id, "error": error})
 
     def _load_flow(self, flow_id: str) -> Flow | None:
         with session_scope() as session:

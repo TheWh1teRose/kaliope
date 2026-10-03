@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
+    audio,
     auth,
     authoring,
     bench,
@@ -46,6 +47,7 @@ from app.migrations import ensure_schema
 from app.pipeline import catalogue
 from app.pipeline.framework.registry import bootstrap_nodes
 from app.schemas.api import HealthOut
+from app.speech.registry import speech_configured
 from app.worker import worker
 
 VERSION = "0.1.0"
@@ -123,6 +125,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_exception_response)
 
     app.include_router(auth.router)
+    app.include_router(audio.router)
     app.include_router(folders.router)
     app.include_router(documents.router)
     app.include_router(runs.router)
@@ -145,6 +148,7 @@ def create_app() -> FastAPI:
             status="ok",
             version=VERSION,
             llm_configured=settings.has_any_llm_key(),
+            speech_configured=speech_configured(),
             flows=flows,
         )
 

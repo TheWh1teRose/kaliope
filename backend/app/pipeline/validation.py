@@ -49,7 +49,7 @@ PLANNER_SEED_KEYS: tuple[str, ...] = ("series_request",)
 
 #: An audio pipeline runs on a finished script: what it is seeded with, and
 #: what it must publish.
-AUDIO_SEED_KEYS: tuple[str, ...] = ("script", "parsed")
+AUDIO_SEED_KEYS: tuple[str, ...] = ("script", "parsed", "voice_cast", "audio_request")
 AUDIO_OUTPUT_KEYS: tuple[str, ...] = ("audio_script",)
 
 

@@ -510,3 +510,49 @@ class OutputFolder(Base):
     )
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AudioTake(Base):
+    """One execution of an audio pipeline on a finished run.
+
+    Kept off ``runs`` and ``run_nodes``: a run can have several takes (a sample,
+    the whole episode, a take after review edits), each with its own manifest,
+    approval and cost. The script it speaks is stored as an artifact when the
+    take is created, review edits included.
+    """
+
+    __tablename__ = "audio_takes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    flow_id: Mapped[str] = mapped_column(String(100))
+    flow_version: Mapped[str] = mapped_column(String(20))
+    #: ``queued`` → ``running`` → ``paused`` (approval) → ``completed`` | ``failed``.
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    #: ``AudioRequest``: sample or whole script.
+    request_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    #: ``VoiceCast`` used for this take.
+    voice_cast_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    script_hash: Mapped[str] = mapped_column(String(64))
+    manifest_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VoiceCastRow(Base):
+    """The default voices of a format. Not part of the format's spec, so a voice
+    change never touches the cache key of a script written with that format."""
+
+    __tablename__ = "voice_casts"
+
+    #: No foreign key: built-in formats have no row until they are edited.
+    format_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    cast_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

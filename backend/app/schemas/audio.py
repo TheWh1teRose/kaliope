@@ -55,3 +55,86 @@ class AudioScript(BaseModel):
     def character_count(self) -> int:
         """What a speech model would bill: the tagged text of every line."""
         return sum(len(line.tagged) for line in self.lines)
+
+
+# ------------------------------------------------------------------ speech
+
+
+class VoiceChoice(BaseModel):
+    #: The speaker's name as it appears in the script.
+    speaker: str
+    voice_id: str
+    voice_name: str | None = None
+
+
+class VoiceCast(BaseModel):
+    """Who speaks with which voice, and how. Its own seed, never part of the format,
+    so changing a voice never invalidates a cached script."""
+
+    voices: list[VoiceChoice] = Field(default_factory=list)
+    model_id: str = "eleven_v4"
+    stability: float = Field(default=0.5, ge=0, le=1)
+    seed: int | None = Field(default=None, ge=0, le=4294967295)
+    language_code: str | None = None
+
+    def voice_for(self, speaker: str) -> str | None:
+        wanted = speaker.strip().lower()
+        for choice in self.voices:
+            if choice.speaker.strip().lower() == wanted and choice.voice_id.strip():
+                return choice.voice_id.strip()
+        return None
+
+
+AudioScope = Literal["sample", "full"]
+
+
+class AudioRequest(BaseModel):
+    """What one audio take covers."""
+
+    scope: AudioScope = "sample"
+    #: For a sample: whole lines from the start until about this many characters
+    #: (about one minute of speech).
+    sample_characters: int = Field(default=1000, ge=100, le=5000)
+
+
+class AudioApproval(BaseModel):
+    """The person's go-ahead to spend credits, with the price they saw."""
+
+    approved_by: str | None = None
+    approved_at: str
+    characters: int
+    estimate_usd: float
+
+
+class LineTiming(BaseModel):
+    segment_id: str
+    start_s: float
+    end_s: float
+
+
+class AudioChunk(BaseModel):
+    """One generated stretch of dialogue: whole lines of one beat."""
+
+    index: int
+    segment_ids: list[str]
+    characters: int
+    #: Content hash of the audio file in the artifact store's media folder.
+    blob: str
+    suffix: str = ".mp3"
+    request_id: str | None = None
+    character_cost: int | None = None
+    cost_usd: float = 0.0
+    duration_s: float = 0.0
+    #: Where each line is heard inside this chunk.
+    lines: list[LineTiming] = Field(default_factory=list)
+
+
+class Audio(BaseModel):
+    chunks: list[AudioChunk]
+    model_id: str
+    scope: AudioScope
+    characters: int
+    #: The price of every chunk, including chunks reused from an earlier take;
+    #: what a take actually paid is on the take.
+    cost_usd: float
+    duration_s: float

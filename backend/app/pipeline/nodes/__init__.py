@@ -3,6 +3,8 @@
 from app.pipeline.nodes import (  # noqa: F401
     ai_critic,
     apply_notes,
+    audio_approval,
+    audio_render,
     audio_script,
     content_budget,
     human_feedback,
@@ -19,6 +21,8 @@ from app.pipeline.nodes import (  # noqa: F401
 __all__ = [
     "ai_critic",
     "apply_notes",
+    "audio_approval",
+    "audio_render",
     "audio_script",
     "content_budget",
     "human_feedback",

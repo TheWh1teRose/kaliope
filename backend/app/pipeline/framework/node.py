@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from app.llm.base import LLMClient
 from app.pipeline.framework.artifacts import ArtifactStore
+from app.speech.base import SpeechClient
 
 
 class NodeError(RuntimeError):
@@ -63,6 +64,8 @@ class NodeContext:
     #: Set when the run ignores the cache; a node with its own step cache
     #: (``ArtifactStore.get_step``) skips it too.
     force: bool = False
+    #: Speech synthesis, when a provider is set up. Only audio nodes use it.
+    speech: SpeechClient | None = None
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)

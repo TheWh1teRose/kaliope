@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { FeedbackOut, NodeIOOut, Note, RunGraphOut, RunOut } from '@/api/types'
+import AudioPanel from '@/components/AudioPanel.vue'
 import FlowGraph from '@/components/FlowGraph.vue'
 import GateList from '@/components/GateList.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
@@ -287,6 +288,8 @@ onUnmounted(() => {
         </div>
       </aside>
     </div>
+
+    <AudioPanel v-if="reviewable" :run-id="run.id" :format-id="run.format_spec?.id ?? null" />
 
     <Teleport to="body">
       <div v-if="notesOpen && awaitingNotes" class="notes-overlay">
