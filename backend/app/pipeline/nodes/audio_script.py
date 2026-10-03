@@ -257,6 +257,7 @@ class AudioScriptNode:
                 messages=messages,
                 max_tokens=int(ctx.get("max_tokens", 8000)),
                 temperature=ctx.get("temperature", 0.3),
+                effort=ctx.request_effort(model),
                 json_schema=AUDIO_SCHEMA,
                 cache_system=True,
             )

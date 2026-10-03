@@ -338,6 +338,7 @@ def _apply_script_note(
             ],
             max_tokens=int(ctx.get("max_tokens", 8000)),
             temperature=ctx.get("temperature"),
+            effort=ctx.request_effort(ctx.model("claude-opus-5")),
             json_schema=_SCRIPT_SCHEMA,
             cache_system=True,
         )
@@ -394,6 +395,7 @@ def _apply_outline_note(
             messages=[Message(role="user", content=_outline_prompt(note, beat, sorted(allowed)))],
             max_tokens=int(ctx.get("max_tokens", 2000)),
             temperature=ctx.get("temperature"),
+            effort=ctx.request_effort(ctx.model("claude-opus-5")),
             json_schema=_OUTLINE_SCHEMA,
             cache_system=True,
         )

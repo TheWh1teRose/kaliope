@@ -17,7 +17,12 @@ from app.main import create_app
 from app.models import User
 from app.pipeline import catalogue
 from app.pipeline.framework.registry import discover_flows, flow_directory, get_node
-from app.pipeline.framework.spec import node_doc, node_params, prune_defaults
+from app.pipeline.framework.spec import (
+    node_doc,
+    node_params,
+    prune_defaults,
+    strip_unsupported_effort,
+)
 from app.pipeline.validation import REQUIRED_OUTPUT_KEYS, validate_flow
 from app.security import hash_password
 
@@ -145,6 +150,37 @@ def test_a_default_is_not_written_into_the_definition() -> None:
     assert prune_defaults(node, {"min_compression": 4.0}) == {"min_compression": 4.0}
 
 
+def test_model_nodes_offer_effort_and_a_default_is_not_stored() -> None:
+    """Effort sits beside the model choice; leaving it empty writes nothing."""
+    script = get_node("script")
+    keys = [param.key for param in node_params(script)]
+    assert keys[keys.index("model") + 1] == "effort"
+    assert prune_defaults(script, {"model": "claude-opus-5", "effort": None}) == {
+        "model": "claude-opus-5"
+    }
+    assert prune_defaults(script, {"effort": "high"}) == {"effort": "high"}
+
+    budget = get_node("content_budget")
+    assert all(param.key != "effort" for param in node_params(budget))
+
+
+def test_an_unsupported_effort_is_reset() -> None:
+    """An effort the chosen model does not list is dropped, not saved."""
+    assert strip_unsupported_effort({"model": "claude-opus-5", "effort": "xhigh"}) == {
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+    }
+    assert strip_unsupported_effort({"model": "claude-opus-4-6", "effort": "xhigh"}) == {
+        "model": "claude-opus-4-6"
+    }
+    assert strip_unsupported_effort({"model": "claude-haiku-4-5", "effort": "low"}) == {
+        "model": "claude-haiku-4-5"
+    }
+    assert strip_unsupported_effort({"model": "claude-opus-5", "effort": "nope"}) == {
+        "model": "claude-opus-5"
+    }
+
+
 def test_doc_falls_back_to_the_docstring() -> None:
     class Undocumented:
         """A node that declares no doc."""
@@ -238,6 +274,11 @@ def test_the_shipped_pipeline_is_listed_and_readable(signed_in: TestClient) -> N
     assert baseline["origin"] == "file"
     assert baseline["revision"] >= 1
     assert baseline["valid"] is True
+    assert baseline["purpose"] == "episode"
+    purposes = {p["id"]: p["purpose"] for p in listing}
+    assert purposes["objectives_v0"] == "episode"
+    assert purposes["series_plan_v0"] == "series_plan"
+    assert purposes["elevenlabs_dialog_v0"] == "audio"
 
     detail = signed_in.get("/api/pipelines/baseline_v0").json()
     assert [n["node"] for n in detail["definition"]["nodes"]] == [
@@ -308,6 +349,38 @@ def test_restoring_appends_rather_than_rewinds(signed_in: TestClient) -> None:
 
     first = signed_in.get("/api/pipelines/baseline_v0/versions/1").json()
     assert first["spec"]["nodes"][1]["config"]["min_compression"] == 2.5
+
+
+def test_saving_keeps_effort_only_when_the_model_accepts_it(signed_in: TestClient) -> None:
+    payload = _draft(name="Aufwand")
+    payload["id"] = "effort_v0"
+    nodes = payload["nodes"]
+    assert isinstance(nodes, list)
+    for entry in nodes:
+        if entry["node"] == "script":
+            entry["config"] = {"model": "claude-opus-5", "temperature": 0.7, "effort": "low"}
+    created = signed_in.post("/api/pipelines", json=payload)
+    assert created.status_code == 201, created.text
+    script = next(n for n in created.json()["definition"]["nodes"] if n["node"] == "script")
+    assert script["config"] == {"model": "claude-opus-5", "effort": "low"}
+
+    draft = created.json()["definition"]
+    draft["note"] = "ohne Aufwand"
+    for entry in draft["nodes"]:
+        if entry["node"] == "script":
+            entry["config"] = {"model": "claude-opus-5"}
+    cleared = signed_in.put("/api/pipelines/effort_v0", json=draft)
+    assert cleared.status_code == 200, cleared.text
+    script = next(n for n in cleared.json()["definition"]["nodes"] if n["node"] == "script")
+    assert "effort" not in script["config"]
+
+    for entry in draft["nodes"]:
+        if entry["node"] == "script":
+            entry["config"] = {"model": "claude-opus-4-6", "effort": "xhigh"}
+    reset = signed_in.put("/api/pipelines/effort_v0", json=draft)
+    assert reset.status_code == 200, reset.text
+    script = next(n for n in reset.json()["definition"]["nodes"] if n["node"] == "script")
+    assert script["config"] == {"model": "claude-opus-4-6"}
 
 
 def test_creating_a_pipeline(signed_in: TestClient) -> None:

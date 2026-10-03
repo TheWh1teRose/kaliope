@@ -15,6 +15,7 @@ import type {
   FeedbackOut,
   FlowNodeIn,
   FlowValidation,
+  ModelCatalogue,
   NodeCheck,
   NodeSpecOut,
   Note,
@@ -23,9 +24,10 @@ import ArtifactView from '@/components/ArtifactView.vue'
 import BenchValueCard from '@/components/BenchValueCard.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
+import NodeParams from '@/components/NodeParams.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
-import ParamField from '@/components/ParamField.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import { loadModelCatalogue } from '@/experiments/modelSettings'
 import { t } from '@/i18n'
 import { runTitle } from '@/titles'
 import { useBenchStore } from '@/stores/bench'
@@ -72,6 +74,7 @@ interface Slot {
 
 const specs = computed(() => new Map((pipelines.nodes?.nodes ?? []).map((n) => [n.name, n])))
 const models = computed(() => pipelines.nodes?.models ?? bench.catalogue?.models ?? [])
+const modelCatalogue = ref<ModelCatalogue | null>(null)
 const available = computed(() =>
   (pipelines.nodes?.nodes ?? []).filter((n) => !nodes.value.some((e) => e.node === n.name)),
 )
@@ -524,14 +527,16 @@ onMounted(async () => {
   loading.value = true
   restore()
   try {
-    await Promise.all([
+    const [, , , , , , loadedCatalogue] = await Promise.all([
       pipelines.loadNodes(),
       catalogue.load(),
       documents.load(),
       runs.load(),
       bench.loadCatalogue(),
       bench.list(),
+      loadModelCatalogue().catch(() => null),
     ])
+    modelCatalogue.value = loadedCatalogue
     if (!formatId.value) formatId.value = catalogue.formats[0]?.id ?? ''
     if (!nodes.value.length) {
       nodes.value = [{ node: 'content_budget', config: {} }]
@@ -672,14 +677,15 @@ onBeforeRouteLeave(() => {
         <section v-if="selectedSpec && selectedEntry" class="params">
           <p class="eyebrow">{{ t.pipelines.parameters }}</p>
           <p v-if="!selectedSpec.params.length" class="muted small">{{ t.pipelines.noParameters }}</p>
-          <ParamField
-            v-for="param in selectedSpec.params"
-            :key="param.key"
-            :param="param"
-            :value="selectedEntry.config[param.key]"
-            :models="models"
-            @update="setParam(param.key, $event)"
-          />
+          <div class="params__grid">
+            <NodeParams
+              :params="selectedSpec.params"
+              :config="selectedEntry.config"
+              :models="models"
+              :catalogue="modelCatalogue"
+              @update="(key, value) => setParam(key, value)"
+            />
+          </div>
           <NodeDocPanel :node="selectedSpec" compact />
         </section>
         <p v-else class="muted small pad">{{ t.bench.selectNode }}</p>
@@ -1158,6 +1164,11 @@ onBeforeRouteLeave(() => {
   gap: var(--s3);
   padding-top: var(--s3);
   border-top: 1px solid var(--rule);
+}
+
+.params__grid {
+  display: grid;
+  gap: var(--s2);
 }
 
 .sources {

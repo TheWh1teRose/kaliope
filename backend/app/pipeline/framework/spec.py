@@ -73,11 +73,59 @@ def node_doc(node: Any) -> NodeDoc:
     return NodeDoc(summary=text or f"The '{node.name}' node.")
 
 
+#: Inserted after a node's model parameter. Empty means the model default and
+#: must not be written into a saved flow (the cache key hashes the config).
+EFFORT_PARAM = NodeParam(
+    key="effort",
+    label="Aufwand",
+    type="select",
+    description="Denkaufwand. Leer verwendet den Standard des gewählten Modells.",
+    options=["low", "medium", "high", "xhigh", "max"],
+)
+
+
 def node_params(node: Any) -> list[NodeParam]:
     declared = getattr(node, "params", None)
     if not isinstance(declared, list):
         return []
-    return [p for p in declared if isinstance(p, NodeParam)]
+    params = [p for p in declared if isinstance(p, NodeParam)]
+    return _with_effort(params)
+
+
+def _with_effort(params: list[NodeParam]) -> list[NodeParam]:
+    """Offer effort beside the model choice of every node that has one."""
+    if any(param.key == "effort" for param in params):
+        return params
+    if not any(param.type == "model" for param in params):
+        return params
+    out: list[NodeParam] = []
+    placed = False
+    for param in params:
+        out.append(param)
+        if not placed and param.type == "model":
+            out.append(EFFORT_PARAM)
+            placed = True
+    return out
+
+
+def strip_unsupported_effort(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop an effort the resolved model will not send.
+
+    Leaving it in the saved definition would change the node cache key without
+    changing the request. An unknown effort is dropped the same way.
+    """
+    if "effort" not in config:
+        return config
+    from app.config import get_settings
+    from app.llm.registry import accepted_effort
+
+    raw = config.get("effort")
+    model = config.get("model")
+    model_id = str(model) if isinstance(model, str) and model else get_settings().default_model
+    kept = accepted_effort(model_id, raw if isinstance(raw, str) else None)
+    if kept is None:
+        return {key: value for key, value in config.items() if key != "effort"}
+    return config
 
 
 def param_defaults(node: Any) -> dict[str, Any]:

@@ -67,6 +67,11 @@ export default {
     tabFormats: 'Formate',
     tabNodes: 'Knoten',
     tabGates: 'Qualitätsprüfungen',
+    groups: {
+      episode: 'Normal',
+      series_plan: 'Serie',
+      audio: 'Audio',
+    },
     empty: 'Noch keine Pipelines.',
     new: 'Neue Pipeline',
     newTitle: 'Pipeline anlegen',

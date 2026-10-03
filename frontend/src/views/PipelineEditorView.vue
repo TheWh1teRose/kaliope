@@ -18,6 +18,7 @@ import { ApiError } from '@/api/client'
 import type {
   FlowNodeIn,
   FlowValidation,
+  ModelCatalogue,
   NodeCheck,
   NodeSpecOut,
   PipelineDetail,
@@ -26,8 +27,9 @@ import type {
 } from '@/api/types'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
-import ParamField from '@/components/ParamField.vue'
+import NodeParams from '@/components/NodeParams.vue'
 import RevisionList from '@/components/RevisionList.vue'
+import { loadModelCatalogue } from '@/experiments/modelSettings'
 import { t } from '@/i18n'
 import { useCatalogueStore } from '@/stores/catalogue'
 import { usePipelinesStore } from '@/stores/pipelines'
@@ -54,6 +56,7 @@ const restoreTarget = ref<number | null>(null)
 
 const specs = computed(() => new Map((store.nodes?.nodes ?? []).map((n) => [n.name, n])))
 const models = computed(() => store.nodes?.models ?? [])
+const modelCatalogue = ref<ModelCatalogue | null>(null)
 const dirty = computed(() => JSON.stringify(draft.value) !== saved.value)
 
 const checks = computed(
@@ -72,7 +75,12 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    await Promise.all([store.loadNodes(), catalogue.load()])
+    const [, , loadedCatalogue] = await Promise.all([
+      store.loadNodes(),
+      catalogue.load(),
+      loadModelCatalogue().catch(() => null),
+    ])
+    modelCatalogue.value = loadedCatalogue
     const loaded = await store.get(props.id)
     apply(loaded)
     revisions.value = await store.versions(props.id)
@@ -360,26 +368,24 @@ onMounted(load)
                   {{ t.pipelines.noParameters }}
                 </p>
                 <div class="params__grid">
-                  <ParamField
-                    v-for="param in spec(entry.node)!.params.filter((p) => !p.advanced)"
-                    :key="param.key"
-                    :param="param"
-                    :value="entry.config[param.key]"
+                  <NodeParams
+                    :params="spec(entry.node)!.params.filter((p) => !p.advanced)"
+                    :config="entry.config"
                     :models="models"
-                    @update="(value) => setParam(entry, param.key, value)"
+                    :catalogue="modelCatalogue"
+                    @update="(key, value) => setParam(entry, key, value)"
                   />
                 </div>
 
                 <details v-if="spec(entry.node)!.params.some((p) => p.advanced)" class="more">
                   <summary>{{ t.pipelines.advanced }}</summary>
                   <div class="params__grid">
-                    <ParamField
-                      v-for="param in spec(entry.node)!.params.filter((p) => p.advanced)"
-                      :key="param.key"
-                      :param="param"
-                      :value="entry.config[param.key]"
+                    <NodeParams
+                      :params="spec(entry.node)!.params.filter((p) => p.advanced)"
+                      :config="entry.config"
                       :models="models"
-                      @update="(value) => setParam(entry, param.key, value)"
+                      :catalogue="modelCatalogue"
+                      @update="(key, value) => setParam(entry, key, value)"
                     />
                   </div>
                 </details>
