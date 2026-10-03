@@ -186,7 +186,9 @@ planner is asked once more; a count that still differs is kept and shown on the
 plan screen. An episode that cannot carry three minutes is merged into its
 neighbour. Passages the model left out join an episode only while it stays
 inside its source-word budget; the rest stay unassigned. An assignment past
-that budget is kept and named in a warning on the plan. Episodes keep the
+that budget is kept and named in a warning on the plan. An episode whose goals
+are all unusable is kept as well, with the warning that it needs a new plan;
+selection does not invent goals for it. Episodes keep the
 length that was asked for. The model's split of passages is checked rather
 than trusted.
 The series always stops after the plan until someone approves it, and can be

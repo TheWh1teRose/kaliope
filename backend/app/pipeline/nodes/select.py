@@ -361,8 +361,7 @@ def _episode_instruction(brief: EpisodeBrief, recap_ids: set[str]) -> str:
             "short recap at the start needs to cite it."
         )
     lines.append(
-        "The series plan fixed this episode's learning goals. Return exactly these, "
-        "with these ids:"
+        "The series plan fixed this episode's learning goals. Return exactly these, with these ids:"
     )
     lines.extend(f"- {goal.id}: {goal.text}" for goal in episode.goals)
     return "\n".join(lines)
