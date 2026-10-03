@@ -150,7 +150,7 @@ pipeline. A flow is one when it contains an audio node (`purpose: audio` in
 take** of a run (`audio_takes`), so a run can have several.
 
 ```
-elevenlabs_dialog_v0:  audio_script → audio_approval (waits) → audio_render
+elevenlabs_dialog_v0:  audio_script → audio_approval (waits) → audio_render → audio_join
 ```
 
 `audio_script` prepares the script for ElevenLabs Text to Dialogue (Eleven v4),
@@ -171,10 +171,26 @@ beat (at most 1,800 characters, under ElevenLabs' 2,000), one dialogue input per
 line, and stores each chunk's MP3 in the artifact store's `media` folder. Chunks
 are cached by model, voices, settings and text, so a failed or repeated take
 never pays twice; on Eleven v4 each chunk continues from the previous ones by
-request id. The run view plays the result.
+request id. Chunks an earlier take already spoke with the same voices are
+reused and left out of the price.
 
-This version speaks a **one-minute sample** (whole lines up to about 1,000
-characters, about $0.08). The whole episode, joined into one file, follows.
+A take is a **one-minute sample** (whole lines up to about 1,000 characters,
+about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,
+about $1.15). A take that fails part-way keeps its approval and **resumes** at
+the first chunk without audio, so nothing is paid for twice.
+
+`audio_join` joins the chunks with ffmpeg into one MP3: 0.3 s of silence between
+chunks, no crossfade, loudness normalised to -16 LUFS. ffmpeg is the static
+build in the `imageio-ffmpeg` wheel (about 80 MB; apt's ffmpeg adds 466 MB); the
+image build checks that it runs. Each chunk's real length is measured, so the
+per-line times ElevenLabs returns land on the joined file's clock: the run view
+plays the take as one file, every line jumps there on click, the line being
+heard is highlighted, and the MP3 can be downloaded. While a take is spoken the
+run view lists every request with its state.
+
+In a series every episode is a run with its own take. The series' plan tab
+prepares takes for all finished episodes, shows their summed price, approves
+them together and plays each episode; the voices are the format's default.
 
 The speech provider sits behind `speech/base.py`; tests use a stub and never
 call ElevenLabs. Without `ELEVENLABS_API_KEY` a take can still be tagged and

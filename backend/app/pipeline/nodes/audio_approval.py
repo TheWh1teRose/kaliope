@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.pipeline.audio_chunks import estimate, select_lines
+from app.pipeline.audio_chunks import cached_chunk, estimate, plan_requests, select_lines
 from app.pipeline.framework.node import NodeContext, NodePause
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc
 from app.schemas.audio import AudioApproval, AudioRequest, AudioScript, VoiceCast
+from app.speech.base import cost_usd
 
 
 class AudioApprovalInput(BaseModel):
@@ -39,7 +40,9 @@ class AudioApprovalNode:
         detail=[
             "Selects the lines the take will speak (the whole script, or for a sample the "
             "first lines up to about one minute), cuts them into requests the way the "
-            "render step will, and prices the characters at the model's rate.",
+            "render step will, and prices the characters at the model's rate. Requests an "
+            "earlier take already spoke with the same voices and settings are reused and "
+            "left out of the price.",
             "The pause payload carries that estimate, the voices per speaker and any "
             "speaker without a voice. Approving in the console stores the approval with the "
             "price that was shown and resumes the take.",
@@ -56,7 +59,12 @@ class AudioApprovalNode:
 
     def run(self, inp: AudioApprovalInput, ctx: NodeContext) -> AudioApproval:
         lines = select_lines(inp.audio_script, inp.audio_request)
-        characters, price, requests = estimate(lines, inp.voice_cast.model_id)
+        characters, _total, requests = estimate(lines, inp.voice_cast.model_id)
+        # Chunks an earlier take already spoke are reused, not paid for again.
+        planned = plan_requests(lines, inp.voice_cast)
+        cached = [plan for plan in planned if cached_chunk(ctx.artifacts, plan.key) is not None]
+        cached_characters = sum(plan.characters for plan in cached)
+        price = cost_usd(inp.voice_cast.model_id, characters - cached_characters)
         speakers = sorted({line.speaker for line in lines})
         raise NodePause(
             f"waiting for approval to spend about ${price:.2f} on audio",
@@ -67,6 +75,8 @@ class AudioApprovalNode:
                 "segment_ids": [line.segment_id for line in lines],
                 "characters": characters,
                 "requests": requests,
+                "cached_requests": len(cached),
+                "cached_characters": cached_characters,
                 "estimate_usd": price,
                 "model_id": inp.voice_cast.model_id,
                 "voices": {speaker: inp.voice_cast.voice_for(speaker) for speaker in speakers},

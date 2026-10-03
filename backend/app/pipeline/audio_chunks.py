@@ -12,11 +12,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
-from app.schemas.audio import AudioLine, AudioRequest, AudioScript
-from app.speech.base import cost_usd
+from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
+from app.schemas.audio import AudioChunk, AudioLine, AudioRequest, AudioScript, VoiceCast
+from app.speech.base import DialogueInput, cost_usd
 
 MAX_CHUNK_CHARACTERS = 1800
+DEFAULT_OUTPUT_FORMAT = "mp3_44100_128"
+#: Part of every chunk key. Kept as the render node's name and first version, so
+#: chunks spoken before the key moved here are still found.
+_KEY_OWNER = ("audio_render", "1.0")
 
 #: Just after a sentence end, before the space that follows it.
 _SENTENCE_END = re.compile(r"(?<=[.!?…])(?=\s)")
@@ -55,6 +61,68 @@ def plan_chunks(
     if current:
         chunks.append(current)
     return chunks
+
+
+@dataclass(frozen=True)
+class PlannedChunk:
+    """One request as it will be sent, and the key its audio is cached under."""
+
+    index: int
+    lines: list[AudioLine]
+    inputs: list[DialogueInput]
+    key: str
+
+    @property
+    def characters(self) -> int:
+        return sum(len(item.text) for item in self.inputs)
+
+
+def plan_requests(
+    lines: Sequence[AudioLine],
+    cast: VoiceCast,
+    output_format: str = DEFAULT_OUTPUT_FORMAT,
+) -> list[PlannedChunk]:
+    """The requests a take sends for these lines, each with its cache key."""
+    planned = []
+    for index, chunk_lines in enumerate(plan_chunks(lines)):
+        inputs = [
+            DialogueInput(text=line.tagged, voice_id=cast.voice_for(line.speaker) or "")
+            for line in chunk_lines
+        ]
+        planned.append(
+            PlannedChunk(
+                index=index,
+                lines=chunk_lines,
+                inputs=inputs,
+                key=chunk_key(cast, output_format, inputs),
+            )
+        )
+    return planned
+
+
+def chunk_key(cast: VoiceCast, output_format: str, inputs: Sequence[DialogueInput]) -> str:
+    """Everything that shapes a chunk's sound; neighbouring chunks are not part of it."""
+    return hash_payload(
+        {
+            "node": _KEY_OWNER[0],
+            "version": _KEY_OWNER[1],
+            "model": cast.model_id,
+            "stability": cast.stability,
+            "seed": cast.seed,
+            "language": cast.language_code,
+            "format": output_format,
+            "inputs": [item.model_dump() for item in inputs],
+        }
+    )
+
+
+def cached_chunk(store: ArtifactStore, key: str) -> AudioChunk | None:
+    """A chunk already spoken under this key whose audio file is still there."""
+    digest = store.get_step(key)
+    if digest is None:
+        return None
+    chunk = AudioChunk.model_validate(store.get_raw(digest))
+    return chunk if store.has_blob(chunk.blob, chunk.suffix) else None
 
 
 def estimate(lines: Sequence[AudioLine], model_id: str) -> tuple[int, float, int]:
