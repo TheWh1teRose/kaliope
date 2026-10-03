@@ -358,6 +358,9 @@ onUnmounted(() => {
             {{ plan.budget.verdict === 'reduced' ? t.series.merged : t.series.clamped }}
           </span>
           <span v-if="countWarning" class="badge badge--warn" data-count-warning>{{ countWarning }}</span>
+          <span v-for="warning in plan.warnings" :key="warning" class="badge badge--warn" data-budget-warning>
+            {{ warning }}
+          </span>
           <span v-if="coverage?.uncited_sections.length" class="meta">
             {{ fill(t.series.coverageUncited, { sections: coverage.uncited_sections.join(', ') }) }}
           </span>

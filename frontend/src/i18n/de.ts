@@ -404,7 +404,7 @@ export default {
       'Bei {minutes} min je Folge reicht das Dokument nur für eine Folge. Wähle kürzere Folgen oder „Eine Folge“.',
     tooThin: 'Für {n} Folgen reicht das Dokument nicht: Jede Folge hätte unter 3 min.',
     moreThanBudget:
-      'Mehr Folgen, als das Budget bei {minutes} min trägt: {n} × {minutes} = {total} min, das Dokument trägt {max} min. Jede Folge wird auf etwa {per} min gekürzt. Der Stoff verteilt sich dünner, das Dokument bleibt ganz abgedeckt.',
+      'Mehr Folgen, als das Budget bei {minutes} min nahelegt: der Stoff verteilt sich auf {n} Folgen à {minutes} min. Jede Folge behält ihre Länge und bekommt weniger Abschnitte, damit Gespräch und Erklärung Platz haben. Das Dokument trägt {max} min in diesem Tempo.',
     fewerThanSuggested:
       'Weniger Folgen als vorgeschlagen: {n} × {minutes} = {total} von {max} min. Jede Folge wählt aus mehr Stoff aus, also fällt mehr weg. S1 zeigt nach dem Plan, welche Kapitel fehlen.',
     single: 'Das Dokument trägt ≈ {max} min. Eine Folge mit {minutes} min nutzt {share} % davon.',

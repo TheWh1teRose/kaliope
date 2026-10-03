@@ -7,13 +7,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 
 from app.config import Settings, get_settings, set_settings
 from app.db import get_engine, reset_engine
 from app.llm.base import LLMClient
 from app.pipeline.framework.artifacts import ArtifactStore
-from app.pipeline.framework.node import NodeContext
+from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.gates.base import GateContext
 from app.pipeline.gates.deterministic import G5ObjectiveCoverage
 from app.pipeline.nodes.content_budget import ContentBudgetInput, ContentBudgetNode
@@ -76,8 +77,43 @@ def test_an_episode_budget_counts_only_its_own_passages(tmp_path: Path) -> None:
         _context(StubProvider(), tmp_path),
     )
     assert whole.narratable_words == 2800
+    assert whole.max_supportable_minutes == pytest.approx(51.85, abs=0.01)
+    assert whole.dialogue_expansion == 2.5
     assert episode.narratable_words == 1400
-    assert episode.verdict == "clamped" and episode.target_minutes == 4.15
+    assert episode.verdict == "ok" and episode.target_minutes == 15
+
+
+def test_a_single_episode_above_the_ceiling_is_clamped(tmp_path: Path) -> None:
+    budget = ContentBudgetNode().run(
+        ContentBudgetInput(parsed=DOC, target_minutes=80), _context(StubProvider(), tmp_path)
+    )
+    assert budget.verdict == "clamped"
+    assert budget.target_minutes == pytest.approx(51.85, abs=0.01)
+    assert "clamped" in budget.explanation
+
+
+def test_a_series_episode_keeps_the_requested_length(tmp_path: Path) -> None:
+    budget = ContentBudgetNode().run(
+        ContentBudgetInput(parsed=DOC, target_minutes=40, episode_brief=_brief()),
+        _context(StubProvider(), tmp_path),
+    )
+    assert budget.max_supportable_minutes == pytest.approx(25.93, abs=0.01)
+    assert budget.verdict == "ok"
+    assert budget.target_minutes == 40
+
+
+def test_under_three_minutes_is_still_refused(tmp_path: Path) -> None:
+    brief = _brief()
+    episode = brief.episode.model_copy(update={"block_ids": IDS[:1]})
+    thin = brief.model_copy(update={"episode": episode})
+    with pytest.raises(NodeError) as raised:
+        ContentBudgetNode().run(
+            ContentBudgetInput(parsed=DOC, target_minutes=15, episode_brief=thin),
+            _context(StubProvider(), tmp_path),
+        )
+    assert raised.value.verdict == "insufficient"
+    assert "narratable words" in str(raised.value)
+    assert "image content" in str(raised.value)
 
 
 def test_select_sees_only_the_episode_and_keeps_the_planned_goals(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ import NewRunView from './NewRunView.vue'
 
 const createSeries = vi.fn(async (_payload: CreateSeriesPayload) => ({ id: 's1' }))
 const createRun = vi.fn(async () => ({ id: 'r1' }))
+const budgetState = vi.hoisted(() => ({ minutes: 46.2 }))
 
 vi.mock('@/stores/catalogue', () => ({
   useCatalogueStore: () => ({
@@ -31,7 +32,8 @@ vi.mock('@/stores/series', () => ({
       narratable_words: 15600,
       words_per_minute: 135,
       min_compression: 2.5,
-      max_supportable_minutes: 46.2,
+      dialogue_expansion: 2.5,
+      max_supportable_minutes: budgetState.minutes,
     })),
   }),
 }))
@@ -50,6 +52,7 @@ function router() {
 
 describe('start screen', () => {
   beforeEach(() => {
+    budgetState.minutes = 46.2
     createSeries.mockClear()
     createRun.mockClear()
   })
@@ -69,7 +72,8 @@ describe('start screen', () => {
     await wrapper.get('[data-step="1"]').trigger('click')
     await wrapper.get('[data-step="1"]').trigger('click')
     expect(wrapper.get('[data-count-out]').text()).toBe('5')
-    expect(wrapper.get('[data-supports]').text()).toContain('gekürzt')
+    expect(wrapper.get('[data-supports]').text()).toContain('verteilt')
+    expect(wrapper.get('[data-supports]').text()).not.toContain('gekürzt')
 
     await wrapper.get('[data-step="-1"]').trigger('click')
     await wrapper.get('form').trigger('submit')
@@ -85,6 +89,19 @@ describe('start screen', () => {
     )
     expect(createSeries.mock.calls[0][0]).not.toHaveProperty('review_plan')
     expect(createRun).not.toHaveBeenCalled()
+  })
+
+  it('shows a too-thin share floored so it stays under three minutes', async () => {
+    budgetState.minutes = 11.85
+    const wrapper = mount(NewRunView, { props: { id: 'd1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    await wrapper.get('[data-scope="series"]').trigger('click')
+    await wrapper.get('[data-step="1"]').trigger('click')
+    await wrapper.get('[data-step="1"]').trigger('click')
+    expect(wrapper.get('[data-count-out]').text()).toBe('4')
+    expect(wrapper.get('[data-supports] b').text()).toBe('4 Folgen à 2,9 min')
+    expect(wrapper.get('[data-supports]').text()).toContain('unter 3 min')
+    expect(wrapper.get('[data-submit]').attributes('disabled')).toBeDefined()
   })
 
   it('sends no count when the suggestion stays', async () => {

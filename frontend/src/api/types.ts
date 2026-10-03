@@ -993,6 +993,7 @@ export interface DocumentBudget {
   narratable_words: number
   words_per_minute: number
   min_compression: number
+  dialogue_expansion: number
   max_supportable_minutes: number
 }
 
@@ -1030,6 +1031,8 @@ export interface SeriesPlan {
   terms: SeriesTerm[]
   episodes: EpisodePlan[]
   unassigned: { block_id: string; reason: string }[]
+  /** Episodes that carry more source words than the dialogue budget allows. */
+  warnings: string[]
   budget: {
     max_supportable_minutes: number
     minutes_per_episode: number

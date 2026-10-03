@@ -89,6 +89,18 @@ class Objectives(BaseModel):
 
 BudgetVerdict = Literal["ok", "clamped", "insufficient"]
 
+#: How many times longer a podcast may run than a plain read-through of the same
+#: words. A read-through is narratable words divided by the language's speaking
+#: rate (German: 135 per minute). Questions, explanation and back-and-forth need
+#: the rest of the minute: at 2.5×, about 54 of those 135 spoken words develop
+#: the source and the other 81 are dialogue. 2.5 is the middle of the requested
+#: two-to-three range, and the same magnitude previously applied as compression,
+#: which made episodes shorter than reading the source aloud. A 15-minute
+#: episode therefore wants about 810 German source words, not the 2,025 of a
+#: read-through. The 2,800-word series sample is a 20.7-minute read and about
+#: 52 minutes of podcast: three 15-minute episodes with room to talk.
+DEFAULT_DIALOGUE_EXPANSION = 2.5
+
 
 class ContentBudget(BaseModel):
     """§6.1."""
@@ -96,6 +108,8 @@ class ContentBudget(BaseModel):
     narratable_words: int
     words_per_minute: int
     min_compression: float
+    #: Stretches a plain read-through into podcast minutes. Missing on older artifacts.
+    dialogue_expansion: float = DEFAULT_DIALOGUE_EXPANSION
     max_supportable_minutes: float
     requested_minutes: int
     target_minutes: float
@@ -279,6 +293,9 @@ class SeriesPlan(BaseModel):
     episodes: list[EpisodePlan]
     unassigned: list[UnassignedBlock] = Field(default_factory=list)
     budget: SeriesBudget
+    #: Episodes that carry more source words than the dialogue budget allows.
+    #: The passages stay; the text asks for more episodes.
+    warnings: list[str] = Field(default_factory=list)
 
     def episode(self, index: int) -> EpisodePlan:
         for episode in self.episodes:

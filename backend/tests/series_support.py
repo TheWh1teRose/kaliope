@@ -38,7 +38,8 @@ SECTIONS = [
     ("Klimaschutz", "Klimaschutz senkt die Emissionen, Anpassung mindert die Folgen"),
 ]
 BLOCKS_PER_SECTION = 5
-#: Words per block; 4 × 5 × 140 = 2,800 narratable words ≈ 8.3 supportable minutes.
+#: Words per block; 4 × 5 × 140 = 2,800 narratable words. At 135 wpm and a 2.5×
+#: dialogue expansion that is about 51.9 supportable minutes, not a read-through.
 WORDS_PER_BLOCK = 140
 
 
