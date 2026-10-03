@@ -53,10 +53,10 @@ class CompletionRequest(BaseModel):
     #: Requested sampling temperature. Dropped, with a warning, for models whose
     #: API rejects sampling parameters (§ registry ``supports_sampling``).
     temperature: float | None = None
-    #: The parameters below are ``None``/``default`` unless an experiment sets
-    #: them; production nodes never do, so nothing new is sent for them. A
-    #: provider drops what the model rejects and records a warning
-    #: (§ registry capabilities).
+    #: ``None``/``default`` unless a caller sets them. A node sends ``effort``
+    #: when its flow config does; everything else stays unset, so a production
+    #: call adds nothing the author did not choose. A provider drops what the
+    #: model rejects and records a warning (§ registry capabilities).
     top_p: float | None = Field(default=None, ge=0, le=1)
     top_k: int | None = Field(default=None, ge=1)
     thinking: ThinkingMode = "default"

@@ -17,6 +17,7 @@ import type { FormatSpec, FormatSummary, NodeSpecOut, PipelineSummary } from '@/
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
 import { t } from '@/i18n'
+import { groupPipelines } from '@/pipelines/groups'
 import { useCatalogueStore } from '@/stores/catalogue'
 import { usePipelinesStore } from '@/stores/pipelines'
 import GatesView from '@/views/GatesView.vue'
@@ -62,6 +63,15 @@ const archiveTarget = ref<PipelineSummary | null>(null)
 const archiveFormatTarget = ref<FormatSummary | null>(null)
 
 const nodes = computed<NodeSpecOut[]>(() => store.nodes?.nodes ?? [])
+const pipelineGroups = computed(() => groupPipelines(store.pipelines))
+
+function groupLabel(purpose: string): string {
+  const groups = t.pipelines.groups
+  if (purpose === 'episode' || purpose === 'series_plan' || purpose === 'audio') {
+    return groups[purpose]
+  }
+  return purpose
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -224,10 +234,21 @@ onMounted(load)
     <p v-if="loading" class="muted pad">{{ t.common.loading }}</p>
 
     <!-- ------------------------------------------------------- pipelines -->
-    <ul v-else-if="tab === 'pipelines'" class="cards">
-      <li v-if="!store.pipelines.length" class="muted pad">{{ t.pipelines.empty }}</li>
+    <div v-else-if="tab === 'pipelines'" class="groups">
+      <p v-if="!store.pipelines.length" class="muted pad">{{ t.pipelines.empty }}</p>
+      <section
+        v-for="group in pipelineGroups"
+        :key="group.purpose"
+        class="group"
+        :data-group="group.purpose"
+      >
+        <h2 class="group__title">
+          {{ groupLabel(group.purpose) }}
+          <span class="group__count num">{{ group.items.length }}</span>
+        </h2>
+        <ul class="cards">
       <li
-        v-for="pipeline in store.pipelines"
+        v-for="pipeline in group.items"
         :key="pipeline.id"
         class="card item"
         :class="{ 'item--off': pipeline.archived }"
@@ -262,7 +283,9 @@ onMounted(load)
           </button>
         </div>
       </li>
-    </ul>
+        </ul>
+      </section>
+    </div>
 
     <!-- --------------------------------------------------------- formats -->
     <ul v-else-if="tab === 'formats'" class="cards">
@@ -495,6 +518,28 @@ onMounted(load)
   gap: 6px;
   font-size: var(--t-sm);
   color: var(--ink-2);
+}
+
+.groups {
+  display: grid;
+  gap: var(--s5);
+}
+
+.group__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  font-size: var(--t-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.group__count {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
 }
 
 .cards {

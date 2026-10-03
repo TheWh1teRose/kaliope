@@ -20,7 +20,12 @@ from app.pipeline.formats import DEFAULT_AUDIENCE, DEFAULT_FORMAT_ID, FORMATS
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import input_keys
 from app.pipeline.framework.registry import get_node, node_names
-from app.pipeline.framework.spec import coerce, node_params, prune_defaults
+from app.pipeline.framework.spec import (
+    coerce,
+    node_params,
+    prune_defaults,
+    strip_unsupported_effort,
+)
 from app.pipeline.nodes.ingest import DocumentRef
 from app.pipeline.validation import RUN_SEED_KEYS, validate_flow
 from app.schemas.api import NodeRunStatus
@@ -140,7 +145,7 @@ def resolve_config(node_name: str, config: dict[str, Any]) -> dict[str, Any]:
                 resolved[key] = coerced
         else:
             resolved[key] = value
-    return prune_defaults(node, resolved)
+    return strip_unsupported_effort(prune_defaults(node, resolved))
 
 
 def coerce_value(key: str, payload: Any) -> Any:

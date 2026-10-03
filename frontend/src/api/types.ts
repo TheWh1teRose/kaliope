@@ -629,6 +629,8 @@ export interface PipelineSummary {
   updated_by_email: string | null
   run_count: number
   valid: boolean
+  /** `episode`, `series_plan`, or `audio`, derived from the nodes. */
+  purpose: string
 }
 
 export interface PipelineDetail extends PipelineSummary {
@@ -791,6 +793,8 @@ export interface ProviderInfo {
 export interface ModelCatalogue {
   models: ModelInfo[]
   providers: ProviderInfo[]
+  /** Server `DEFAULT_MODEL`, used when a node's model field is empty. */
+  default_model?: string
 }
 
 /** The model parameters an experiment sends with each call. Null = not sent. */

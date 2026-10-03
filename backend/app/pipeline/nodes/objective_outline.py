@@ -228,6 +228,7 @@ class ObjectiveOutlineNode:
                 messages=[Message(role="user", content=user)],
                 max_tokens=int(ctx.get("max_tokens", 12000)),
                 temperature=ctx.get("temperature"),
+                effort=ctx.request_effort(ctx.model("claude-opus-5")),
                 json_schema=_SCHEMA,
                 cache_system=True,
             )

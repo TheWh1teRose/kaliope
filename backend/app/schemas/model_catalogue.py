@@ -36,3 +36,5 @@ class ProviderOut(BaseModel):
 class ModelCatalogueOut(BaseModel):
     models: list[ModelOut]
     providers: list[ProviderOut]
+    #: ``DEFAULT_MODEL``: the effort list for a node whose model field is empty.
+    default_model: str

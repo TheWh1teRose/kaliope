@@ -55,7 +55,7 @@ function reset(): void {
 </script>
 
 <template>
-  <div class="param" :class="{ 'param--prompt': param.type === 'prompt' }">
+  <div class="param" :class="{ 'param--prompt': param.type === 'prompt' }" :data-param="param.key">
     <div class="param__head">
       <label class="param__label" :for="`p-${param.key}`">{{ param.label }}</label>
       <code class="param__key">{{ param.key }}</code>

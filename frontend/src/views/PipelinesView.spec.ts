@@ -2,14 +2,22 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { PipelineSummary } from '@/api/types'
+
 import PipelinesView from './PipelinesView.vue'
+
+const storeState = vi.hoisted(() => ({
+  pipelines: [] as PipelineSummary[],
+}))
 
 vi.mock('@/stores/pipelines', () => ({
   usePipelinesStore: () => ({
-    pipelines: [],
+    get pipelines() {
+      return storeState.pipelines
+    },
     formats: [],
     nodes: null,
-    list: vi.fn(async () => []),
+    list: vi.fn(async () => storeState.pipelines),
     listFormats: vi.fn(async () => []),
     loadNodes: vi.fn(async () => ({ nodes: [] })),
   }),
@@ -49,6 +57,81 @@ function tab(wrapper: ReturnType<typeof mount>, label: string) {
   if (!button) throw new Error(`missing tab ${label}`)
   return button
 }
+
+function pipeline(partial: Partial<PipelineSummary> & Pick<PipelineSummary, 'id' | 'name'>): PipelineSummary {
+  return {
+    version: '1.0',
+    revision: 1,
+    description: null,
+    origin: 'file',
+    archived: false,
+    editable: true,
+    nodes: ['script'],
+    gates: [],
+    updated_at: null,
+    updated_by_email: null,
+    run_count: 0,
+    valid: true,
+    purpose: 'episode',
+    ...partial,
+  }
+}
+
+describe('pipeline groups', () => {
+  it('groups by flow kind, counts them, and sorts names inside a group', async () => {
+    storeState.pipelines = [
+      pipeline({
+        id: 'zeta',
+        name: 'Zeta',
+        purpose: 'episode',
+        nodes: ['outline', 'script'],
+      }),
+      pipeline({
+        id: 'voice',
+        name: 'Dialog',
+        purpose: '',
+        nodes: ['audio_script'],
+      }),
+      pipeline({
+        id: 'plan',
+        name: 'Plan',
+        purpose: 'series_plan',
+        nodes: ['series_plan'],
+      }),
+      pipeline({
+        id: 'alpha',
+        name: 'Alpha',
+        purpose: 'episode',
+        nodes: ['script'],
+      }),
+      pipeline({
+        id: 'old-voice',
+        name: 'Archiviertes Audio',
+        purpose: 'audio',
+        archived: true,
+        nodes: ['audio_render'],
+      }),
+    ]
+    const { wrapper } = await open('/pipelines')
+
+    const groups = wrapper.findAll('[data-group]')
+    expect(groups.map((group) => group.attributes('data-group'))).toEqual([
+      'episode',
+      'series_plan',
+      'audio',
+    ])
+    const heading = (group: (typeof groups)[number]) =>
+      group.find('.group__title').text().replace(/\s+/g, ' ').trim()
+    expect(groups.map(heading)).toEqual(['Normal 2', 'Serie 1', 'Audio 2'])
+    expect(groups[0].findAll('.item__name').map((item) => item.text())).toEqual(['Alpha', 'Zeta'])
+    const audio = groups[2]
+    expect(audio.text()).toContain('Archiviertes Audio')
+    expect(audio.text()).toContain('Archiviert')
+    expect(wrapper.findAll('[data-group="archived"]')).toHaveLength(0)
+
+    storeState.pipelines = []
+  })
+})
 
 describe('pipelines quality checks tab', () => {
   it('opens the catalogue from its address and leaves the other tabs alone', async () => {
