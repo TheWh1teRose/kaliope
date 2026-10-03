@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.llm.base import LLMClient, Usage
 from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
+from app.pipeline.framework.cancel import RunStopped
 from app.pipeline.framework.keys import node_key
 from app.pipeline.framework.node import (
     NodeContext,
@@ -100,6 +101,7 @@ class FlowRunner:
         document_path: Path | None = None,
         force: bool = False,
         speech: SpeechClient | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self.artifacts = artifacts
         self.llm = llm
@@ -109,6 +111,7 @@ class FlowRunner:
         self.document_path = document_path
         self.force = force
         self.speech = speech
+        self.should_stop = should_stop or (lambda: False)
 
     def execute(
         self,
@@ -132,6 +135,8 @@ class FlowRunner:
         resumed = resume_outputs or {}
 
         for entry in flow.nodes:
+            if self.should_stop():
+                return self._halted(manifest, bag, hashes)
             node = get_node(entry.node)
             config = {**entry.config, **overrides.get(entry.node, {})}
             model_id = config.get("model")
@@ -205,10 +210,14 @@ class FlowRunner:
                 document_id=document_id,
                 progress=_progress_for(self.progress, node.name),
                 force=self.force,
+                stopped=self.should_stop,
             )
 
             try:
                 output = node.run(build_input(node, bag), context)
+            except RunStopped:
+                self._account_abandoned(record, manifest, usage_before, cost_before, started)
+                return self._halted(manifest, bag, hashes)
             except NodePause as exc:
                 record.finished_at = None
                 manifest.nodes.append(record)
@@ -269,6 +278,44 @@ class FlowRunner:
         manifest.finished_at = _now()
         manifest.recompute_total()
         return RunResult(status="completed", manifest=manifest, bag=bag, artifact_hashes=hashes)
+
+    def _halted(
+        self,
+        manifest: RunManifest,
+        bag: dict[str, Any],
+        hashes: dict[str, str],
+    ) -> RunResult:
+        """Stop between steps. Nodes already stored stay in the manifest."""
+        self.llm.node_name = None
+        manifest.finished_at = _now()
+        manifest.recompute_total()
+        return RunResult(status="stopped", manifest=manifest, bag=bag, artifact_hashes=hashes)
+
+    def _account_abandoned(
+        self,
+        record: NodeRecord,
+        manifest: RunManifest,
+        usage_before: Usage,
+        cost_before: float,
+        started: datetime,
+    ) -> None:
+        """Keep the cost of a call that returned after a stop, without an artifact.
+
+        The result itself is discarded: there is no error and no cache entry, so
+        a later run computes this node again and reuses only what was finished
+        before it.
+        """
+        usage_delta = _usage_delta(usage_before, self.llm.total_usage)
+        record.error = None
+        record.artifact_hash = None
+        record.finished_at = _now()
+        record.wall_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        record.tokens_in = usage_delta.input_tokens + usage_delta.cache_read_tokens
+        record.tokens_out = usage_delta.output_tokens
+        record.cost_usd = round(self._spent() - cost_before, 8)
+        manifest.recompute_total()
+        self.on_node(record)
+        self.llm.node_name = None
 
     def _spent(self) -> float:
         """Everything paid so far in this execution: model calls and speech."""

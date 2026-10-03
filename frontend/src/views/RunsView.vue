@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import type { SeriesOut } from '@/api/types'
+import ModalDialog from '@/components/ModalDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
 import { runTitle, seriesTitle } from '@/titles'
@@ -17,6 +18,8 @@ const LIVE_SERIES = new Set(['queued', 'planning', 'outlining', 'writing'])
 const runs = useRunsStore()
 const seriesStore = useSeriesStore()
 const series = ref<SeriesOut[]>([])
+const confirmStop = ref<{ kind: 'run' | 'series'; id: string } | null>(null)
+const stopping = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 function when(value: string): string {
@@ -33,6 +36,24 @@ async function load(): Promise<void> {
   if (!moving && timer) {
     clearInterval(timer)
     timer = null
+  }
+}
+
+function askStop(kind: 'run' | 'series', id: string): void {
+  confirmStop.value = { kind, id }
+}
+
+async function confirm(): Promise<void> {
+  const target = confirmStop.value
+  if (!target || stopping.value) return
+  stopping.value = true
+  try {
+    if (target.kind === 'run') await runs.stop(target.id)
+    else await seriesStore.stop(target.id)
+    confirmStop.value = null
+    await load()
+  } finally {
+    stopping.value = false
   }
 }
 
@@ -69,9 +90,29 @@ onUnmounted(() => {
           </td>
           <td class="meta">{{ row.flow_id }} v{{ row.flow_version }}</td>
           <td>
-            <span class="badge" :class="row.status === 'failed' ? 'badge--fail' : row.status === 'completed' ? 'badge--pass' : 'badge--mark'">
+            <span
+              class="badge"
+              :class="
+                row.status === 'failed'
+                  ? 'badge--fail'
+                  : row.status === 'completed'
+                    ? 'badge--pass'
+                    : row.status === 'stopped'
+                      ? 'badge--idle'
+                      : 'badge--mark'
+              "
+            >
               {{ t.series.status[row.status] }}
             </span>
+            <button
+              v-if="LIVE_SERIES.has(row.status)"
+              class="btn btn--sm"
+              type="button"
+              data-stop-series
+              @click="askStop('series', row.id)"
+            >
+              {{ t.run.stop }}
+            </button>
           </td>
           <td class="right num">${{ row.total_cost_usd.toFixed(4) }}</td>
           <td class="right num">{{ row.episodes.length || row.request.episodes || t.common.none }}</td>
@@ -110,7 +151,18 @@ onUnmounted(() => {
             </RouterLink>
           </td>
           <td class="meta">{{ run.flow_id }} v{{ run.flow_version }}</td>
-          <td><StatusPill :status="run.status" /></td>
+          <td>
+            <StatusPill :status="run.status" />
+            <button
+              v-if="LIVE_RUN.has(run.status)"
+              class="btn btn--sm"
+              type="button"
+              data-stop
+              @click="askStop('run', run.id)"
+            >
+              {{ t.run.stop }}
+            </button>
+          </td>
           <td class="right num">${{ run.total_cost_usd.toFixed(4) }}</td>
           <td class="right num">{{ run.target_minutes ?? t.common.none }}</td>
           <td class="right">
@@ -125,6 +177,28 @@ onUnmounted(() => {
         </tr>
       </tbody>
     </table>
+
+    <ModalDialog
+      :open="confirmStop !== null"
+      :title="confirmStop?.kind === 'series' ? t.series.stopTitle : t.run.stopTitle"
+      :lead="confirmStop?.kind === 'series' ? t.series.stopLead : t.run.stopLead"
+      @close="confirmStop = null"
+    >
+      <template #actions>
+        <button class="btn btn--ghost" type="button" @click="confirmStop = null">
+          {{ t.common.cancel }}
+        </button>
+        <button
+          class="btn btn--mark"
+          type="button"
+          data-action="confirm-stop"
+          :disabled="stopping"
+          @click="confirm"
+        >
+          {{ t.run.stopConfirm }}
+        </button>
+      </template>
+    </ModalDialog>
   </div>
 </template>
 

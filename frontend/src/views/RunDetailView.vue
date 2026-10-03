@@ -39,6 +39,10 @@ const reviewable = computed(
   () => run.value && ['completed', 'in_review', 'reviewed'].includes(run.value.status),
 )
 const awaitingNotes = computed(() => run.value?.status === 'paused')
+const stoppable = computed(() => ['queued', 'running'].includes(run.value?.status ?? ''))
+const stopped = computed(() => run.value?.status === 'stopped')
+const confirmStop = ref(false)
+const stopping = ref(false)
 
 function duration(node: { started_at: string | null; finished_at: string | null }): string {
   if (!node.started_at || !node.finished_at) return t.common.none
@@ -124,6 +128,19 @@ async function submitNotes(): Promise<void> {
   }
 }
 
+async function stopRun(): Promise<void> {
+  if (!run.value || stopping.value) return
+  stopping.value = true
+  try {
+    await runs.stop(props.id)
+    confirmStop.value = false
+    await reload()
+    follow()
+  } finally {
+    stopping.value = false
+  }
+}
+
 async function inspect(node: string): Promise<void> {
   inspected.value = node
   io.value = null
@@ -165,6 +182,24 @@ onUnmounted(() => {
       </div>
       <div class="row wrap">
         <StatusPill :status="run.status" />
+        <button
+          v-if="stoppable"
+          class="btn btn--sm"
+          type="button"
+          data-stop
+          :disabled="stopping"
+          @click="confirmStop = true"
+        >
+          {{ t.run.stop }}
+        </button>
+        <RouterLink
+          v-if="stopped"
+          class="btn btn--sm"
+          data-again
+          :to="{ name: 'new-run', params: { id: run.document_id } }"
+        >
+          {{ t.run.again }}
+        </RouterLink>
         <span class="badge badge--idle num">${{ run.total_cost_usd.toFixed(4) }}</span>
         <span class="badge badge--idle num">{{ totalTokens.toLocaleString('de-DE') }} tok</span>
         <button v-if="awaitingNotes" class="btn btn--mark" @click="openNotes">
@@ -179,6 +214,7 @@ onUnmounted(() => {
     <p v-if="run.verdict === 'insufficient'" class="notice notice--fail">
       {{ t.run.verdictInsufficient }}
     </p>
+    <p v-if="stopped" class="notice" data-stopped>{{ t.run.stoppedNotice }}</p>
 
     <section v-if="graph" class="sheet">
       <div class="spread">
@@ -329,6 +365,28 @@ onUnmounted(() => {
           {{ t.run.viewArtifact }}
         </a>
         <button class="btn btn--mark" @click="closeInspector">{{ t.common.close }}</button>
+      </template>
+    </ModalDialog>
+
+    <ModalDialog
+      :open="confirmStop"
+      :title="t.run.stopTitle"
+      :lead="t.run.stopLead"
+      @close="confirmStop = false"
+    >
+      <template #actions>
+        <button class="btn btn--ghost" type="button" @click="confirmStop = false">
+          {{ t.common.cancel }}
+        </button>
+        <button
+          class="btn btn--mark"
+          type="button"
+          data-action="confirm-stop"
+          :disabled="stopping"
+          @click="stopRun"
+        >
+          {{ t.run.stopConfirm }}
+        </button>
       </template>
     </ModalDialog>
   </div>

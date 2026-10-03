@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.review import edited_texts
+from app.api.runs import _person, _stop_out
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
@@ -28,6 +29,7 @@ from app.pipeline.catalogue import CatalogueError
 from app.pipeline.feedback import last_row_for_key, pause_from_manifest
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.registry import flow_purpose
+from app.schemas.api import StopOut
 from app.schemas.audio import Audio, AudioApproval, AudioScript, VoiceCast
 from app.schemas.pipeline import FormatSpec, Script
 from app.security import current_user
@@ -120,6 +122,7 @@ class TakeOut(BaseModel):
     audio_script: dict[str, Any] | None = None
     audio: dict[str, Any] | None = None
     chunks: list[ChunkOut] = Field(default_factory=list)
+    stopped_by: str | None = None
 
 
 class RunAudioOut(BaseModel):
@@ -211,7 +214,7 @@ def run_audio(
     return RunAudioOut(
         configured=configured,
         message=None if configured else SETUP_MESSAGE,
-        takes=[_take_out(take, run) for take in takes],
+        takes=[_take_out(db, take, run) for take in takes],
     )
 
 
@@ -260,7 +263,29 @@ def start_take(
     db.add(take)
     db.commit()
     worker.submit_take(take.id)
-    return _take_out(take, run)
+    return _take_out(db, take, run)
+
+
+@router.post("/audio/takes/{take_id}/stop", response_model=StopOut)
+def stop_take(
+    take_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)
+) -> StopOut:
+    """Stop a take that is queued, generating, or waiting for approval.
+
+    Chunks already generated stay cached. A finished take is left as it is.
+    """
+    take = db.get(AudioTake, take_id)
+    if take is None:
+        raise problem(404, "No such take", f"Audio take '{take_id}' does not exist.")
+    status, outcome = worker.stop_take(take.id, user.id)
+    db.refresh(take)
+    who = (take.manifest_json or {}).get("stopped_by")
+    return _stop_out(
+        take.id,
+        take.status if outcome != "finished" else status,
+        outcome,
+        _person(db, who),
+    )
 
 
 @router.post("/audio/takes/{take_id}/approve", response_model=TakeOut)
@@ -317,7 +342,7 @@ def approve_take(
     db.commit()
     bus.clear(take_id)
     worker.submit_take(take_id)
-    return _take_out(take, run)
+    return _take_out(db, take, run)
 
 
 @router.get("/audio/takes/{take_id}/chunks/{index}")
@@ -418,7 +443,7 @@ def _approval_out(take: AudioTake) -> ApprovalOut | None:
     )
 
 
-def _take_out(take: AudioTake, run: Run) -> TakeOut:
+def _take_out(db: Session, take: AudioTake, run: Run) -> TakeOut:
     store = _store()
     bag = _bag(take)
     script_digest = bag.get("audio_script")
@@ -456,4 +481,5 @@ def _take_out(take: AudioTake, run: Run) -> TakeOut:
             )
             for chunk in (audio.chunks if audio else [])
         ],
+        stopped_by=_person(db, (take.manifest_json or {}).get("stopped_by")),
     )

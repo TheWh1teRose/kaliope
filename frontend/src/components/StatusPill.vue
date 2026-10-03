@@ -26,6 +26,8 @@ const tone = computed(() => {
     case 'in_review':
     case 'paused':
       return 'mark'
+    case 'stopped':
+      return 'idle'
     default:
       return 'idle'
   }

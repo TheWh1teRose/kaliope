@@ -13,6 +13,7 @@ import { audioApi, takeActive } from '@/api/audio'
 import { ApiError } from '@/api/client'
 import type { AudioStatus, AudioTakeOut, RunAudioOut, SpeechVoice, VoiceCast } from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
+import ModalDialog from '@/components/ModalDialog.vue'
 import { fill, t } from '@/i18n'
 
 const props = defineProps<{ runId: string; formatId: string | null }>()
@@ -27,6 +28,7 @@ const draft = ref<VoiceCast | null>(null)
 const saveDefault = ref(true)
 const busy = ref(false)
 const error = ref('')
+const confirmStop = ref(false)
 let timer: number | undefined
 
 const take = computed<AudioTakeOut | null>(() => data.value?.takes[0] ?? null)
@@ -113,6 +115,22 @@ async function start(): Promise<void> {
   }
 }
 
+async function stopTake(): Promise<void> {
+  const current = take.value
+  if (!current || busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await audioApi.stop(current.id)
+    confirmStop.value = false
+    await reload()
+  } catch (exc) {
+    fail(exc)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function approve(): Promise<void> {
   const current = take.value
   if (!current || !draft.value || !canApprove.value) return
@@ -183,6 +201,16 @@ onUnmounted(() => window.clearTimeout(timer))
       <p v-if="active" class="running">
         <span class="spinner" />{{ take.audio_script ? t.audio.speaking : t.audio.tagging }}
       </p>
+      <div v-if="active || take.status === 'paused'" class="row wrap">
+        <button class="btn btn--sm" type="button" data-stop @click="confirmStop = true">
+          {{ t.audio.stop }}
+        </button>
+      </div>
+
+      <div v-if="take.status === 'stopped'" class="notice" data-stopped>
+        <span class="badge badge--idle">{{ t.audio.stopped }}</span>
+        <p>{{ t.audio.stoppedHint }}</p>
+      </div>
 
       <div v-else-if="take.status === 'paused' && take.approval" class="approval">
         <span class="badge badge--warn">{{ t.audio.waiting }}</span>
@@ -290,11 +318,27 @@ onUnmounted(() => window.clearTimeout(timer))
         <ArtifactView model="AudioScript" :payload="sampleScript" mode="text" />
       </details>
 
-      <div v-if="take.status === 'completed' || take.status === 'failed'" class="row wrap">
+      <div v-if="take.status === 'completed' || take.status === 'failed' || take.status === 'stopped'" class="row wrap">
         <button class="btn btn--sm" :disabled="busy" @click="start">{{ t.audio.again }}</button>
         <span class="meta num">{{ money(take.total_cost_usd) }}</span>
       </div>
     </template>
+
+    <ModalDialog
+      :open="confirmStop"
+      :title="t.audio.stopTitle"
+      :lead="t.audio.stopLead"
+      @close="confirmStop = false"
+    >
+      <template #actions>
+        <button class="btn btn--ghost" type="button" @click="confirmStop = false">
+          {{ t.common.cancel }}
+        </button>
+        <button class="btn btn--mark" type="button" data-action="confirm-stop" :disabled="busy" @click="stopTake">
+          {{ t.audio.stopConfirm }}
+        </button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 

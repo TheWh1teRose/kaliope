@@ -227,6 +227,17 @@ class RunOut(BaseModel):
     #: Set for a run of a series: 0 is the planner run, 1… the episodes.
     series_id: str | None = None
     episode_index: int | None = None
+    #: Who stopped the run, when it was stopped. Empty otherwise.
+    stopped_by: str | None = None
+
+
+class StopOut(BaseModel):
+    """What a stop request did. ``finished`` means the run had already ended."""
+
+    id: str
+    status: str
+    outcome: Literal["stopped", "stopping", "already_stopped", "finished"]
+    stopped_by: str | None = None
 
 
 class AnchorOut(BaseModel):
@@ -505,6 +516,8 @@ class SeriesOut(BaseModel):
     progress: dict[str, int] = Field(default_factory=dict)
     #: Whether a worker job is driving the series right now.
     active: bool = False
+    #: Who stopped the series, when it was stopped.
+    stopped_by: str | None = None
 
 
 class SeriesGraphEpisodeOut(BaseModel):

@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { NodeIOOut, SeriesEvent, SeriesGraphOut, SeriesOut } from '@/api/types'
+import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import PipelineCanvas from '@/components/PipelineCanvas.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -32,8 +33,9 @@ const error = ref('')
 const replanCount = ref<number | null>(null)
 const replanMinutes = ref<number | null>(null)
 const replanHint = ref<string | null>(null)
+const confirmStop = ref(false)
 
-const IDLE = new Set(['planned', 'completed', 'failed'])
+const IDLE = new Set(['planned', 'completed', 'failed', 'stopped'])
 
 const moving = computed(() => !!series.value && (!IDLE.has(series.value.status) || series.value.active))
 const stuck = computed(
@@ -85,6 +87,7 @@ function seriesTone(status: string): string {
   if (status === 'failed') return 'badge--fail'
   if (status === 'completed') return 'badge--pass'
   if (status === 'planned') return 'badge--warn'
+  if (status === 'stopped') return 'badge--idle'
   return 'badge--mark'
 }
 
@@ -153,6 +156,21 @@ function approve(): Promise<void> {
 
 function resume(): Promise<void> {
   return act(() => seriesStore.resume(props.id))
+}
+
+async function stopSeries(): Promise<void> {
+  busy.value = true
+  error.value = ''
+  try {
+    await seriesStore.stop(props.id)
+    confirmStop.value = false
+    await reload()
+    follow()
+  } catch (exc) {
+    error.value = exc instanceof ApiError ? exc.detail : t.errors.generic
+  } finally {
+    busy.value = false
+  }
 }
 
 function replan(): Promise<void> {
@@ -229,7 +247,17 @@ onUnmounted(() => {
           {{ t.series.exportZip }}
         </a>
         <button
-          v-if="series.status === 'failed' || stuck"
+          v-if="moving"
+          class="btn btn--sm"
+          type="button"
+          data-stop
+          :disabled="busy"
+          @click="confirmStop = true"
+        >
+          {{ t.series.stop }}
+        </button>
+        <button
+          v-if="series.status === 'failed' || series.status === 'stopped' || stuck"
           class="btn btn--sm btn--primary"
           type="button"
           :disabled="busy"
@@ -241,6 +269,7 @@ onUnmounted(() => {
       </div>
     </header>
 
+    <p v-if="series.status === 'stopped'" class="notice" data-stopped>{{ t.series.stoppedNotice }}</p>
     <p v-if="series.error" class="notice notice--fail" data-series-error>{{ series.error }}</p>
     <p v-else-if="stuck" class="notice notice--warn">{{ t.series.stuck }}</p>
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
@@ -502,6 +531,28 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+
+    <ModalDialog
+      :open="confirmStop"
+      :title="t.series.stopTitle"
+      :lead="t.series.stopLead"
+      @close="confirmStop = false"
+    >
+      <template #actions>
+        <button class="btn btn--ghost" type="button" @click="confirmStop = false">
+          {{ t.common.cancel }}
+        </button>
+        <button
+          class="btn btn--mark"
+          type="button"
+          data-action="confirm-stop"
+          :disabled="busy"
+          @click="stopSeries"
+        >
+          {{ t.run.stopConfirm }}
+        </button>
+      </template>
+    </ModalDialog>
   </div>
 </template>
 

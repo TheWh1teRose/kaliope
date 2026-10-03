@@ -195,6 +195,7 @@ export type RunStatus =
   | 'outlined'
   | 'completed'
   | 'failed'
+  | 'stopped'
   | 'in_review'
   | 'reviewed'
 
@@ -295,6 +296,15 @@ export interface RunOut {
   /** Set for a run of a series: 0 is the planner run, 1… the episodes. */
   series_id?: string | null
   episode_index?: number | null
+  /** Set when someone stopped the run. */
+  stopped_by?: string | null
+}
+
+export interface StopOut {
+  id: string
+  status: string
+  outcome: 'stopped' | 'stopping' | 'already_stopped' | 'finished'
+  stopped_by: string | null
 }
 
 export interface AnchorRect {
@@ -1050,6 +1060,7 @@ export type SeriesStatus =
   | 'writing'
   | 'completed'
   | 'failed'
+  | 'stopped'
 
 export interface SeriesEpisode {
   index: number
@@ -1111,6 +1122,7 @@ export interface SeriesOut {
   episodes: SeriesEpisode[]
   progress: { outlined?: number; written?: number; episodes?: number }
   active: boolean
+  stopped_by?: string | null
 }
 
 export interface SeriesGraphEpisode {
@@ -1209,7 +1221,7 @@ export interface AudioChunkOut {
   segment_ids: string[]
 }
 
-export type TakeStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed'
+export type TakeStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped'
 
 export interface AudioTakeOut {
   id: string
@@ -1228,6 +1240,7 @@ export interface AudioTakeOut {
   audio_script: Record<string, unknown> | null
   audio: Record<string, unknown> | null
   chunks: AudioChunkOut[]
+  stopped_by?: string | null
 }
 
 export interface RunAudioOut {

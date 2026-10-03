@@ -6,6 +6,7 @@ import type {
   FormatVoices,
   RunAudioOut,
   SpeechVoice,
+  StopOut,
   VoiceCast,
 } from '@/api/types'
 
@@ -21,6 +22,7 @@ export const audioApi = {
     api.post<AudioTakeOut>(`/api/runs/${runId}/audio`, flowId ? { flow_id: flowId } : {}),
   approve: (takeId: string, cast: VoiceCast) =>
     api.post<AudioTakeOut>(`/api/audio/takes/${takeId}/approve`, { voice_cast: cast }),
+  stop: (takeId: string) => api.post<StopOut>(`/api/audio/takes/${takeId}/stop`),
 }
 
 /** A take is still moving while it is queued or running. */

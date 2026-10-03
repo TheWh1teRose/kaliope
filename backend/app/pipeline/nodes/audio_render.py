@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from app.pipeline.audio_chunks import plan_chunks, select_lines
 from app.pipeline.framework.artifacts import hash_payload
+from app.pipeline.framework.cancel import RunStopped
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
@@ -129,11 +130,17 @@ class AudioRenderNode:
             )
             chunk = self._cached(ctx, key)
             if chunk is None:
+                if ctx.stopped():
+                    raise RunStopped()
                 ctx.progress(f"speaking chunk {index + 1} of {len(chunks)}")
                 chunk = self._speak(
                     ctx, cast, inputs, chunk_lines, index, output_format, request_ids
                 )
                 ctx.artifacts.put_step(key, ctx.artifacts.put("audio_chunk", chunk).hash)
+                if ctx.stopped():
+                    # This chunk is already paid for and cached. Do not speak another.
+                    rendered.append(chunk)
+                    raise RunStopped()
             else:
                 ctx.progress(f"chunk {index + 1} of {len(chunks)} reused")
                 chunk = chunk.model_copy(update={"index": index})

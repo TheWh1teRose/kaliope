@@ -107,7 +107,9 @@ const neededKeys = computed(() => {
 })
 const parsedDocuments = computed(() => documents.items.filter((d) => d.parse_status === 'parsed'))
 const finishedRuns = computed(() =>
-  runs.items.filter((r) => ['completed', 'in_review', 'reviewed', 'failed'].includes(r.status)),
+  runs.items.filter((r) =>
+    ['completed', 'in_review', 'reviewed', 'failed', 'stopped'].includes(r.status),
+  ),
 )
 
 function spec(name: string): NodeSpecOut | undefined {

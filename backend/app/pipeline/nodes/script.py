@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.artifacts import hash_payload
+from app.pipeline.framework.cancel import RunStopped
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
@@ -248,6 +249,8 @@ class ScriptNode:
         previous_result = ""
 
         for position, beat in enumerate(inp.outline.beats):
+            if ctx.stopped():
+                raise RunStopped()
             beat_blocks = [blocks[bid] for bid in beat.block_ids if bid in blocks]
             key = _beat_key(
                 inp,

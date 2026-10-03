@@ -37,7 +37,7 @@ MIN_ASSIGNED_SHARE = 0.9
 #: Episode runs that finished their script; review keeps a run finished.
 SCRIPT_DONE = frozenset({"completed", "in_review", "reviewed"})
 #: Series states in which no worker job is meant to be running.
-SERIES_IDLE = frozenset({"planned", "completed", "failed"})
+SERIES_IDLE = frozenset({"planned", "completed", "failed", "stopped"})
 #: Nodes that pause for a person; a series cannot run an episode flow with one yet.
 PAUSING_NODES = frozenset({"human_feedback"})
 

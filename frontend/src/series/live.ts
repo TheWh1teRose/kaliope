@@ -28,7 +28,12 @@ export function waitingReasons(series: SeriesOut): Record<number, string> {
   const reasons: Record<number, string> = {}
   const episodes = series.episodes
   for (const episode of episodes) {
-    if (episode.status === 'running' || SCRIPT_DONE.has(episode.status) || episode.status === 'failed') {
+    if (
+      episode.status === 'running' ||
+      episode.status === 'failed' ||
+      episode.status === 'stopped' ||
+      SCRIPT_DONE.has(episode.status)
+    ) {
       continue
     }
     if (series.status === 'planned') {

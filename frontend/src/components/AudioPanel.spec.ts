@@ -23,6 +23,12 @@ vi.mock('@/api/audio', () => ({
     takes: vi.fn(),
     start: vi.fn(async () => ({})),
     approve: vi.fn(async () => ({})),
+    stop: vi.fn(async () => ({
+      id: 'take-1',
+      status: 'stopped',
+      outcome: 'stopped',
+      stopped_by: null,
+    })),
   },
   takeActive: (status: string) => status === 'queued' || status === 'running',
 }))
@@ -201,5 +207,38 @@ describe('AudioPanel', () => {
     expect(audio.attributes('src')).toBe('/api/audio/takes/take-1/chunks/0')
     expect(wrapper.text()).toContain('58.4 s · 1.040 Zeichen · $0.08')
     expect(wrapper.findAll('.script-seg')).toHaveLength(2)
+  })
+
+  it('asks in the page before stopping a take that is waiting for approval', async () => {
+    vi.mocked(audioApi.takes)
+      .mockResolvedValueOnce(answer(true, [take({})]))
+      .mockResolvedValueOnce(answer(true, [take({ status: 'stopped', error: null, approval: null })]))
+    const wrapper = mount(AudioPanel, {
+      props: { runId: 'run-1', formatId: 'two_host_dialogue' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await flushPromises()
+    await wrapper.get('[data-stop]').trigger('click')
+    expect(audioApi.stop).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Audio stoppen?')
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
+    await flushPromises()
+    expect(audioApi.stop).toHaveBeenCalledWith('take-1')
+    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt')
+    expect(wrapper.find('.notice--fail').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows a stopped take without treating it as a failure', async () => {
+    vi.mocked(audioApi.takes).mockResolvedValue(
+      answer(true, [take({ status: 'stopped', error: null, approval: null })]),
+    )
+    const wrapper = await mountPanel()
+    expect(wrapper.get('[data-stopped] .badge').text()).toBe('Gestoppt')
+    expect(wrapper.get('[data-stopped] .badge').classes()).toContain('badge--idle')
+    expect(wrapper.find('.notice--fail').exists()).toBe(false)
+    expect(wrapper.find('[data-stop]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Neue Probe')
   })
 })

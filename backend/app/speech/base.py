@@ -113,10 +113,12 @@ class SpeechClient:
         *,
         retries: int = 4,
         sleep: Callable[[float], None] = time.sleep,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self.provider = provider
         self.retries = retries
         self._sleep = sleep
+        self._should_stop = should_stop or (lambda: False)
         self.node_name: str | None = None
         self.total_cost_usd = 0.0
         self.total_characters = 0
@@ -124,6 +126,10 @@ class SpeechClient:
         self.traces: list[dict[str, Any]] = []
 
     def dialogue(self, request: DialogueRequest) -> SpeechResult:
+        from app.pipeline.framework.cancel import RunStopped
+
+        if self._should_stop():
+            raise RunStopped()
         attempt = 0
         while True:
             attempt += 1
