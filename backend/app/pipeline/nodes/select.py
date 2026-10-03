@@ -108,14 +108,16 @@ class SelectNode:
     doc = NodeDoc(
         summary="Names the learning goals and picks the passages the episode will be built from.",
         detail=[
-            "Offers the model every narratable block as an id, a weight and its text. The "
+            "Offers the model every narratable block as an id, a weight and its text — in a "
+            "series, only that episode's passages and its recap passages. The "
             "weight is the zone salience — how prominent the author made that passage. It is "
             "given as a prior, not an instruction, and no zone is ever named in prose, so the "
             "zone taxonomy can change without anyone rewriting this prompt.",
             "Learning goals take one of two paths. If the document states its own objectives, "
             "they are handed over and the goals are derived from them. If it states none, the "
             "goals are inferred from the material. Which path ran is recorded on every goal as "
-            "'document' or 'generated'.",
+            "'document' or 'generated'. In a series, goals the plan already fixed are kept; "
+            "the model only maps passages onto them.",
             "The reply is filtered, not trusted: block ids that do not exist are discarded and "
             "counted, duplicates are dropped, and goal references that point at no goal are "
             "stripped. What survives is sorted back into document order.",

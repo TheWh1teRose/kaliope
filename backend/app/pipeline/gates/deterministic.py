@@ -330,7 +330,8 @@ class G5ObjectiveCoverage:
             inspects=["ingest", "outline", "objective_outline", "select", "objective_select"],
             rule=(
                 "Every learning objective the document states is served by at least one beat "
-                f"of the outline, at {OBJECTIVE_COVERAGE:.0%} content-word overlap or better."
+                f"of the outline, at {OBJECTIVE_COVERAGE:.0%} content-word overlap or better. "
+                "In a series episode, only the objectives the plan gave that episode."
             ),
             method=(
                 "Collects the words of every beat title and summary plus the selected "
@@ -346,7 +347,10 @@ class G5ObjectiveCoverage:
                 "min_coverage": OBJECTIVE_COVERAGE,
                 "min_content_word_length": 4,
             },
-            skip_condition="the document states no objectives of its own",
+            skip_condition=(
+                "the document states no objectives of its own, or a series episode was "
+                "given none of them"
+            ),
         )
 
     def check(self, ctx: GateContext) -> GateReport:

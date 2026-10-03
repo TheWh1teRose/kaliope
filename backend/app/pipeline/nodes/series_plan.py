@@ -16,7 +16,7 @@ the episodes' scripts still take every fact from their own passages.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -158,10 +158,11 @@ class SeriesPlanNode:
             "The number of episodes is either the one the run asked for or, when it asked "
             "for none, as many as the content budget carries at the requested length (at "
             "least two, at most eight).",
-            "One model call sees every narratable passage, grouped by section, with its id, "
+            "The model sees every narratable passage, grouped by section, with its id, "
             "weight, word count and the start of its text. It returns the episodes with "
             "their passages, learning goals, role, recap and preview, plus the series title, "
-            "through-line and key terms.",
+            "through-line and key terms. If that answer does not have the asked-for number "
+            "of episodes, it is asked once more; a count that still differs is kept.",
             "The answer is then checked, not trusted: unknown ids are dropped, a passage "
             "named twice keeps its first episode, passages the model did not mention join "
             "the episode they sit in, and each episode's length is measured from its own "
@@ -185,8 +186,9 @@ class SeriesPlanNode:
             "'insufficient'; a single episode fits better.",
             "The model returned no episode with a passage that exists.",
         ],
-        cost="One call over a shortened view of the document: about as expensive as the "
-        "outline step, far cheaper than one script.",
+        cost="One call over a shortened view of the document, or a second when the "
+        "episode count does not match: about as expensive as the outline step, far "
+        "cheaper than one script.",
     )
 
     params = [
@@ -246,17 +248,20 @@ class SeriesPlanNode:
             message = _user_message(inp, candidates, count, minutes)
             if note:
                 message = f"{note}\n\n{message}"
-            return ctx.llm.complete(
-                CompletionRequest(
-                    model=ctx.model("claude-opus-5"),
-                    system=str(ctx.get("system_prompt") or _SYSTEM),
-                    messages=[Message(role="user", content=message)],
-                    max_tokens=int(ctx.get("max_tokens", 16000)),
-                    temperature=ctx.get("temperature"),
-                    json_schema=_SCHEMA,
-                    cache_system=True,
-                )
-            ).json_payload()
+            return cast(
+                dict[str, Any],
+                ctx.llm.complete(
+                    CompletionRequest(
+                        model=ctx.model("claude-opus-5"),
+                        system=str(ctx.get("system_prompt") or _SYSTEM),
+                        messages=[Message(role="user", content=message)],
+                        max_tokens=int(ctx.get("max_tokens", 16000)),
+                        temperature=ctx.get("temperature"),
+                        json_schema=_SCHEMA,
+                        cache_system=True,
+                    )
+                ).json_payload(),
+            )
 
         data = ask(None)
         plan = build_plan(
@@ -269,8 +274,7 @@ class SeriesPlanNode:
         if len(plan.episodes) != count:
             answered = len(plan.episodes)
             data = ask(
-                f"Your previous answer planned {answered} episodes. "
-                f"Plan exactly {count} episodes."
+                f"Your previous answer planned {answered} episodes. Plan exactly {count} episodes."
             )
             plan = build_plan(
                 data,

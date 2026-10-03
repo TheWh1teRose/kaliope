@@ -145,18 +145,20 @@ A run can also produce a **series**: several episodes that together cover the
 whole document. Start one with "Serie" on the start screen.
 
 ```
-series_plan_v0:  ingest → content_budget → series_plan     (once; optional hold)
+series_plan_v0:  ingest → content_budget → series_plan     (once; then it waits)
 each episode:    content_budget → select → outline          (all episodes first)
                  → script → gates                           (episodes in order)
 ```
 
 `series_plan` decides which passages and learning goals belong to which
 episode, with a title, a through-line and the key terms. The number of episodes
-is what the content budget carries at the chosen length (two to eight) unless the
-reviewer sets it; an episode that cannot carry three minutes is merged into its
-neighbour, and the model's split is checked rather than trusted. By default the
-series stops after the plan until someone approves it, and can be planned again
-with another count, length or hint while it waits.
+asked for is what the content budget carries at the chosen length (two to eight)
+unless the reviewer sets it. If the plan comes back with a different count, the
+planner is asked once more; a count that still differs is kept and shown on the
+plan screen. An episode that cannot carry three minutes is merged into its
+neighbour, and the model's split of passages is checked rather than trusted.
+The series always stops after the plan until someone approves it, and can be
+planned again with another count, length or hint while it waits.
 
 Each episode is an ordinary run (`runs.series_id`, `episode_index`), so review,
 gates, the node inspector and the Markdown export work per episode unchanged.

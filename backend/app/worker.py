@@ -753,7 +753,9 @@ class Worker:
                 session.flush()
             previous = plan_run(session, series_id)
             request = dict(series.request_json or {})
-            seed = (previous.config_json or {}).get("series_request") if previous is not None else None
+            seed = (
+                (previous.config_json or {}).get("series_request") if previous is not None else None
+            )
             if isinstance(seed, dict):
                 request["episodes"] = seed.get("episodes")
                 request["minutes_per_episode"] = seed.get("minutes_per_episode")

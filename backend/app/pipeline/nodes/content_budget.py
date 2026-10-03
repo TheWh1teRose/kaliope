@@ -42,7 +42,8 @@ class ContentBudgetNode:
         "the run when the answer is 'not enough'.",
         detail=[
             "Counts the narratable words in the parse — headings, exercises, page furniture "
-            "and reference lists do not count, because they will never be spoken.",
+            "and reference lists do not count, because they will never be spoken. In a "
+            "series episode only that episode's own passages are counted.",
             "Divides by the speaking rate for the document's language, then by the minimum "
             "compression. That gives the longest honestly supportable episode: an episode "
             "must be able to *choose* from more material than it emits, or the model starts "
