@@ -12,6 +12,7 @@ from app.pipeline.nodes import (  # noqa: F401
     outline,
     script,
     select,
+    series_plan,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "outline",
     "script",
     "select",
+    "series_plan",
 ]

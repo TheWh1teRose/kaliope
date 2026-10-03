@@ -208,3 +208,139 @@ class IngestOutput(BaseModel):
     document_id: str
     parse_version: int
     parsed_artifact_hash: str
+
+
+# ------------------------------------------------------------------ series
+
+
+class SeriesRequest(BaseModel):
+    """What a series run asks the planner for."""
+
+    #: ``None`` lets the planner choose the count from the content budget.
+    episodes: int | None = None
+    minutes_per_episode: int
+    #: Free-text guidance on how to split, e.g. "Paris in its own episode".
+    hint: str | None = None
+
+
+class SeriesTerm(BaseModel):
+    term: str
+    gloss: str = ""
+    #: 1-based index of the episode that introduces the term.
+    first_episode: int = 1
+
+
+class EpisodePlan(BaseModel):
+    """One episode's share of the document, as the planner decided it."""
+
+    id: str
+    #: 1-based position in the series.
+    index: int
+    title: str
+    role: str = ""
+    summary: str | None = None
+    #: The episode's own passages; each narratable block has at most one home.
+    block_ids: list[str] = Field(default_factory=list)
+    #: A few passages of earlier episodes this one may cite again for a recap.
+    recap_block_ids: list[str] = Field(default_factory=list)
+    goals: list[LearningGoal] = Field(default_factory=list)
+    #: The document's stated objectives this episode serves, verbatim.
+    objective_refs: list[str] = Field(default_factory=list)
+    target_minutes: float
+    supportable_minutes: float
+    #: What to recall from earlier episodes, and what the next one answers.
+    recap: str | None = None
+    preview: str | None = None
+
+
+class UnassignedBlock(BaseModel):
+    block_id: str
+    reason: str
+
+
+SeriesVerdict = Literal["ok", "clamped", "reduced"]
+
+
+class SeriesBudget(BaseModel):
+    max_supportable_minutes: float
+    minutes_per_episode: int
+    requested_episodes: int | None = None
+    verdict: SeriesVerdict
+    explanation: str
+
+
+class SeriesPlan(BaseModel):
+    """How a document is split into a series of episodes."""
+
+    title: str
+    #: The arc across the episodes, in one or two sentences.
+    through_line: str = ""
+    terms: list[SeriesTerm] = Field(default_factory=list)
+    episodes: list[EpisodePlan]
+    unassigned: list[UnassignedBlock] = Field(default_factory=list)
+    budget: SeriesBudget
+
+    def episode(self, index: int) -> EpisodePlan:
+        for episode in self.episodes:
+            if episode.index == index:
+                return episode
+        raise KeyError(f"the series plan has no episode {index}")
+
+
+class EpisodeBrief(BaseModel):
+    """One episode's slice of the series plan, the input of its early nodes.
+
+    It holds the series header and this episode only, so changing another
+    episode's share leaves this one's cache keys untouched.
+    """
+
+    series_title: str
+    through_line: str = ""
+    episode_count: int
+    terms: list[SeriesTerm] = Field(default_factory=list)
+    episode: EpisodePlan
+
+    @classmethod
+    def from_plan(cls, plan: SeriesPlan, index: int) -> EpisodeBrief:
+        return cls(
+            series_title=plan.title,
+            through_line=plan.through_line,
+            episode_count=len(plan.episodes),
+            terms=plan.terms,
+            episode=plan.episode(index),
+        )
+
+
+class EpisodeSummary(BaseModel):
+    index: int
+    title: str
+    role: str = ""
+    summary: str | None = None
+
+
+class EpisodeOutline(BaseModel):
+    index: int
+    title: str
+    #: ``(title, summary)`` per beat.
+    beats: list[tuple[str, str]] = Field(default_factory=list)
+
+
+class EarlierEpisode(BaseModel):
+    index: int
+    title: str
+    #: The final script as ``Speaker: text`` lines, without block ids.
+    lines: list[str] = Field(default_factory=list)
+
+
+class SeriesContext(BaseModel):
+    """What the script of one episode sees of the rest of the series."""
+
+    series_title: str
+    through_line: str = ""
+    terms: list[SeriesTerm] = Field(default_factory=list)
+    episode_index: int
+    episodes: list[EpisodeSummary]
+    #: The outlines of the other episodes.
+    outlines: list[EpisodeOutline] = Field(default_factory=list)
+    #: The full text of the episodes before this one, in order.
+    earlier: list[EarlierEpisode] = Field(default_factory=list)

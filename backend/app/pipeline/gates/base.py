@@ -17,7 +17,14 @@ from typing import Any, Protocol
 
 from app.schemas.document import ParsedDocument
 from app.schemas.gates import GateReport, GateSpec, Violation
-from app.schemas.pipeline import ContentBudget, FormatSpec, Outline, Script, Selection
+from app.schemas.pipeline import (
+    ContentBudget,
+    EpisodeBrief,
+    FormatSpec,
+    Outline,
+    Script,
+    Selection,
+)
 
 __all__ = [
     "Gate",
@@ -45,6 +52,9 @@ class GateContext:
     budget: ContentBudget
     format_spec: FormatSpec
     config: dict[str, Any] = field(default_factory=dict)
+    #: Set for one episode of a series; gates that score the whole document
+    #: score only this episode's share of it.
+    episode_brief: EpisodeBrief | None = None
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)

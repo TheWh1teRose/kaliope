@@ -80,6 +80,7 @@ def run_gates(
             budget=ctx.budget,
             format_spec=ctx.format_spec,
             config=configs.get(gate_id, {}),
+            episode_brief=ctx.episode_brief,
         )
         try:
             reports.append(gate.check(scoped))

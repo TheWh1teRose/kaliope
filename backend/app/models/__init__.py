@@ -21,6 +21,7 @@ from app.models.tables import (
     Run,
     RunNode,
     Segment,
+    Series,
     SessionToken,
     User,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "Run",
     "RunNode",
     "Segment",
+    "Series",
     "SessionToken",
     "User",
 ]

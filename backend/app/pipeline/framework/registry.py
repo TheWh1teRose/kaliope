@@ -60,6 +60,19 @@ class Flow(BaseModel):
     path: str | None = None
 
 
+#: The node whose presence makes a flow a series planner rather than an episode flow.
+SERIES_PLAN_NODE = "series_plan"
+
+
+def flow_purpose(flow: Flow) -> str:
+    """``series_plan`` for a flow that plans a series, ``episode`` for every other.
+
+    Derived from the nodes rather than stored, so a planner flow built in the
+    pipeline editor is recognised without a separate setting.
+    """
+    return "series_plan" if any(n.node == SERIES_PLAN_NODE for n in flow.nodes) else "episode"
+
+
 def load_flow(path: Path) -> Flow:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):

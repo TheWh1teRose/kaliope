@@ -36,7 +36,7 @@ from app.pipeline.feedback import last_row_for_key, pause_out
 from app.pipeline.formats import DEFAULT_AUDIENCE
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import Node, input_keys
-from app.pipeline.framework.registry import Flow, get_node
+from app.pipeline.framework.registry import Flow, flow_purpose, get_node
 from app.pipeline.gates import gate_catalogue
 from app.pipeline.validation import RUN_SEED_KEYS
 from app.schemas.api import (
@@ -95,6 +95,7 @@ def list_flows(db: Session = Depends(get_db), _user: User = Depends(current_user
             description=flow.description,
             nodes=[n.node for n in flow.nodes],
             gates=flow.gates,
+            purpose=flow_purpose(flow),
         )
         for flow in catalogue.flows(db).values()
     ]

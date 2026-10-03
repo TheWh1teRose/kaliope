@@ -276,6 +276,8 @@ class FlowOut(BaseModel):
     description: str | None
     nodes: list[str]
     gates: list[str]
+    #: ``episode`` for a flow that makes one script, ``series_plan`` for a planner.
+    purpose: str = "episode"
 
 
 # --------------------------------------------------------------- flow graph

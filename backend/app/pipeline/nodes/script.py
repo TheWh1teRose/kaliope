@@ -30,7 +30,15 @@ from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
 from app.schemas.document import Anchor, Block, ParsedDocument
-from app.schemas.pipeline import AudienceSpec, Beat, FormatSpec, Outline, Script, Segment
+from app.schemas.pipeline import (
+    AudienceSpec,
+    Beat,
+    FormatSpec,
+    Outline,
+    Script,
+    Segment,
+    SeriesContext,
+)
 
 #: Shortest quote worth trying to locate; below this, matches are coincidental.
 MIN_QUOTE_CHARS = 12
@@ -118,6 +126,9 @@ class ScriptInput(BaseModel):
     outline: Outline
     format_spec: FormatSpec
     audience_spec: AudienceSpec
+    #: Set for one episode of a series: the plan, the other episodes' outlines
+    #: and the full text of the earlier episodes.
+    series_context: SeriesContext | None = None
 
 
 class ScriptNode:
@@ -164,6 +175,9 @@ class ScriptNode:
             "format_spec": "Speakers with their voice notes, register, opening and closing "
             "guidance.",
             "audience_spec": "Who is listening, which sets the level of explanation.",
+            "series_context": "Only in a series: the plan, every other episode's running order "
+            "and the full text of the earlier episodes, sent once at the top of every beat's "
+            "message for continuity only.",
         },
         output="A Script: ordered segments with speaker, text, kind, beat id and anchors.",
         failure_modes=[
@@ -353,23 +367,25 @@ def _beat_key(
     rewrite the beats before them. The previous beat's key and result chain the
     beats, so a change to any earlier beat reaches every later one.
     """
-    return hash_payload(
-        {
-            "node": ScriptNode.name,
-            "version": ScriptNode.version,
-            "config": ctx.config,
-            "model": model,
-            "format_spec": inp.format_spec.model_dump(mode="json"),
-            "audience_spec": inp.audience_spec.model_dump(mode="json"),
-            "document": [inp.parsed.document_id, inp.parsed.parse_version, inp.parsed.language],
-            "beat": beat.model_dump(mode="json"),
-            "position": position,
-            "is_last": is_last,
-            "passages": [[b.id, b.llm_text()] for b in beat_blocks],
-            "previous_key": previous_key,
-            "previous_result": previous_result,
-        }
-    )
+    payload: dict[str, Any] = {
+        "node": ScriptNode.name,
+        "version": ScriptNode.version,
+        "config": ctx.config,
+        "model": model,
+        "format_spec": inp.format_spec.model_dump(mode="json"),
+        "audience_spec": inp.audience_spec.model_dump(mode="json"),
+        "document": [inp.parsed.document_id, inp.parsed.parse_version, inp.parsed.language],
+        "beat": beat.model_dump(mode="json"),
+        "position": position,
+        "is_last": is_last,
+        "passages": [[b.id, b.llm_text()] for b in beat_blocks],
+        "previous_key": previous_key,
+        "previous_result": previous_result,
+    }
+    if inp.series_context is not None:
+        # Only present in a series, so the keys of a single episode are unchanged.
+        payload["series_context"] = inp.series_context.model_dump(mode="json")
+    return hash_payload(payload)
 
 
 def beat_prompt_fields(
@@ -444,12 +460,67 @@ def _beat_message(
     """
     fields = beat_prompt_fields(inp, position, beat_blocks, written)
     stable = [_frame(fields), *_written_blocks(written)]
+    if inp.series_context is not None:
+        stable.insert(0, series_section(inp.series_context))
     breaks: list[int] = []
     offset = 0
     for part in stable:
         offset += len(part)
         breaks.append(offset)
     return "".join(stable) + _this_beat(fields), breaks
+
+
+def series_section(context: SeriesContext) -> str:
+    """The series around this episode, the same for every beat of it.
+
+    It comes first in the message, so it sits in the cached prefix of every beat.
+    The earlier episodes' text carries no block ids: it is for continuity only.
+    """
+    total = len(context.episodes)
+    lines = [f'Series: "{context.series_title}", episode {context.episode_index} of {total}.']
+    if context.through_line:
+        lines.append(f"Through-line: {context.through_line}")
+    if context.terms:
+        lines.append("Terms of the series (use these names; introduced in the episode given):")
+        lines.extend(
+            f"- {t.term} (episode {t.first_episode})" + (f": {t.gloss}" if t.gloss else "")
+            for t in context.terms
+        )
+    lines.append("Episodes:")
+    for episode in context.episodes:
+        marker = "▶ " if episode.index == context.episode_index else "  "
+        lines.append(
+            f"{marker}{episode.index}. {episode.title}"
+            + (f" ({episode.role})" if episode.role else "")
+            + (f": {episode.summary}" if episode.summary else "")
+            + (" (this episode)" if episode.index == context.episode_index else "")
+        )
+    for outline in context.outlines:
+        lines.append(f"\nRunning order of episode {outline.index}: {outline.title}")
+        lines.extend(
+            f"  {i + 1}. {title}" + (f": {summary}" if summary else "")
+            for i, (title, summary) in enumerate(outline.beats)
+        )
+    if context.earlier:
+        lines.append(
+            "\nEarlier episodes in full, for continuity only. Do not cite them and take no "
+            "facts from them; facts come only from this beat's passages."
+        )
+        for episode in context.earlier:
+            lines.append(f"[Episode {episode.index}: {episode.title}]")
+            lines.extend(episode.lines)
+    lines.append(
+        "\nSeries rules:\n"
+        "- Refer back to earlier episodes by name where it helps. Do not explain again what "
+        "an earlier episode covered; a short recap belongs in this episode's first beat only.\n"
+        "- Do not cover what a later episode covers. The last beat may point ahead to the "
+        "next episode.\n"
+        "- Use the series' terms, not synonyms.\n"
+        "- The opening guidance opens this episode: after the first episode, open with a "
+        "short recap instead of introducing the subject anew. Only the last episode closes "
+        "the whole series."
+    )
+    return "\n".join(lines) + "\n\n"
 
 
 def _frame(fields: dict[str, str]) -> str:

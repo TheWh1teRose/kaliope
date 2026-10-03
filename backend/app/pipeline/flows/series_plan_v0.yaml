@@ -1,0 +1,13 @@
+id: series_plan_v0
+version: "1.0"
+description: >-
+  Plans a series. Reads the document, measures how many minutes it supports and
+  splits it into episodes; each episode then runs through an episode flow such
+  as baseline_v0. Not a flow for single runs.
+nodes:
+  - node: ingest
+  - node: content_budget
+    config: {min_compression: 2.5}
+  - node: series_plan
+    config: {model: claude-opus-5}
+gates: []
