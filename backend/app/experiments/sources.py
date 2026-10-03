@@ -187,6 +187,7 @@ def load_beat_source(session: Session, store: ArtifactStore, source: SourceIn) -
         source={
             "run_id": run.id,
             "document_id": run.document_id,
+            "name": run.name,
             "document_title": (document.title or document.filename) if document else None,
             "beat_id": beat.id,
             "beat_title": beat.title,

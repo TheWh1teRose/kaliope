@@ -17,6 +17,7 @@ import { RouterLink } from 'vue-router'
 import type { GateDetail, GateSpec, RunOut } from '@/api/types'
 import StatusPill from '@/components/StatusPill.vue'
 import { t, tt } from '@/i18n'
+import { runTitle } from '@/titles'
 import { useCatalogueStore } from '@/stores/catalogue'
 import { useRunsStore } from '@/stores/runs'
 
@@ -98,7 +99,7 @@ onMounted(load)
           :to="{ name: 'run', params: { id: props.id } }"
           class="eyebrow back"
         >
-          ← {{ run?.document_title || t.run.title }}
+          ← {{ runTitle(run, t.run.title) }}
         </RouterLink>
         <p v-else class="eyebrow">{{ t.app.name }}</p>
         <h1 class="h-page">{{ scoped ? t.gate.detailTitle : t.gate.catalogueTitle }}</h1>

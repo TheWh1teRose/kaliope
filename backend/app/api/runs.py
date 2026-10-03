@@ -30,6 +30,7 @@ from app.errors import problem
 from app.events import bus
 from app.ingestion import anchors as anchor_tools
 from app.models import Document, GateResult, Run, RunNode, User
+from app.naming import clean_name
 from app.pipeline import catalogue
 from app.pipeline.catalogue import CatalogueError
 from app.pipeline.feedback import last_row_for_key, pause_out
@@ -46,6 +47,7 @@ from app.schemas.api import (
     FlowGraphOut,
     FlowNodeOut,
     FlowOut,
+    NameUpdate,
     NodeIOOut,
     NodeRunStatus,
     NodeValueOut,
@@ -179,6 +181,7 @@ def create_run(
         audience_spec_json=(payload.audience_spec or DEFAULT_AUDIENCE).model_dump(mode="json"),
         status="queued",
         created_by=user.id,
+        name=clean_name(payload.name),
     )
     db.add(run)
     db.commit()
@@ -210,6 +213,20 @@ def get_run(
     run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> RunOut:
     return _run_out(db, _require_run(db, run_id))
+
+
+@router.patch("/runs/{run_id}", response_model=RunOut)
+def rename_run(
+    run_id: str,
+    payload: NameUpdate,
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
+) -> RunOut:
+    """Change only the display name. Blank clears it."""
+    run = _require_run(db, run_id)
+    run.name = clean_name(payload.name)
+    db.commit()
+    return _run_out(db, run)
 
 
 @router.get("/runs/{run_id}/events")
@@ -893,7 +910,10 @@ def _to_markdown(
     script: Script,
     edits: dict[str, str],
 ) -> str:
-    title = (document.title if document else None) or (document.filename if document else "Skript")
+    document_title = (document.title if document else None) or (
+        document.filename if document else "Skript"
+    )
+    title = run.name or document_title
     lines = [
         f"# {title}",
         "",
@@ -1021,6 +1041,7 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         id=run.id,
         document_id=run.document_id,
         document_title=(document.title or document.filename) if document else None,
+        name=run.name,
         flow_id=run.flow_id,
         flow_version=run.flow_version,
         status=run.status,

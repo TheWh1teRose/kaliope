@@ -30,6 +30,7 @@ from app.errors import problem
 from app.events import bus
 from app.lang.resources import words_per_minute
 from app.models import Document, Run, Series, User
+from app.naming import clean_name
 from app.pipeline import catalogue
 from app.pipeline.catalogue import CatalogueError
 from app.pipeline.formats import DEFAULT_AUDIENCE
@@ -40,6 +41,7 @@ from app.pipeline.nodes.series_plan import MAX_EPISODES, MIN_EPISODES
 from app.schemas.api import (
     CreateSeriesRequest,
     DocumentBudgetOut,
+    NameUpdate,
     ReplanRequest,
     RunGraphNodeOut,
     RunGraphOut,
@@ -52,6 +54,8 @@ from app.security import current_user
 from app.series import (
     PAUSING_NODES,
     SERIES_IDLE,
+    apply_episode_names,
+    episode_run_name,
     episode_runs,
     load_plan,
     plan_run,
@@ -146,6 +150,7 @@ def create_series(
         audience_spec_json=(payload.audience_spec or DEFAULT_AUDIENCE).model_dump(mode="json"),
         status="queued",
         created_by=user.id,
+        name=clean_name(payload.name),
     )
     db.add(series)
     db.flush()
@@ -173,6 +178,21 @@ def get_series(
     series_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> SeriesOut:
     return _series_out(db, _require_series(db, series_id))
+
+
+@router.patch("/series/{series_id}", response_model=SeriesOut)
+def rename_series(
+    series_id: str,
+    payload: NameUpdate,
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
+) -> SeriesOut:
+    """Change only the display name, and retitle the episode runs from it."""
+    series = _require_series(db, series_id)
+    series.name = clean_name(payload.name)
+    apply_episode_names(db, series)
+    db.commit()
+    return _series_out(db, series)
 
 
 @router.post("/series/{series_id}/approve", response_model=SeriesOut)
@@ -351,18 +371,20 @@ def export_series(
                 continue
             parsed, script = _load_run_output(db, run)
             body = _to_markdown(run, document, parsed, script, edited_texts(db, run.id))
-            heading = f"# Folge {index}: {titles.get(index, '')}".rstrip(": ")
-            name = f"folge-{index:02d}-{_slug(titles.get(index, ''))}.md".replace("-.md", ".md")
+            label = run.name or titles.get(index, "")
+            heading = f"# Folge {index}: {label}".rstrip(": ")
+            name = f"folge-{index:02d}-{_slug(label)}.md".replace("-.md", ".md")
             archive.writestr(name, f"{heading}\n\n{body}")
             written += 1
         if plan is not None:
             archive.writestr("serie.json", json.dumps(plan.model_dump(mode="json"), indent=2))
     if not written:
         raise problem(409, "Nothing to export", "No episode of this series has a script yet.")
+    stem = _slug(series.name or "") or series_id
     return Response(
         buffer.getvalue(),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="kalliope-serie-{series_id}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="kalliope-serie-{stem}.zip"'},
     )
 
 
@@ -441,6 +463,11 @@ def _series_out(db: Session, series: Series) -> SeriesOut:
                 SeriesEpisodeOut(
                     index=episode.index,
                     title=episode.title,
+                    name=(
+                        run.name
+                        if run is not None
+                        else episode_run_name(series.name, episode.index)
+                    ),
                     role=episode.role,
                     target_minutes=episode.target_minutes,
                     run_id=run.id if run is not None else None,
@@ -453,6 +480,7 @@ def _series_out(db: Session, series: Series) -> SeriesOut:
         id=series.id,
         document_id=series.document_id,
         document_title=(document.title or document.filename) if document else None,
+        name=series.name,
         flow_id=series.flow_id,
         flow_version=series.flow_version,
         plan_flow_id=series.plan_flow_id,

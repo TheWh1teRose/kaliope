@@ -5,6 +5,7 @@ import { RouterLink } from 'vue-router'
 import type { SeriesOut } from '@/api/types'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
+import { runTitle, seriesTitle } from '@/titles'
 import { useRunsStore } from '@/stores/runs'
 import { useSeriesStore } from '@/stores/series'
 
@@ -62,7 +63,7 @@ onUnmounted(() => {
         <tr v-for="row in series" :key="row.id">
           <td>
             <RouterLink :to="{ name: 'series', params: { id: row.id } }" class="link">
-              {{ row.plan?.title || row.document_title || row.document_id }}
+              {{ seriesTitle(row) }}
             </RouterLink>
             <span class="meta block">{{ row.document_title }} · {{ when(row.created_at) }}</span>
           </td>
@@ -95,9 +96,11 @@ onUnmounted(() => {
         <tr v-for="run in runs.items" :key="run.id">
           <td>
             <RouterLink :to="{ name: 'run', params: { id: run.id } }" class="link">
-              {{ run.document_title || run.document_id }}
+              {{ runTitle(run) }}
             </RouterLink>
-            <span class="meta block">{{ when(run.created_at) }}</span>
+            <span class="meta block">
+              <template v-if="run.name && run.document_title">{{ run.document_title }} · </template>{{ when(run.created_at) }}
+            </span>
             <RouterLink
               v-if="run.series_id && run.episode_index"
               class="badge badge--mark series-badge"

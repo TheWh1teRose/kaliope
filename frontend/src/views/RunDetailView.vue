@@ -12,6 +12,7 @@ import NotesEditor from '@/components/NotesEditor.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { t } from '@/i18n'
 import { type ProgressLine, useRunsStore } from '@/stores/runs'
+import { runTitle } from '@/titles'
 
 const props = defineProps<{ id: string }>()
 
@@ -155,7 +156,7 @@ onUnmounted(() => {
       <div class="grow">
         <RouterLink :to="{ name: 'runs' }" class="eyebrow back">← {{ t.nav.runs }}</RouterLink>
         <h1 class="h-page">
-          {{ run.document_title || t.run.title }}
+          {{ runTitle(run, t.run.title) }}
         </h1>
         <p class="meta">
           {{ run.flow_id }} v{{ run.flow_version }} · {{ run.id }}

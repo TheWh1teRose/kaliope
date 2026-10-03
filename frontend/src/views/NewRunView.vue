@@ -31,6 +31,7 @@ const targetMinutes = ref(15)
 /** `null` follows the suggestion; a number is the reviewer's own count. */
 const ownCount = ref<number | null>(null)
 const hint = ref('')
+const runName = ref('')
 const audience = ref<AudienceSpec>({
   description: '',
   prior_knowledge: '',
@@ -112,6 +113,7 @@ async function submit(): Promise<void> {
   busy.value = true
   error.value = ''
   const audienceSpec = audience.value.description.trim() ? audience.value : undefined
+  const name = runName.value.trim() || undefined
   try {
     if (scope.value === 'series') {
       const created = await series.create({
@@ -123,6 +125,7 @@ async function submit(): Promise<void> {
         minutes_per_episode: targetMinutes.value,
         hint: hint.value.trim() || undefined,
         audience_spec: audienceSpec,
+        name,
       })
       await router.push({ name: 'series', params: { id: created.id } })
       return
@@ -133,6 +136,7 @@ async function submit(): Promise<void> {
       format_id: formatId.value,
       target_minutes: targetMinutes.value,
       audience_spec: audienceSpec,
+      name,
     })
     await router.push({ name: 'run', params: { id: run.id } })
   } catch (exc) {
@@ -186,6 +190,18 @@ onMounted(async () => {
             {{ t.run.scopeSeries }}
           </button>
         </div>
+      </div>
+
+      <div class="field">
+        <label for="run-name">{{ scope === 'series' ? t.series.name : t.run.name }}</label>
+        <input
+          id="run-name"
+          v-model="runName"
+          class="input"
+          maxlength="200"
+          :placeholder="scope === 'series' ? t.series.namePlaceholder : t.run.namePlaceholder"
+        />
+        <p class="hint">{{ scope === 'series' ? t.series.nameHint : t.run.nameHint }}</p>
       </div>
 
       <div class="pair">

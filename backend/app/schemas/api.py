@@ -178,6 +178,8 @@ class CreateRunRequest(BaseModel):
     audience_spec: AudienceSpec | None = None
     language: str | None = None
     force: bool = False
+    #: Trimmed by the endpoint. Blank means the run keeps the document title.
+    name: str | None = None
 
 
 class RunNodeOut(BaseModel):
@@ -204,6 +206,8 @@ class RunOut(BaseModel):
     id: str
     document_id: str
     document_title: str | None = None
+    #: Set when the reviewer named the run. Otherwise the document title is the title.
+    name: str | None = None
     flow_id: str
     flow_version: str
     status: str
@@ -440,6 +444,14 @@ class CreateSeriesRequest(BaseModel):
     audience_spec: AudienceSpec | None = None
     language: str | None = None
     force: bool = False
+    #: Trimmed by the endpoint. Blank means the series keeps its plan or document title.
+    name: str | None = None
+
+
+class NameUpdate(BaseModel):
+    """A later rename. Blank clears the name."""
+
+    name: str | None = None
 
 
 class ReplanRequest(BaseModel):
@@ -453,6 +465,8 @@ class ReplanRequest(BaseModel):
 class SeriesEpisodeOut(BaseModel):
     index: int
     title: str
+    #: The episode run's display name, such as ``"<Serie> Teil 1"``.
+    name: str | None = None
     role: str = ""
     target_minutes: float | None = None
     run_id: str | None = None
@@ -465,6 +479,8 @@ class SeriesOut(BaseModel):
     id: str
     document_id: str
     document_title: str | None = None
+    #: Set when the reviewer named the series. Otherwise the plan or document title is used.
+    name: str | None = None
     flow_id: str
     flow_version: str
     plan_flow_id: str

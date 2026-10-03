@@ -3,6 +3,7 @@
  * output's `meta`. Shared so every experiment shows them the same way.
  */
 import type { ExperimentCall, ExperimentRun } from '@/api/types'
+import { sourceTitle } from '@/titles'
 
 export interface Badge {
   text: string
@@ -36,8 +37,8 @@ export function formatFacts(parts: {
 
 export function sourceLabel(source: unknown): string | null {
   if (!source || typeof source !== 'object') return null
-  const s = source as Record<string, unknown>
-  const title = typeof s.document_title === 'string' ? s.document_title : null
+  const s = source as { name?: string | null; document_title?: string | null; beat_title?: unknown }
+  const title = sourceTitle(s) || null
   const beat = typeof s.beat_title === 'string' ? s.beat_title : null
   return [title, beat].filter(Boolean).join(' · ') || null
 }

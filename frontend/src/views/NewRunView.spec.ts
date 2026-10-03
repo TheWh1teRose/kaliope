@@ -107,7 +107,27 @@ describe('start screen', () => {
     ])
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(createRun).toHaveBeenCalledWith(expect.objectContaining({ flow_id: 'baseline_v0', target_minutes: 15 }))
+    expect(createRun).toHaveBeenCalledWith(
+      expect.objectContaining({ flow_id: 'baseline_v0', target_minutes: 15, name: undefined }),
+    )
     expect(createSeries).not.toHaveBeenCalled()
+  })
+
+  it('sends a trimmed name for a run, and a series name in series mode', async () => {
+    const wrapper = mount(NewRunView, { props: { id: 'd1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    await wrapper.get('#run-name').setValue('  Kurzfassung  ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(createRun).toHaveBeenCalledWith(expect.objectContaining({ name: 'Kurzfassung' }))
+
+    createRun.mockClear()
+    await wrapper.get('[data-scope="series"]').trigger('click')
+    await wrapper.get('#run-name').setValue('  Klimaserie  ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(createSeries).toHaveBeenCalledWith(expect.objectContaining({ name: 'Klimaserie' }))
+    expect(wrapper.text()).toContain('Teil 1')
+    expect(createRun).not.toHaveBeenCalled()
   })
 })

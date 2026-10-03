@@ -113,6 +113,13 @@ describe('series view', () => {
     expect(store.approve).toHaveBeenCalledWith('s1')
   })
 
+  it('uses the series name as the page title', async () => {
+    store.get.mockResolvedValueOnce({ ...series('planned'), name: 'Klimaserie' })
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.find('h1').text()).toBe('Klimaserie')
+  })
+
   it('plans again with another count', async () => {
     const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
     await flushPromises()

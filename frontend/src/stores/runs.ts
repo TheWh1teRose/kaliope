@@ -65,6 +65,7 @@ export const useRunsStore = defineStore('runs', () => {
     format_id: string
     target_minutes?: number
     audience_spec?: AudienceSpec
+    name?: string
   }): Promise<RunOut> {
     return api.post<RunOut>('/api/runs', payload)
   }

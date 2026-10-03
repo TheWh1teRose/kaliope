@@ -17,6 +17,7 @@ import ReasonPicker from '@/components/ReasonPicker.vue'
 import SeriesStrip from '@/components/SeriesStrip.vue'
 import SourceRegister from '@/components/SourceRegister.vue'
 import { t } from '@/i18n'
+import { runTitle } from '@/titles'
 import { useCatalogueStore } from '@/stores/catalogue'
 import { useDocumentsStore } from '@/stores/documents'
 import { useReviewStore } from '@/stores/review'
@@ -201,7 +202,7 @@ onMounted(async () => {
       <RouterLink :to="{ name: 'run', params: { id: props.id } }" class="eyebrow back">
         ← {{ t.run.title }}
       </RouterLink>
-      <h1 class="bar__title truncate">{{ run?.document_title || t.review.title }}</h1>
+      <h1 class="bar__title truncate">{{ runTitle(run, t.review.title) }}</h1>
       <SeriesStrip
         v-if="run?.series_id && run.episode_index"
         :series-id="run.series_id"
