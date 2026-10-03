@@ -1,13 +1,14 @@
 """Experiment: tune the series planner's prompt and input.
 
 It starts from the production ``series_plan`` system prompt and response schema.
-The user message is a template over the fields the planner needs: a document
-summary, the content budget, format and audience, and how many episodes of
-what length. One run is one model call. The answer is read as a series plan
-when it has episodes with titles, roles, goals and passage ids; any other
-shape stays raw text with a warning. Goals use the same formulation rule as
-the objectives node. Nothing here assigns leftover passages or warns about the
-source-word budget: the page shows what the model planned.
+The user message is the production planner template: document language, an
+optional split hint, the document's objectives, the content budget, format and
+audience, and how many episodes of what length. One run is one model call.
+The answer is read as a series plan when it has episodes with titles, roles,
+goals and passage ids; any other shape stays raw text with a warning. Goals
+use the same formulation rule as the objectives node. Nothing here assigns
+leftover passages or warns about the source-word budget: the page shows what
+the model planned.
 """
 
 from __future__ import annotations
@@ -33,53 +34,47 @@ from app.llm.base import LLMClient, LLMError, parse_json
 from app.models import Document, Run, Series
 from app.pipeline.bench import coerce_value, load_values
 from app.pipeline.framework.artifacts import ArtifactStore
-from app.pipeline.nodes.content_budget import episode_source_words, supportable_minutes
 from app.pipeline.nodes.series_plan import _SCHEMA as PLAN_SCHEMA
 from app.pipeline.nodes.series_plan import _SYSTEM as PLAN_SYSTEM
-from app.pipeline.nodes.series_plan import PASSAGE_CHARS
-from app.pipeline.objective_rule import (
-    DOCUMENT_OBJECTIVES_NOTE,
-    desired_outcome_source,
-    formulated_goal,
-    time_budget_constraint,
-)
-from app.schemas.document import Block, ParsedDocument
+from app.pipeline.nodes.series_plan import PLANNER_USER_TEMPLATE as SERIES_TEMPLATE
+from app.pipeline.nodes.series_plan import planner_user_fields
+from app.pipeline.objective_rule import formulated_goal
+from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import AudienceSpec, ContentBudget, FormatSpec, SeriesRequest
 
 #: The series planner pins this model and this ``max_tokens``.
 PRODUCTION_MODEL = "claude-opus-5"
 PRODUCTION_MAX_TOKENS = 16000
 
-SERIES_TEMPLATE = (
-    "Plan {{episode_count}} episodes of about {{minutes_per_episode}} minutes each.\n"
-    "{{content_budget}}\n"
-    "{{format_audience}}\n"
-    "Document:\n{{document}}\n"
-)
-
 SAMPLE_SERIES: dict[str, str] = {
     "episode_count": "2",
     "minutes_per_episode": "15",
-    "content_budget": (
-        "810 narratable words support about 15.0 minutes at 135 words per minute "
-        "with a 2.5× dialogue expansion. Each episode should use about 405 words "
-        "of source material so the 15 minutes have room for dialogue, explanation "
-        "and questions. 810 words is the most one episode should carry; "
-        "the document's 810 narratable words spread across 2 episodes "
-        "come to about 405 words each. Prefer the smaller figure, and prefer "
+    "source_budget": (
+        "Each episode should use about 405 words of source material so the 15 minutes "
+        "have room for dialogue, explanation and questions. 810 words is the most one "
+        "episode should carry; the document's 810 narratable words spread across 2 "
+        "episodes come to about 405 words each. Prefer the smaller figure, and prefer "
         "fewer, richer topics. Passages beyond that stay unassigned."
     ),
-    "format_audience": (
-        "Format: Zwei Stimmen im Gespräch. Speakers: Moderator (asks the questions "
-        "a listener would ask), Expertin (explains the material).\n"
-        "Audience: Erwachsene ohne Fachstudium, die den Stoff verstehen wollen.\n"
-        "Desired outcome (the source — derive every objective from this):\n"
-        "Die Hörerin kann erklären, wie Fotosynthese Licht in Zucker verwandelt.\n"
-        "Time budget (constraint — only write objectives a listener can reach in "
-        "this time): 15.0 minutes per episode."
+    "format_name": "Zwei Stimmen im Gespräch",
+    "speakers": (
+        "Moderator (asks the questions a listener would ask), Expertin (explains the material)"
     ),
-    "document": (
-        "## Licht\n"
+    "audience": "Erwachsene ohne Fachstudium, die den Stoff verstehen wollen.",
+    "outcome": (
+        "Desired outcome (the source — derive every objective from this):\n"
+        "Die Hörerin kann erklären, wie Fotosynthese Licht in Zucker verwandelt."
+    ),
+    "time_budget": (
+        "Time budget (constraint — only write objectives a listener can reach in "
+        "this time): 15.0 minutes"
+    ),
+    "language": "de",
+    "hint": "",
+    "objectives": "The document states no objectives of its own.",
+    "passage_count": "2",
+    "passages": (
+        "\n## Licht\n"
         "[b12] (weight 1.0, 40 words)\n"
         "Die Fotosynthese wandelt Lichtenergie in chemische Energie um.\n"
         "[b14] (weight 0.8, 30 words)\n"
@@ -110,73 +105,6 @@ class PlanView(BaseModel):
     episodes: list[PlanEpisode]
 
 
-def _clip(text: str) -> str:
-    if len(text) <= PASSAGE_CHARS:
-        return text
-    return text[:PASSAGE_CHARS].rsplit(" ", 1)[0] + " …"
-
-
-def document_summary(parsed: ParsedDocument) -> str:
-    """Passages the way the planner sees them: section, id, weight, words, start of the text."""
-    titles = {section.id: section.title for section in (parsed.sections or [])}
-    lines: list[str] = []
-    current: str | None = "\0"
-    for block in parsed.narratable_blocks():
-        if block.section_id != current:
-            current = block.section_id
-            lines.append(f"## {titles.get(current or '') or '(no section)'}")
-        lines.append(_passage_line(block))
-    objectives = parsed.objectives
-    if objectives:
-        lines.append(
-            DOCUMENT_OBJECTIVES_NOTE
-            + "\n"
-            + "\n".join(f"{index + 1}. {objective}" for index, objective in enumerate(objectives))
-        )
-    return "\n".join(lines)
-
-
-def _passage_line(block: Block) -> str:
-    return (
-        f"[{block.id}] (weight {round(block.salience, 2)}, {block.word_count()} words)\n"
-        f"{_clip(block.llm_text())}"
-    )
-
-
-def budget_summary(parsed: ParsedDocument, budget: ContentBudget, minutes: int, count: int) -> str:
-    total = parsed.narratable_word_count()
-    wpm = budget.words_per_minute
-    expansion = budget.dialogue_expansion
-    supportable = supportable_minutes(total, wpm, expansion)
-    target, cap, even_share = episode_source_words(total, count, minutes, wpm, expansion)
-    return (
-        f"{total} narratable words support about {supportable:.1f} minutes at {wpm} words "
-        f"per minute with a {expansion:g}× dialogue expansion. "
-        f"Each episode should use about {target} words of source material "
-        f"so the {minutes} minutes have room for dialogue, explanation and questions. "
-        f"{cap} words is the most one episode should carry; "
-        f"the document's {total} narratable words spread across {count} episodes "
-        f"come to about {even_share} words each. Prefer the smaller figure, and prefer "
-        f"fewer, richer topics. Passages beyond that stay unassigned."
-    )
-
-
-def format_audience_text(format_spec: FormatSpec, audience: AudienceSpec, minutes: int) -> str:
-    speakers = ", ".join(f"{speaker.name} ({speaker.role})" for speaker in format_spec.speakers)
-    desired = (audience.desired_outcome or "").strip()
-    outcome = (
-        desired_outcome_source(desired)
-        if desired
-        else "The audience states no desired outcome. Do not invent ambition from the document."
-    )
-    return (
-        f"Format: {format_spec.name}. Speakers: {speakers}.\n"
-        f"Audience: {audience.description}\n"
-        f"{outcome}\n"
-        f"{time_budget_constraint(float(minutes))} per episode."
-    )
-
-
 def series_fields(
     parsed: ParsedDocument,
     budget: ContentBudget,
@@ -185,14 +113,18 @@ def series_fields(
     *,
     episode_count: int,
     minutes: int,
+    hint: str | None = None,
 ) -> dict[str, str]:
-    return {
-        "episode_count": str(episode_count),
-        "minutes_per_episode": str(minutes),
-        "content_budget": budget_summary(parsed, budget, minutes, episode_count),
-        "format_audience": format_audience_text(format_spec, audience, minutes),
-        "document": document_summary(parsed),
-    }
+    return planner_user_fields(
+        parsed,
+        budget,
+        format_spec,
+        audience,
+        parsed.narratable_blocks(),
+        episode_count,
+        minutes,
+        hint,
+    )
 
 
 def planner_minutes_and_count(
@@ -324,13 +256,21 @@ class SeriesPlanner(PromptExperiment):
         return [
             FieldSpec(key="episode_count", label="Anzahl Folgen"),
             FieldSpec(key="minutes_per_episode", label="Minuten je Folge"),
-            FieldSpec(key="content_budget", label="Inhaltsbudget", multiline=True),
-            FieldSpec(key="format_audience", label="Format und Zielgruppe", multiline=True),
+            FieldSpec(key="source_budget", label="Quellenbudget", multiline=True),
+            FieldSpec(key="format_name", label="Format"),
+            FieldSpec(key="speakers", label="Stimmen", multiline=True),
+            FieldSpec(key="audience", label="Zielgruppe", multiline=True),
+            FieldSpec(key="outcome", label="Gewünschtes Ergebnis", multiline=True),
+            FieldSpec(key="time_budget", label="Zeitbudget", multiline=True),
+            FieldSpec(key="language", label="Dokumentsprache"),
+            FieldSpec(key="hint", label="Hinweis zur Aufteilung", multiline=True),
+            FieldSpec(key="objectives", label="Lernziele des Dokuments", multiline=True),
+            FieldSpec(key="passage_count", label="Anzahl Passagen"),
             FieldSpec(
-                key="document",
-                label="Dokument",
+                key="passages",
+                label="Passagen",
                 multiline=True,
-                hint="Abschnitte und Passagen, oder eine Zusammenfassung des geparsten Dokuments",
+                hint="Abschnitte und Passagen, so wie der Serienplaner sie sieht",
             ),
         ]
 
@@ -403,6 +343,7 @@ def load_series_source(session: Session, store: ArtifactStore, source: SourceIn)
         coerce_value("audience_spec", payloads["audience_spec"]),
         episode_count=episode_count,
         minutes=minutes,
+        hint=None if request is None else request.hint,
     )
     document = session.get(Document, run.document_id)
     own_plan = payloads.get("series_plan")

@@ -479,7 +479,7 @@ onBeforeRouteLeave(() => {
             :hint="fieldSpecs.get(name)?.hint"
             :multiline="fieldSpecs.get(name)?.multiline ?? true"
             :removable="!fieldSpecs.has(name)"
-            :start-open="name === 'document' || !fieldSpecs.has(name)"
+            :start-open="name === 'passages' || name === 'document' || !fieldSpecs.has(name)"
             @update:model-value="setField(name, $event)"
             @remove="removeField(name)"
           />
