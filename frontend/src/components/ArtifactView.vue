@@ -1,24 +1,28 @@
 <script setup lang="ts">
 /**
- * Read-only text view for an outline, a beat, a script, or a selection, with the raw JSON
+ * Read-only text view for an outline, a beat, a script, a selection or an audio script,
+ * with the raw JSON
  * one click away. The model name picks the renderer. Anything else, and any
  * payload that does not match, stays JSON.
  */
 import { computed, ref } from 'vue'
 
-import { t } from '@/i18n'
+import { fill, t } from '@/i18n'
 
 import {
   artifactMode,
   loadArtifactMode,
   parsePreview,
   pickRenderer,
+  readAudioScript,
   readBeat,
   readOutline,
   readScript,
   readSelection,
   setArtifactMode,
+  tagParts,
   type ArtifactMode,
+  type AudioLineView,
   type BeatView,
   type SegmentView,
   type SelectionView,
@@ -68,8 +72,26 @@ const selection = computed<SelectionView | null>(() => {
   return readSelection(parsed.value)
 })
 
+const audioLines = computed<AudioLineView[] | null>(() => {
+  if (props.truncated || kind.value !== 'audio' || parsed.value === undefined) return null
+  return readAudioScript(parsed.value)
+})
+
+const audioSummary = computed(() => {
+  const lines = audioLines.value ?? []
+  return fill(t.artifact.audioSummary, {
+    lines: lines.length,
+    tags: lines.reduce((sum, line) => sum + line.tags.length, 0),
+    fallbacks: lines.filter((line) => line.guard === 'fallback').length,
+  })
+})
+
 const rendered = computed(
-  () => beats.value !== null || segments.value !== null || selection.value !== null,
+  () =>
+    beats.value !== null ||
+    segments.value !== null ||
+    selection.value !== null ||
+    audioLines.value !== null,
 )
 const showText = computed(() => viewMode.value === 'text' && rendered.value)
 const mismatch = computed(() => {
@@ -87,8 +109,8 @@ const jsonText = computed(() => {
 
 const speakers = computed(() => {
   const index = new Map<string, number>()
-  for (const segment of segments.value ?? []) {
-    if (!index.has(segment.speaker)) index.set(segment.speaker, index.size)
+  for (const line of [...(segments.value ?? []), ...(audioLines.value ?? [])]) {
+    if (!index.has(line.speaker)) index.set(line.speaker, index.size)
   }
   return index
 })
@@ -173,6 +195,37 @@ async function copyJson(): Promise<void> {
           <span v-if="segment.kind === 'claim' && !segment.anchors.length" class="meta">
             {{ t.review.noCitations }}
           </span>
+        </footer>
+      </article>
+    </div>
+
+    <div v-else-if="showText && audioLines" class="dialog">
+      <p class="meta">{{ audioSummary }}</p>
+      <article
+        v-for="line in audioLines"
+        :key="line.segment_id"
+        class="script-seg"
+        :style="{ '--speaker': speakerColor(line.speaker) }"
+      >
+        <header class="script-seg__head">
+          <span class="script-seg__speaker">{{ line.speaker }}</span>
+          <span class="meta">{{ line.segment_id }}</span>
+          <span class="grow" />
+          <span class="badge" :class="line.guard === 'pass' ? 'badge--pass' : 'badge--warn'">
+            {{ line.guard === 'pass' ? t.artifact.guardPass : t.artifact.guardFallback }}
+          </span>
+        </header>
+        <p class="script-seg__text prose">
+          <template v-for="(part, index) in tagParts(line.tagged)" :key="index">
+            <span v-if="part.tag" class="audio-tag">{{ part.text }}</span>
+            <template v-else>{{ part.text }}</template>
+          </template>
+        </p>
+        <footer v-if="line.spoken_forms.length || line.problem" class="script-seg__foot">
+          <span v-for="(form, index) in line.spoken_forms" :key="index" class="cite">
+            „{{ form.original }}“ → „{{ form.spoken }}“
+          </span>
+          <span v-if="line.problem" class="audio-problem">{{ line.problem }}</span>
         </footer>
       </article>
     </div>
@@ -370,6 +423,21 @@ async function copyJson(): Promise<void> {
   font-family: var(--mono);
   font-size: 0.625rem;
   color: var(--ink-2);
+}
+
+.audio-tag {
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--mark-soft);
+  color: var(--mark-deep);
+  font-family: var(--mono);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+.audio-problem {
+  font-size: var(--t-xs);
+  color: var(--warn);
 }
 
 .json {

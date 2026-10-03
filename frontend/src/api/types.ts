@@ -353,8 +353,8 @@ export interface FlowOut {
   description: string | null
   nodes: string[]
   gates: string[]
-  /** `episode` makes one script; `series_plan` plans a series. */
-  purpose?: 'episode' | 'series_plan'
+  /** `episode` makes one script; `series_plan` plans a series; `audio` runs on a finished script. */
+  purpose?: 'episode' | 'series_plan' | 'audio'
 }
 
 // --------------------------------------------------------------- flow graph

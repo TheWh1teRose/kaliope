@@ -142,6 +142,27 @@ def test_a_planner_flow_is_not_a_single_run_and_a_pausing_flow_not_a_series(
     assert flows["series_plan_v0"] == "series_plan" and flows["baseline_v0"] == "episode"
 
 
+def test_an_audio_pipeline_starts_neither_a_run_nor_a_series(
+    client: TestClient, document_id: str
+) -> None:
+    flows = {f["id"]: f["purpose"] for f in client.get("/api/flows").json()}
+    assert flows["elevenlabs_dialog_v0"] == "audio"
+    single = client.post(
+        "/api/runs", json={"document_id": document_id, "flow_id": "elevenlabs_dialog_v0"}
+    )
+    assert single.status_code == 422
+    assert "audio pipeline" in single.json()["detail"]
+    series = client.post(
+        "/api/series",
+        json={
+            "document_id": document_id,
+            "flow_id": "elevenlabs_dialog_v0",
+            "minutes_per_episode": 3,
+        },
+    )
+    assert series.status_code == 422
+
+
 def test_a_series_holds_at_its_plan_then_writes_every_episode_in_order(
     client: TestClient, document_id: str, provider: SeriesStub
 ) -> None:

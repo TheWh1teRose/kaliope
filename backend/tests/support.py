@@ -128,6 +128,8 @@ class StubProvider:
 
         if "You label blocks" in system:
             return self._zones(text)
+        if "for speech synthesis with ElevenLabs" in system:
+            return self._audio_tags(text)
         if "You split a source document into a series" in system:
             return self._series_plan(text)
         if "You write the learning objectives" in system:
@@ -151,6 +153,19 @@ class StubProvider:
         if "You revise one beat of an outline" in system:
             return self._revise_outline(text)
         return {}
+
+    @staticmethod
+    def _audio_tags(text: str) -> Any:
+        """Every second line gets a tag; the words stay as they are."""
+        lines = []
+        for raw in text.splitlines():
+            match = re.match(r"^\[(\S+)\] [^:]+?: (.*)$", raw)
+            if match is None:
+                continue
+            line_id, words = match.groups()
+            tag = "[thoughtful] " if len(lines) % 2 == 0 else ""
+            lines.append({"id": line_id, "tagged": tag + words, "spoken_forms": []})
+        return {"lines": lines}
 
     @staticmethod
     def _objectives() -> Any:

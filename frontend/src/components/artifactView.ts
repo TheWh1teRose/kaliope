@@ -7,7 +7,7 @@
  */
 import { ref } from 'vue'
 
-export type RendererName = 'outline' | 'beat' | 'script' | 'selection'
+export type RendererName = 'outline' | 'beat' | 'script' | 'selection' | 'audio'
 
 export interface BeatView {
   id: string
@@ -47,7 +47,31 @@ export interface SegmentView {
   beat_id: string
 }
 
+export interface SpokenFormView {
+  original: string
+  spoken: string
+}
+
+export interface AudioLineView {
+  segment_id: string
+  speaker: string
+  kind: string | null
+  text: string
+  tagged: string
+  spoken_forms: SpokenFormView[]
+  tags: string[]
+  guard: 'pass' | 'fallback'
+  problem: string | null
+}
+
+/** A stretch of a tagged line: a tag in square brackets, or the words between. */
+export interface TagPart {
+  text: string
+  tag: boolean
+}
+
 const RENDERERS: Record<string, RendererName> = {
+  AudioScript: 'audio',
   Outline: 'outline',
   Beat: 'beat',
   Script: 'script',
@@ -167,6 +191,52 @@ export function readSelection(value: unknown): SelectionView | null {
   }
   const rationale = typeof value.rationale === 'string' ? value.rationale : ''
   return { goals, unassigned, rationale }
+}
+
+/** `null` when the payload is not an audio script: lines with their tagged text and guard. */
+export function readAudioScript(value: unknown): AudioLineView[] | null {
+  if (!isRecord(value) || !Array.isArray(value.lines)) return null
+  const lines: AudioLineView[] = []
+  for (const item of value.lines) {
+    if (!isRecord(item)) return null
+    if (typeof item.segment_id !== 'string' || typeof item.speaker !== 'string') return null
+    if (typeof item.text !== 'string' || typeof item.tagged !== 'string') return null
+    if (item.guard !== 'pass' && item.guard !== 'fallback') return null
+    const forms: SpokenFormView[] = []
+    for (const form of Array.isArray(item.spoken_forms) ? item.spoken_forms : []) {
+      if (!isRecord(form) || typeof form.original !== 'string' || typeof form.spoken !== 'string') {
+        return null
+      }
+      forms.push({ original: form.original, spoken: form.spoken })
+    }
+    const tags = Array.isArray(item.tags) ? item.tags : []
+    lines.push({
+      segment_id: item.segment_id,
+      speaker: item.speaker,
+      kind: typeof item.kind === 'string' ? item.kind : null,
+      text: item.text,
+      tagged: item.tagged,
+      spoken_forms: forms,
+      tags: tags.filter((tag): tag is string => typeof tag === 'string'),
+      guard: item.guard,
+      problem: typeof item.problem === 'string' ? item.problem : null,
+    })
+  }
+  return lines
+}
+
+/** Split a tagged line into tags and the words between them, in order. */
+export function tagParts(tagged: string): TagPart[] {
+  const parts: TagPart[] = []
+  let last = 0
+  for (const match of tagged.matchAll(/\[[^[\]\n]{1,60}\]/g)) {
+    const at = match.index ?? 0
+    if (at > last) parts.push({ text: tagged.slice(last, at), tag: false })
+    parts.push({ text: match[0], tag: true })
+    last = at + match[0].length
+  }
+  if (last < tagged.length) parts.push({ text: tagged.slice(last), tag: false })
+  return parts
 }
 
 export function parsePreview(preview: string | null | undefined): unknown {

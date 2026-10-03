@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.pipeline.framework.registry import get_node, node_names
+from app.pipeline.framework.registry import get_node, node_names, nodes_purpose
 from app.pipeline.gates import ALL_GATE_IDS
 
 #: What the worker seeds every run's value bag with before the first node runs.
@@ -46,6 +46,11 @@ REQUIRED_OUTPUT_KEYS: tuple[str, ...] = (
 PLANNER_OUTPUT_KEYS: tuple[str, ...] = ("parsed", "budget", "series_plan")
 #: What the worker additionally seeds a planner run with.
 PLANNER_SEED_KEYS: tuple[str, ...] = ("series_request",)
+
+#: An audio pipeline runs on a finished script: what it is seeded with, and
+#: what it must publish.
+AUDIO_SEED_KEYS: tuple[str, ...] = ("script", "parsed")
+AUDIO_OUTPUT_KEYS: tuple[str, ...] = ("audio_script",)
 
 
 class WiringOut(BaseModel):
@@ -102,9 +107,13 @@ def validate_flow(
     as available the same way a run treats ``document_ref``.
     """
     entries = [_entry(item) for item in nodes]
-    planner = any(name == "series_plan" for name, _config in entries)
+    purpose = nodes_purpose([name for name, _config in entries])
+    planner = purpose == "series_plan"
+    audio = purpose == "audio"
     if planner:
         extra_seeds = (*extra_seeds, *PLANNER_SEED_KEYS)
+    if audio:
+        extra_seeds = (*extra_seeds, *AUDIO_SEED_KEYS)
     errors: list[str] = []
     warnings: list[str] = []
     checks: list[NodeCheckOut] = []
@@ -184,7 +193,10 @@ def validate_flow(
         published[node.produces] = name
 
     if as_pipeline:
-        for key in PLANNER_OUTPUT_KEYS if planner else REQUIRED_OUTPUT_KEYS:
+        required = (
+            PLANNER_OUTPUT_KEYS if planner else AUDIO_OUTPUT_KEYS if audio else REQUIRED_OUTPUT_KEYS
+        )
+        for key in required:
             if key not in published:
                 errors.append(
                     f"Nothing in this pipeline publishes '{key}'. The run would execute and then "
@@ -197,7 +209,7 @@ def validate_flow(
             f"Unknown quality check(s): {', '.join(unknown_gates)}. "
             f"Known: {', '.join(ALL_GATE_IDS)}."
         )
-    if as_pipeline and not gates and not planner:
+    if as_pipeline and not gates and purpose == "episode":
         warnings.append(
             "No quality checks are selected. The run produces a script that nothing reports on."
         )

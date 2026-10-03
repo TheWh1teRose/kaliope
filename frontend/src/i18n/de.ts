@@ -877,6 +877,17 @@ export default {
         'Ein fertiger Lauf liefert Kandidaten, Längenbudget, Zielgruppe und Lernziel-Anweisung, so wie der Auswahl-Schritt sie bekam.',
       reference: 'Auswahl dieses Laufs',
     },
+    audioTags: {
+      systemPromptHint:
+        'Startet mit dem Prompt des Knotens audio_script, wie er in der Produktion läuft. Jede Zeile der Antwort geht durch denselben Wortwächter.',
+      shapeHint:
+        'Die Antwort erscheint als Audio-Skript: Tags hervorgehoben, ausgeschriebene Formen darunter. Eine Zeile, die der Wächter ablehnt, steht ohne Tags da. Der Knoten würde sie noch einmal anfragen, das Experiment zeigt die erste Antwort. Noch ohne Audio.',
+      structuredHint:
+        'Das Modell antwortet im JSON-Schema des Audio-Skript-Schritts. Aus: freier Text; JSON in der Antwort wird trotzdem gelesen.',
+      sourceSample: 'Beispiel-Skript (kein Lauf geladen)',
+      loadFromRunLead:
+        'Ein fertiger Lauf liefert die Zeilen eines Beats, die Sprecher seines Formats und die Zeile davor, so wie der Audio-Skript-Schritt sie bekommt.',
+    },
   },
   collection: {
     tabExperiments: 'Experimente',
@@ -1012,6 +1023,9 @@ export default {
     passages: 'Stellen',
     goal: 'Lernziel',
     noGoal: 'Ohne Lernziel',
+    guardPass: 'Wächter: ok',
+    guardFallback: 'Wächter: ohne Tags',
+    audioSummary: '{lines} Zeilen · {tags} Tags · {fallbacks} ohne Tags',
   },
   modelSettings: {
     provider: 'Anbieter',

@@ -62,15 +62,27 @@ class Flow(BaseModel):
 
 #: The node whose presence makes a flow a series planner rather than an episode flow.
 SERIES_PLAN_NODE = "series_plan"
+#: Nodes whose presence makes a flow an audio pipeline: it runs on a finished
+#: script and is chosen separately from the pipeline that writes the script.
+AUDIO_NODES: frozenset[str] = frozenset({"audio_script"})
 
 
 def flow_purpose(flow: Flow) -> str:
-    """``series_plan`` for a flow that plans a series, ``episode`` for every other.
+    """``series_plan`` for a flow that plans a series, ``audio`` for an audio
+    pipeline, ``episode`` for every other.
 
-    Derived from the nodes rather than stored, so a planner flow built in the
-    pipeline editor is recognised without a separate setting.
+    Derived from the nodes rather than stored, so a planner or audio flow built
+    in the pipeline editor is recognised without a separate setting.
     """
-    return "series_plan" if any(n.node == SERIES_PLAN_NODE for n in flow.nodes) else "episode"
+    return nodes_purpose([n.node for n in flow.nodes])
+
+
+def nodes_purpose(names: list[str]) -> str:
+    if SERIES_PLAN_NODE in names:
+        return "series_plan"
+    if any(name in AUDIO_NODES for name in names):
+        return "audio"
+    return "episode"
 
 
 def load_flow(path: Path) -> Flow:
