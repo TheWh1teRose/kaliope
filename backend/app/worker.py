@@ -272,12 +272,24 @@ class Worker:
             row.tokens_out = llm.total_usage.output_tokens
             row.finished_at = datetime.now(UTC)
 
-    def execute_run(self, run_id: str) -> None:
+    def execute_run(self, run_id: str) -> bool:
+        """Run one attempt. False means the row was already stopped, so nothing started."""
+        try:
+            return self._execute_run(run_id) is not False
+        finally:
+            self._discard_run_flag(run_id)
+
+    def _execute_run(self, run_id: str) -> bool | None:
         settings = get_settings()
         store = ArtifactStore(settings.artifacts_dir)
         with session_scope() as session:
             tagged = session.get(Run, run_id)
-            if tagged is not None and tagged.series_id and tagged.episode_index is not None:
+            if tagged is None:
+                logger.warning("execution requested for unknown run %s", run_id)
+                return
+            if tagged.status == "stopped":
+                return False
+            if tagged.series_id and tagged.episode_index is not None:
                 with self._lock:
                     self._series_tags[run_id] = (tagged.series_id, tagged.episode_index)
         # A run executes again after a pause; the previous execution's events,
@@ -291,11 +303,10 @@ class Worker:
                 logger.warning("execution requested for unknown run %s", run_id)
                 return
             halted = False
-            # A stopped run whose flag was cleared is being started again.
-            # A flag that is still set means the stop won before this attempt.
-            if run.status == "stopped" and self._run_should_stop(run_id):
-                return
-            if self._run_should_stop(run_id) and run.status in _RUN_STOPPABLE:
+            if run.status == "stopped":
+                return False
+            self._arm(run_id)
+            if self._flag_says_stop(run_id) and run.status in _RUN_STOPPABLE:
                 self._apply_run_stopped(session, run, self._stop_user(run_id), None)
                 halted = True
             document = None if halted else session.get(Document, run.document_id)
@@ -730,7 +741,7 @@ class Worker:
                     session.add(run)
                     session.flush()
                     _record_artifact(session, brief.hash, "episode_brief", brief.size_bytes)
-                if run.status in SCRIPT_DONE or run.status == "outlined":
+                if run.status in SCRIPT_DONE or run.status == "outlined" or run.status == "stopped":
                     continue
                 flow = catalogue.flows(session).get(run.flow_id)
                 if flow is not None and last_row_for_key(
@@ -748,7 +759,8 @@ class Worker:
         for run_id in todo:
             if self._series_should_stop(series_id):
                 return
-            self._run_for_series(series_id, run_id)
+            if not self._run_for_series(series_id, run_id):
+                continue
             if not self._episode_reached(series_id, run_id, {"outlined", *SCRIPT_DONE}):
                 return
 
@@ -763,7 +775,7 @@ class Worker:
         for episode in plan.episodes:
             with session_scope() as session:
                 run = episode_runs(session, series_id)[episode.index]
-                if run.status in SCRIPT_DONE:
+                if run.status in SCRIPT_DONE or run.status == "stopped":
                     continue
                 context = series_context_for(session, store, series_id, plan, episode.index)
                 stored = store.put("series_context", context)
@@ -782,7 +794,8 @@ class Worker:
             if self._series_should_stop(series_id):
                 return
             bus.publish(channel, "episode.writing", {"episode": episode.index, "run_id": run_id})
-            self._run_for_series(series_id, run_id)
+            if not self._run_for_series(series_id, run_id):
+                continue
             if not self._episode_reached(series_id, run_id, set(SCRIPT_DONE)):
                 return
 
@@ -993,12 +1006,23 @@ class Worker:
             flag = self._stops.get(job_id)
             return flag is not None and flag.is_set()
 
-    def _run_should_stop(self, run_id: str) -> bool:
+    def _flag_says_stop(self, run_id: str) -> bool:
         if self._is_stopped(run_id):
             return True
         with self._lock:
             tag = self._series_tags.get(run_id)
         return tag is not None and self._is_stopped(tag[0])
+
+    def _run_should_stop(self, run_id: str) -> bool:
+        if self._flag_says_stop(run_id):
+            return True
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            return run is not None and run.status == "stopped"
+
+    def _discard_run_flag(self, run_id: str) -> None:
+        with self._lock:
+            self._stops.pop(run_id, None)
 
     def _stop_user(self, *job_ids: str) -> str | None:
         with self._lock:
@@ -1008,12 +1032,11 @@ class Worker:
                     return flag.user_id
         return None
 
-    def _run_for_series(self, series_id: str, run_id: str) -> None:
-        self._arm(run_id)
+    def _run_for_series(self, series_id: str, run_id: str) -> bool:
         with self._lock:
             self._current_run[series_id] = run_id
         try:
-            self.execute_run(run_id)
+            return self.execute_run(run_id)
         finally:
             with self._lock:
                 if self._current_run.get(series_id) == run_id:

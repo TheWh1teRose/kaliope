@@ -259,6 +259,11 @@ def test_stopping_a_running_run_keeps_artifacts_and_a_rerun_reuses_them(
     assert again["outcome"] == "already_stopped"
 
     worker._arm(run_id)
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run is not None
+        run.status = "queued"
+        run.finished_at = None
     worker.execute_run(run_id)
     resumed = client.get(f"/api/runs/{run_id}").json()
     assert resumed["status"] == "completed", resumed["error"]
@@ -317,6 +322,11 @@ def test_stopping_during_a_beat_does_not_start_the_next_and_keeps_the_cached_one
     registry.register_provider("anthropic", provider)
     try:
         worker._arm(run_id)
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            assert run is not None
+            run.status = "queued"
+            run.finished_at = None
         worker.execute_run(run_id)
     finally:
         registry.register_provider("anthropic", _STUB)
@@ -407,6 +417,42 @@ def test_resuming_a_stopped_series_in_the_same_process_runs_it(
     assert resumed.status_code == 200, resumed.text
     continued = _wait_series(client, series_id, {"planned", "failed", "stopped", "completed"})
     assert continued["status"] == "planned", continued["error"]
+
+
+def test_stopping_a_later_queued_episode_skips_it(
+    client: TestClient, document_id: str
+) -> None:
+    created = client.post(
+        "/api/series",
+        json={"document_id": document_id, "minutes_per_episode": 3, "episodes": 2, "force": True},
+    )
+    assert created.status_code == 201, created.text
+    series_id = created.json()["id"]
+    held = _wait_series(client, series_id, {"planned", "failed"})
+    assert held["status"] == "planned", held["error"]
+
+    provider = BlockingProvider(lambda system, _content: "You choose which passages" in system)
+    registry.register_provider("anthropic", provider)
+    try:
+        approved = client.post(f"/api/series/{series_id}/approve")
+        assert approved.status_code == 200, approved.text
+        assert provider.entered.wait(180), "episode 1 never reached selection"
+        live = client.get(f"/api/series/{series_id}").json()
+        later = next(episode for episode in live["episodes"] if episode["index"] == 2)
+        assert later["status"] == "queued", later
+        assert later["run_id"]
+        stopped = client.post(f"/api/runs/{later['run_id']}/stop")
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["outcome"] == "stopped"
+        assert stopped.json()["status"] == "stopped"
+        provider.release.set()
+        done = _wait_series(client, series_id, {"completed", "failed", "stopped"})
+    finally:
+        provider.release.set()
+        registry.register_provider("anthropic", _STUB)
+
+    assert done["status"] == "completed", done["error"]
+    assert [episode["status"] for episode in done["episodes"]] == ["completed", "stopped"]
 
 
 def test_stopping_audio_at_the_approval_spends_nothing_further(

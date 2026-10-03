@@ -279,6 +279,10 @@ def resume_series(
     series.status = "queued"
     series.error = None
     series.finished_at = None
+    for run in db.scalars(select(Run).where(Run.series_id == series.id, Run.status == "stopped")):
+        run.status = "queued"
+        run.error = None
+        run.finished_at = None
     db.commit()
     bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
