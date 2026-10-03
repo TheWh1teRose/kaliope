@@ -14,6 +14,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import type { AnchorOut, EditAction, ReviewSummary, RunOut, ScriptOut, StructureOut } from '@/api/types'
 import ModalDialog from '@/components/ModalDialog.vue'
 import ReasonPicker from '@/components/ReasonPicker.vue'
+import SeriesStrip from '@/components/SeriesStrip.vue'
 import SourceRegister from '@/components/SourceRegister.vue'
 import { t } from '@/i18n'
 import { useCatalogueStore } from '@/stores/catalogue'
@@ -201,6 +202,11 @@ onMounted(async () => {
         ← {{ t.run.title }}
       </RouterLink>
       <h1 class="bar__title truncate">{{ run?.document_title || t.review.title }}</h1>
+      <SeriesStrip
+        v-if="run?.series_id && run.episode_index"
+        :series-id="run.series_id"
+        :episode="run.episode_index"
+      />
 
       <div class="progress" :title="`${reviewed}/${total}`">
         <div class="progress__fill" :style="{ width: `${percent}%` }" />

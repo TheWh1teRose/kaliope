@@ -17,7 +17,14 @@ from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
 from app.schemas.document import ParsedDocument
-from app.schemas.pipeline import Beat, ContentBudget, FormatSpec, Outline, Selection
+from app.schemas.pipeline import (
+    Beat,
+    ContentBudget,
+    EpisodeBrief,
+    FormatSpec,
+    Outline,
+    Selection,
+)
 
 #: Allowed deviation of the summed beat budgets from the target (§6.3).
 BUDGET_TOLERANCE = 0.10
@@ -73,6 +80,8 @@ class OutlineInput(BaseModel):
     selection: Selection
     budget: ContentBudget
     format_spec: FormatSpec
+    #: Set for one episode of a series: where it stands and how it connects.
+    episode_brief: EpisodeBrief | None = None
 
 
 class OutlineNode:
@@ -105,6 +114,8 @@ class OutlineNode:
             "selection": "Which passages were chosen and the learning goals they serve.",
             "budget": "The target word count the beat budgets must sum to.",
             "format_spec": "Speakers, register and beat guidance for the chosen format.",
+            "episode_brief": "Only in a series: the episode's place in it, what to recall from "
+            "earlier episodes and what the next one answers.",
         },
         output="An Outline: ordered beats with title, block ids, word budget, goal and summary.",
         failure_modes=[
@@ -175,7 +186,8 @@ class OutlineNode:
             + f"Target length: {inp.budget.target_minutes:.1f} minutes "
             f"(~{target_words} words). The beat budgets must sum to {target_words}.\n"
             f"Document language: {inp.parsed.language}\n\n"
-            f"Learning goals:\n{goals}\n\n"
+            + (_episode_lines(inp.episode_brief) if inp.episode_brief is not None else "")
+            + f"Learning goals:\n{goals}\n\n"
             f"Selected passages:\n{passages}"
         )
 
@@ -219,6 +231,32 @@ class OutlineNode:
 
         _normalise_budgets(beats, target_words, ctx)
         return Outline(beats=beats)
+
+
+def _episode_lines(brief: EpisodeBrief) -> str:
+    episode = brief.episode
+    first = episode.index == 1
+    last = episode.index == brief.episode_count
+    lines = [
+        f"This is episode {episode.index} of {brief.episode_count} of the series "
+        f'"{brief.series_title}": {episode.title}'
+        + (f" ({episode.role})" if episode.role else "")
+        + ".",
+    ]
+    if brief.through_line:
+        lines.append(f"Through-line of the series: {brief.through_line}")
+    if first:
+        lines.append("The first beat opens the series.")
+    else:
+        lines.append(
+            "The first beat opens with a short recap of the earlier episodes"
+            + (f": {episode.recap}" if episode.recap else ".")
+        )
+    if last:
+        lines.append("The last beat closes the series.")
+    elif episode.preview:
+        lines.append(f"The last beat points ahead to the next episode: {episode.preview}")
+    return "\n".join(lines) + "\n\n"
 
 
 def _normalise_budgets(beats: list[Beat], target_words: int, ctx: NodeContext) -> None:

@@ -139,6 +139,43 @@ citation rather than character offsets — a model cannot count characters, so t
 node locates the quote in the block and turns it into an anchor. Gate G1
 verifies the result.
 
+### Series of episodes
+
+A run can also produce a **series**: several episodes that together cover the
+whole document. Start one with "Serie" on the start screen.
+
+```
+series_plan_v0:  ingest → content_budget → series_plan     (once; then it waits)
+each episode:    content_budget → select → outline          (all episodes first)
+                 → script → gates                           (episodes in order)
+```
+
+`series_plan` decides which passages and learning goals belong to which
+episode, with a title, a through-line and the key terms. The number of episodes
+asked for is what the content budget carries at the chosen length (two to eight)
+unless the reviewer sets it. If the plan comes back with a different count, the
+planner is asked once more; a count that still differs is kept and shown on the
+plan screen. An episode that cannot carry three minutes is merged into its
+neighbour, and the model's split of passages is checked rather than trusted.
+The series always stops after the plan until someone approves it, and can be
+planned again with another count, length or hint while it waits.
+
+Each episode is an ordinary run (`runs.series_id`, `episode_index`), so review,
+gates, the node inspector and the Markdown export work per episode unchanged.
+Every episode is outlined before any script is written; then the scripts run in
+order, and each one sees the plan, every other episode's running order and the
+full text of the earlier episodes (for continuity only, without block ids — facts
+still come only from its own passages). Two inputs keep the cache precise:
+`episode_brief` (this episode's share of the plan) feeds the early nodes and
+`series_context` feeds only the script. A flow without the planner never has
+either, so its prompts and cache keys are unchanged (pinned by
+`tests/test_series_golden.py`). Series that fail resume where they stopped.
+
+The series view shows the whole pipeline on one pannable canvas — the planner as
+a column, one lane per episode — compact (state, cost, tokens, duration) or with
+every input and output, and follows the run live. After the last episode the S1
+check reports how much of the document the series covers.
+
 ### Gates
 
 | ID | Rule | On violation |
@@ -148,7 +185,7 @@ verifies the result.
 | G2 | every `claim` segment has at least one anchor | fail |
 | G3 | no segment shares a 6-gram with non-narratable text | fail |
 | G4 | total words within ±15% of `target_minutes × wpm(language)` | fail |
-| G5 | every stated objective is served by a beat | warn, skipped when none |
+| G5 | every stated objective is served by a beat (in a series: the episode's objectives) | warn, skipped when none |
 | G6 | no segment reproduces removed page furniture | fail |
 | G7 | language-appropriate readability inside a configurable band | warn, skipped without a formula |
 | G8 | declared speakers, no empty segments, no duplicates, every beat covered | fail |
@@ -257,6 +294,7 @@ GET  /api/format-specs                            # same shape, for format specs
 
 ```
 GET /api/runs/{id}/export?format=md     # script as Markdown, citations as footnotes
+GET /api/series/{id}/export?format=zip  # one Markdown file per finished episode, plus the plan
 GET /api/exports/edit-events.jsonl      # every edit event, one JSON object per line
 ```
 
@@ -268,6 +306,10 @@ GET /api/runs/{id}/gates/detail         # that, joined with what it measured her
 GET /api/flows/{id}/graph               # the flow's nodes, ports and wiring
 GET /api/runs/{id}/graph                # the same, as it actually ran
 GET /api/runs/{id}/nodes/{node}/io      # one node's real inputs and output
+GET /api/documents/{id}/budget          # how many minutes a document supports
+POST /api/series                        # start a series; approve, replan, resume below it
+GET /api/series/{id}/graph              # the planner run and every episode run
+GET /api/series/{id}/events             # one live stream for the whole series
 GET /api/folders                        # the folder tree, with rolled-up counts
 GET /api/experiment-folders             # the Sammlung's folder tree, same rules
 GET /api/experiments/outputs            # every collected output; folder, experiment, q filters
@@ -284,7 +326,7 @@ backend/app/
 ├─ main.py config.py db.py security.py accounts.py errors.py events.py migrations.py worker.py cli.py
 ├─ models/       SQLAlchemy ORM
 ├─ schemas/      pydantic domain + API models, zone taxonomy, reason codes
-├─ api/          auth · folders · documents · runs · review
+├─ api/          auth · folders · documents · runs · series · review
 ├─ llm/          provider protocol, pricing and capability registry, three providers
 ├─ lang/         detection, per-language resources, readability formulas
 ├─ experiments/  verbalized sampling: prompts, schemas, parsing, checks, cost
@@ -292,9 +334,9 @@ backend/app/
 │                anchors · structure · zones · tables · report · pipeline
 └─ pipeline/
    ├─ framework/ node · registry · artifacts · keys · runner
-   ├─ nodes/     ingest · content_budget · select · outline · script
+   ├─ nodes/     ingest · content_budget · select · outline · script · series_plan
    ├─ gates/     G0–G8
-   └─ flows/     baseline_v0.yaml
+   └─ flows/     baseline_v0.yaml · series_plan_v0.yaml
 frontend/src/    views · components · api · stores · i18n
 ```
 

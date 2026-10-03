@@ -1,18 +1,44 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import type { SeriesOut } from '@/api/types'
 import StatusPill from '@/components/StatusPill.vue'
-import { t } from '@/i18n'
+import { fill, t } from '@/i18n'
 import { useRunsStore } from '@/stores/runs'
+import { useSeriesStore } from '@/stores/series'
+
+/** How often the list asks again while a run or series is still moving. */
+const POLL_MS = 4000
+const LIVE_RUN = new Set(['queued', 'running', 'outlined'])
+const LIVE_SERIES = new Set(['queued', 'planning', 'outlining', 'writing'])
 
 const runs = useRunsStore()
+const seriesStore = useSeriesStore()
+const series = ref<SeriesOut[]>([])
+let timer: ReturnType<typeof setInterval> | null = null
 
 function when(value: string): string {
   return new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
 }
 
-onMounted(() => runs.load())
+async function load(): Promise<void> {
+  await runs.load()
+  series.value = await seriesStore.list().catch(() => [])
+  const moving =
+    runs.items.some((run) => LIVE_RUN.has(run.status)) ||
+    series.value.some((row) => LIVE_SERIES.has(row.status))
+  if (moving && !timer) timer = setInterval(load, POLL_MS)
+  if (!moving && timer) {
+    clearInterval(timer)
+    timer = null
+  }
+}
+
+onMounted(load)
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+})
 </script>
 
 <template>
@@ -21,6 +47,36 @@ onMounted(() => runs.load())
       <p class="eyebrow">{{ t.app.name }}</p>
       <h1 class="h-page">{{ t.nav.runs }}</h1>
     </header>
+
+    <table v-if="series.length" class="runs">
+      <thead>
+        <tr>
+          <th>{{ t.series.title }}</th>
+          <th>{{ t.run.flow }}</th>
+          <th>Status</th>
+          <th class="right">{{ t.common.cost }}</th>
+          <th class="right">{{ t.series.count }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="row in series" :key="row.id">
+          <td>
+            <RouterLink :to="{ name: 'series', params: { id: row.id } }" class="link">
+              {{ row.plan?.title || row.document_title || row.document_id }}
+            </RouterLink>
+            <span class="meta block">{{ row.document_title }} · {{ when(row.created_at) }}</span>
+          </td>
+          <td class="meta">{{ row.flow_id }} v{{ row.flow_version }}</td>
+          <td>
+            <span class="badge" :class="row.status === 'failed' ? 'badge--fail' : row.status === 'completed' ? 'badge--pass' : 'badge--mark'">
+              {{ t.series.status[row.status] }}
+            </span>
+          </td>
+          <td class="right num">${{ row.total_cost_usd.toFixed(4) }}</td>
+          <td class="right num">{{ row.episodes.length || row.request.episodes || t.common.none }}</td>
+        </tr>
+      </tbody>
+    </table>
 
     <p v-if="!runs.items.length" class="muted empty">{{ t.run.empty }}</p>
 
@@ -42,6 +98,13 @@ onMounted(() => runs.load())
               {{ run.document_title || run.document_id }}
             </RouterLink>
             <span class="meta block">{{ when(run.created_at) }}</span>
+            <RouterLink
+              v-if="run.series_id && run.episode_index"
+              class="badge badge--mark series-badge"
+              :to="{ name: 'series', params: { id: run.series_id } }"
+            >
+              {{ fill(t.run.seriesBadge, { n: run.episode_index }) }}
+            </RouterLink>
           </td>
           <td class="meta">{{ run.flow_id }} v{{ run.flow_version }}</td>
           <td><StatusPill :status="run.status" /></td>
@@ -130,6 +193,11 @@ onMounted(() => runs.load())
 
 .btn {
   text-decoration: none;
+}
+
+.series-badge {
+  text-decoration: none;
+  margin-top: 4px;
 }
 
 .empty {

@@ -192,6 +192,7 @@ export type RunStatus =
   | 'queued'
   | 'running'
   | 'paused'
+  | 'outlined'
   | 'completed'
   | 'failed'
   | 'in_review'
@@ -289,6 +290,9 @@ export interface RunOut {
   gates: GateReport[]
   manifest: Record<string, unknown> | null
   pause: PauseOut | null
+  /** Set for a run of a series: 0 is the planner run, 1… the episodes. */
+  series_id?: string | null
+  episode_index?: number | null
 }
 
 export interface AnchorRect {
@@ -349,6 +353,8 @@ export interface FlowOut {
   description: string | null
   nodes: string[]
   gates: string[]
+  /** `episode` makes one script; `series_plan` plans a series. */
+  purpose?: 'episode' | 'series_plan'
 }
 
 // --------------------------------------------------------------- flow graph
@@ -974,4 +980,160 @@ export interface OutputFolderOut {
   output_count: number
   total_output_count: number
   created_at: string
+}
+
+// ------------------------------------------------------------------ series
+
+export interface DocumentBudget {
+  document_id: string
+  narratable_words: number
+  words_per_minute: number
+  min_compression: number
+  max_supportable_minutes: number
+}
+
+export interface LearningGoal {
+  id: string
+  text: string
+  source: 'document' | 'generated'
+}
+
+export interface SeriesTerm {
+  term: string
+  gloss: string
+  first_episode: number
+}
+
+export interface EpisodePlan {
+  id: string
+  index: number
+  title: string
+  role: string
+  summary: string | null
+  block_ids: string[]
+  recap_block_ids: string[]
+  goals: LearningGoal[]
+  objective_refs: string[]
+  target_minutes: number
+  supportable_minutes: number
+  recap: string | null
+  preview: string | null
+}
+
+export interface SeriesPlan {
+  title: string
+  through_line: string
+  terms: SeriesTerm[]
+  episodes: EpisodePlan[]
+  unassigned: { block_id: string; reason: string }[]
+  budget: {
+    max_supportable_minutes: number
+    minutes_per_episode: number
+    requested_episodes: number | null
+    verdict: 'ok' | 'clamped' | 'reduced'
+    explanation: string
+  }
+}
+
+export type SeriesStatus =
+  | 'queued'
+  | 'planning'
+  | 'planned'
+  | 'outlining'
+  | 'writing'
+  | 'completed'
+  | 'failed'
+
+export interface SeriesEpisode {
+  index: number
+  title: string
+  role: string
+  target_minutes: number | null
+  run_id: string | null
+  status: RunStatus | 'pending'
+  total_cost_usd: number
+  error: string | null
+}
+
+export interface CoverageSection {
+  title: string
+  episodes: number[]
+  cited: boolean
+  blocks: number
+}
+
+export interface CoverageCheck {
+  id: 'S1'
+  status: 'pass' | 'warn'
+  assigned_share: number
+  uncited_sections: string[]
+  unassigned: { block_id: string; reason: string }[]
+  sections: CoverageSection[]
+}
+
+export interface SeriesRequestOut {
+  episodes: number | null
+  minutes_per_episode: number
+  hint: string | null
+  approved: boolean
+}
+
+export interface SeriesOut {
+  id: string
+  document_id: string
+  document_title: string | null
+  flow_id: string
+  flow_version: string
+  plan_flow_id: string
+  status: SeriesStatus
+  error: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  request: SeriesRequestOut
+  plan: SeriesPlan | null
+  checks: { S1?: CoverageCheck }
+  plan_run_id: string | null
+  plan_run_status: RunStatus | null
+  plan_cost_usd: number
+  total_cost_usd: number
+  episodes: SeriesEpisode[]
+  progress: { outlined?: number; written?: number; episodes?: number }
+  active: boolean
+}
+
+export interface SeriesGraphEpisode {
+  index: number
+  title: string
+  run_id: string | null
+  graph: RunGraphOut
+}
+
+export interface SeriesGraphOut {
+  series_id: string
+  status: SeriesStatus
+  plan: RunGraphOut | null
+  episodes: SeriesGraphEpisode[]
+}
+
+export interface CreateSeriesPayload {
+  document_id: string
+  flow_id: string
+  plan_flow_id: string
+  format_id: string
+  episodes: number | null
+  minutes_per_episode: number
+  hint?: string
+  audience_spec?: AudienceSpec
+}
+
+/** One event of a series' stream, tagged with the run and episode it came from. */
+export interface SeriesEvent {
+  type: string
+  at: string
+  run_id?: string
+  episode?: number
+  node?: string
+  message?: string
+  error?: string
 }

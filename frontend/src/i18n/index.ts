@@ -15,3 +15,10 @@ export function tt(path: string, fallback = ''): string {
     .reduce<unknown>((acc, key) => (acc as Record<string, unknown> | undefined)?.[key], t)
   return typeof value === 'string' ? value : fallback || path
 }
+
+/** A message with `{name}` placeholders filled in. */
+export function fill(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) =>
+    key in values ? String(values[key]) : match,
+  )
+}

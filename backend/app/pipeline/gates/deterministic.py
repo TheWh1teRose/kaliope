@@ -330,7 +330,8 @@ class G5ObjectiveCoverage:
             inspects=["ingest", "outline", "objective_outline", "select", "objective_select"],
             rule=(
                 "Every learning objective the document states is served by at least one beat "
-                f"of the outline, at {OBJECTIVE_COVERAGE:.0%} content-word overlap or better."
+                f"of the outline, at {OBJECTIVE_COVERAGE:.0%} content-word overlap or better. "
+                "In a series episode, only the objectives the plan gave that episode."
             ),
             method=(
                 "Collects the words of every beat title and summary plus the selected "
@@ -338,19 +339,34 @@ class G5ObjectiveCoverage:
                 "characters or fewer and measures what share of the remainder appears in that "
                 "pool. A lexical proxy for coverage, not a semantic one — which is why it "
                 "warns instead of failing. It skips entirely when the document states no "
-                "objectives of its own, rather than inventing some to score against."
+                "objectives of its own, rather than inventing some to score against. In an "
+                "episode of a series it scores only the objectives the series plan gave that "
+                "episode."
             ),
             thresholds={
                 "min_coverage": OBJECTIVE_COVERAGE,
                 "min_content_word_length": 4,
             },
-            skip_condition="the document states no objectives of its own",
+            skip_condition=(
+                "the document states no objectives of its own, or a series episode was "
+                "given none of them"
+            ),
         )
 
     def check(self, ctx: GateContext) -> GateReport:
         objectives = ctx.parsed.objectives
         if not objectives:
             return skipped(self, "the document states no objectives of its own", {"objectives": 0})
+        if ctx.episode_brief is not None:
+            # In a series each episode serves only the objectives the plan gave it.
+            assigned = set(ctx.episode_brief.episode.objective_refs)
+            objectives = [o for o in objectives if o in assigned]
+            if not objectives:
+                return skipped(
+                    self,
+                    "the series plan gave this episode none of the document's objectives",
+                    {"objectives": 0},
+                )
 
         stopwords = stopwords_for(ctx.parsed.language)
         covered_tokens: set[str] = set()

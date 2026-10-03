@@ -36,7 +36,7 @@ from app.pipeline.feedback import last_row_for_key, pause_out
 from app.pipeline.formats import DEFAULT_AUDIENCE
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import Node, input_keys
-from app.pipeline.framework.registry import Flow, get_node
+from app.pipeline.framework.registry import Flow, flow_purpose, get_node
 from app.pipeline.gates import gate_catalogue
 from app.pipeline.validation import RUN_SEED_KEYS
 from app.schemas.api import (
@@ -95,6 +95,7 @@ def list_flows(db: Session = Depends(get_db), _user: User = Depends(current_user
             description=flow.description,
             nodes=[n.node for n in flow.nodes],
             gates=flow.gates,
+            purpose=flow_purpose(flow),
         )
         for flow in catalogue.flows(db).values()
     ]
@@ -147,6 +148,12 @@ def create_run(
         flow = catalogue.get_flow(db, payload.flow_id)
     except CatalogueError as exc:
         raise problem(404, "No such flow", str(exc)) from exc
+    if flow_purpose(flow) != "episode":
+        raise problem(
+            422,
+            "Not an episode flow",
+            f"'{flow.id}' plans a series and makes no script. Start a series with it instead.",
+        )
 
     try:
         format_spec = catalogue.get_format_spec(db, payload.format_id)
@@ -186,7 +193,13 @@ def list_runs(
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[RunOut]:
-    statement = select(Run).order_by(Run.created_at.desc()).limit(max(1, min(limit, 500)))
+    statement = (
+        select(Run)
+        # A series' planner run makes no script; the series view shows it.
+        .where((Run.episode_index.is_(None)) | (Run.episode_index > 0))
+        .order_by(Run.created_at.desc())
+        .limit(max(1, min(limit, 500)))
+    )
     if document_id:
         statement = statement.where(Run.document_id == document_id)
     return [_run_out(db, run, detailed=False) for run in db.scalars(statement).all()]
@@ -309,9 +322,15 @@ def run_graph(
     run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> RunGraphOut:
     """The flow as it actually ran: per node, what happened and what it cost."""
-    run = _require_run(db, run_id)
+    return build_run_graph(db, _require_run(db, run_id))
+
+
+def build_run_graph(db: Session, run: Run) -> RunGraphOut:
+    """A run's graph: the flow's wiring with each node's status, cost and findings."""
+    run_id = run.id
     flow = _require_flow(db, run.flow_id)
-    nodes, edges, seeds = _topology(flow)
+    config = run.config_json or {}
+    nodes, edges, seeds = _topology(flow, present_seeds=_series_seed_keys(config))
 
     rows = {
         row.node_name: row
@@ -350,7 +369,7 @@ def run_graph(
                 tokens_in=row.tokens_in if row else 0,
                 tokens_out=row.tokens_out if row else 0,
                 cost_usd=row.cost_usd if row else 0.0,
-                wall_ms=record.get("wall_ms"),
+                wall_ms=_wall_ms(row, record),
                 started_at=_iso(row.started_at) if row else None,
                 finished_at=_iso(row.finished_at) if row else None,
                 error=row.error if row else None,
@@ -424,6 +443,10 @@ def node_io(
             source = None
 
         if source is None:
+            if key not in seed_values and not node.Input.model_fields[key].is_required():
+                # An optional input this run does not have, such as a series
+                # input on an ordinary run: nothing to show.
+                continue
             value = seed_values.get(key)
             inputs.append(
                 _value_out(
@@ -646,7 +669,31 @@ def _description(node: Node) -> str | None:
     return " ".join(doc.split()) or None
 
 
-def _topology(flow: Flow) -> tuple[list[FlowNodeOut], list[EdgeOut], list[PortOut]]:
+def _wall_ms(row: RunNode | None, record: dict[str, Any]) -> int | None:
+    """How long the node took. A row kept from an earlier execution of the run
+    (a series' outline stage) knows that; the latest manifest only saw a cache hit."""
+    wall = record.get("wall_ms")
+    if row is not None and not row.cache_hit and row.started_at and row.finished_at:
+        measured = int((row.finished_at - row.started_at).total_seconds() * 1000)
+        if not wall or record.get("cache_hit"):
+            return measured
+    return int(wall) if isinstance(wall, (int, float)) else None
+
+
+def _series_seed_keys(config: dict[str, Any]) -> tuple[str, ...]:
+    """The optional seeds a series episode carries, so its graph shows them."""
+    keys: list[str] = []
+    series_episode = bool(config.get("episode_brief_artifact"))
+    if series_episode:
+        keys.append("episode_brief")
+    if series_episode or config.get("series_context_artifact"):
+        keys.append("series_context")
+    return tuple(keys)
+
+
+def _topology(
+    flow: Flow, *, present_seeds: tuple[str, ...] = ()
+) -> tuple[list[FlowNodeOut], list[EdgeOut], list[PortOut]]:
     """Nodes, wiring and run seeds, derived from the node classes themselves.
 
     Wiring is by field name — exactly the rule the runner applies — so adding a
@@ -670,7 +717,12 @@ def _topology(flow: Flow) -> tuple[list[FlowNodeOut], list[EdgeOut], list[PortOu
             source = producers.get(key)
             if source is not None and _position(flow, source) >= index:
                 source = None
-            if source is None and key not in RUN_SEED_KEYS and not info.is_required():
+            if (
+                source is None
+                and key not in RUN_SEED_KEYS
+                and key not in present_seeds
+                and not info.is_required()
+            ):
                 continue
             if source is None and key not in seed_keys:
                 seed_keys.append(key)
@@ -701,7 +753,8 @@ def _node_status(row: RunNode | None, *, reached: bool, run_status: str) -> Node
     if row is None:
         if reached or run_status == "failed":
             return "blocked"
-        return "running" if run_status == "running" else "pending"
+        # A node gets its row when it starts, so one without a row is still waiting.
+        return "pending"
     if row.error:
         return "failed"
     if row.finished_at is None:
@@ -748,6 +801,17 @@ def _seed_values(db: Session, run: Run) -> dict[str, Any]:
             "parsed_artifact_hash": document.parsed_artifact_hash,
             "language_override": config.get("language"),
         }
+    # A series run's own seeds: its request, its share of the plan, its context.
+    if config.get("series_request"):
+        seeds["series_request"] = config["series_request"]
+    store = _store()
+    for key, field in (
+        ("episode_brief", "episode_brief_artifact"),
+        ("series_context", "series_context_artifact"),
+    ):
+        digest = config.get(field)
+        if digest and store.exists(digest):
+            seeds[key] = store.get_raw(digest)
     return {key: value for key, value in seeds.items() if value is not None}
 
 
@@ -973,6 +1037,8 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         gates=gates,
         manifest=run.manifest_json if detailed else None,
         pause=pause_out(run.manifest_json),
+        series_id=run.series_id,
+        episode_index=run.episode_index,
     )
 
 

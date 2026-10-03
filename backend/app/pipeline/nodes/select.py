@@ -23,6 +23,7 @@ from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
     ContentBudget,
+    EpisodeBrief,
     LearningGoal,
     SelectedBlock,
     Selection,
@@ -60,6 +61,8 @@ class SelectInput(BaseModel):
     parsed: ParsedDocument
     budget: ContentBudget
     audience_spec: AudienceSpec
+    #: Set for one episode of a series: its passages and its planned goals.
+    episode_brief: EpisodeBrief | None = None
 
 
 _SCHEMA: dict[str, Any] = {
@@ -105,14 +108,16 @@ class SelectNode:
     doc = NodeDoc(
         summary="Names the learning goals and picks the passages the episode will be built from.",
         detail=[
-            "Offers the model every narratable block as an id, a weight and its text. The "
+            "Offers the model every narratable block as an id, a weight and its text — in a "
+            "series, only that episode's passages and its recap passages. The "
             "weight is the zone salience — how prominent the author made that passage. It is "
             "given as a prior, not an instruction, and no zone is ever named in prose, so the "
             "zone taxonomy can change without anyone rewriting this prompt.",
             "Learning goals take one of two paths. If the document states its own objectives, "
             "they are handed over and the goals are derived from them. If it states none, the "
             "goals are inferred from the material. Which path ran is recorded on every goal as "
-            "'document' or 'generated'.",
+            "'document' or 'generated'. In a series, goals the plan already fixed are kept; "
+            "the model only maps passages onto them.",
             "The reply is filtered, not trusted: block ids that do not exist are discarded and "
             "counted, duplicates are dropped, and goal references that point at no goal are "
             "stripped. What survives is sorted back into document order.",
@@ -126,6 +131,8 @@ class SelectNode:
             "budget": "Target length and available material, so the model knows how much to "
             "select.",
             "audience_spec": "Who is listening, which shifts what counts as worth selecting.",
+            "episode_brief": "Only in a series: the candidates are the episode's own passages "
+            "plus its recap passages, and the learning goals are the ones the plan fixed.",
         },
         output="A Selection: learning goals, the chosen block ids with the goals each serves, "
         "and the rationale.",
@@ -194,6 +201,12 @@ class SelectNode:
 
     def run(self, inp: SelectInput, ctx: NodeContext) -> Selection:
         candidates = inp.parsed.narratable_blocks()
+        brief = inp.episode_brief
+        recap_ids: set[str] = set()
+        if brief is not None:
+            own = set(brief.episode.block_ids)
+            recap_ids = set(brief.episode.recap_block_ids) - own
+            candidates = [b for b in candidates if b.id in own or b.id in recap_ids]
         if not candidates:
             raise NodeError("no narratable blocks are available to select from")
 
@@ -218,6 +231,9 @@ class SelectNode:
             )
         )
 
+        if brief is not None:
+            goal_instruction = _episode_instruction(brief, recap_ids)
+
         user = (
             f"Audience: {_audience_text(inp.audience_spec)}\n\n"
             f"Target length: {inp.budget.target_minutes:.1f} minutes "
@@ -229,6 +245,7 @@ class SelectNode:
             + "\n".join(
                 f"[{e['id']}] (weight {e['weight']})"
                 + (f" section: {e['section']}" if e["section"] else "")
+                + (" (recap from an earlier episode)" if e["id"] in recap_ids else "")
                 + f"\n{e['text']}"
                 for e in payload
             )
@@ -257,6 +274,9 @@ class SelectNode:
             for index, g in enumerate(data.get("learning_goals", []))
             if str(g.get("text", "")).strip()
         ]
+        if brief is not None and brief.episode.goals:
+            # The series plan fixed this episode's goals; the model only maps to them.
+            goals = list(brief.episode.goals)
         if not goals:
             raise NodeError("the selection returned no learning goals")
 
@@ -316,6 +336,32 @@ def _candidate_payload(
             }
         )
     return payload, truncated / len(candidates) if candidates else 0.0
+
+
+def _episode_instruction(brief: EpisodeBrief, recap_ids: set[str]) -> str:
+    episode = brief.episode
+    lines = [
+        f"This is episode {episode.index} of {brief.episode_count} of the series "
+        f'"{brief.series_title}": {episode.title}'
+        + (f" ({episode.role})" if episode.role else "")
+        + ".",
+        "The candidates are this episode's own passages. Select from them for this "
+        "episode only; the other episodes cover the rest of the document.",
+    ]
+    if recap_ids:
+        lines.append(
+            "Passages marked as recap belong to earlier episodes. Select one only if a "
+            "short recap at the start needs to cite it."
+        )
+    if episode.goals:
+        lines.append(
+            "The series plan fixed this episode's learning goals. Return exactly these, "
+            "with these ids:"
+        )
+        lines.extend(f"- {goal.id}: {goal.text}" for goal in episode.goals)
+    else:
+        lines.append("Infer learning goals for this episode from its passages.")
+    return "\n".join(lines)
 
 
 def _audience_text(spec: AudienceSpec) -> str:

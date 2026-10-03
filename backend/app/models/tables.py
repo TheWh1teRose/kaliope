@@ -185,6 +185,42 @@ class FormatVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Series(Base):
+    """A series of episodes from one document: a planner run and one run per episode.
+
+    Each episode is an ordinary ``Run`` carrying ``series_id`` and its
+    ``episode_index``, so review, gates and export work per episode unchanged.
+    The planner's own nodes run as a hidden run with ``episode_index`` 0.
+    """
+
+    __tablename__ = "series"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: The flow every episode runs, such as ``baseline_v0``.
+    flow_id: Mapped[str] = mapped_column(String(100))
+    flow_version: Mapped[str] = mapped_column(String(20))
+    #: The planner flow, such as ``series_plan_v0``.
+    plan_flow_id: Mapped[str] = mapped_column(String(100))
+    #: The series request plus ``approved``, ``language`` and ``force``.
+    request_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    format_spec_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    audience_spec_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    #: ``queued`` → ``planning`` → ``planned`` (waits for approval) → ``outlining``
+    #: → ``writing`` → ``completed``; or ``failed``.
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    plan_artifact_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: Results of the series-level checks (S1 …), keyed by check id.
+    checks_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    document: Mapped[Document] = relationship()
+
+
 class Run(Base):
     __tablename__ = "runs"
 
@@ -206,6 +242,13 @@ class Run(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     manifest_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    #: Set for the runs of a series: 0 is the planner run, 1… the episodes.
+    series_id: Mapped[str | None] = mapped_column(
+        ForeignKey("series.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    episode_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Hash of the series context the episode's script was written with.
+    context_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     document: Mapped[Document] = relationship()
 

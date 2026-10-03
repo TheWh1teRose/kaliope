@@ -11,6 +11,7 @@ cache (AC-FW-1).
 from __future__ import annotations
 
 import logging
+import threading
 import traceback as traceback_module
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -38,17 +39,38 @@ from app.models import (
     Run,
     RunNode,
     Segment,
+    Series,
 )
 from app.pipeline import catalogue
 from app.pipeline.bench import coerce_value, jsonable
-from app.pipeline.feedback import resume_outputs, write_pause
+from app.pipeline.feedback import last_row_for_key, resume_outputs, write_pause
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.registry import Flow, FlowNode, flow_directory
 from app.pipeline.framework.runner import FlowRunner, NodeRecord
 from app.pipeline.gates import GateContext, run_gates
 from app.pipeline.nodes.ingest import DocumentRef
 from app.schemas.document import ParsedDocument
-from app.schemas.pipeline import AudienceSpec, FormatSpec, Script
+from app.schemas.pipeline import (
+    AudienceSpec,
+    EpisodeBrief,
+    FormatSpec,
+    Script,
+    SeriesContext,
+    SeriesRequest,
+)
+from app.series import (
+    SCRIPT_DONE,
+    brief_for,
+    context_hash,
+    coverage_check,
+    episode_runs,
+    final_script,
+    load_plan,
+    plan_run,
+    series_channel,
+    series_context_for,
+    truncate_flow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +80,12 @@ class Worker:
         settings = get_settings()
         self.max_workers = max_workers or settings.max_concurrent_runs
         self._pool: ThreadPoolExecutor | None = None
+        #: ``run_id`` → ``(series_id, episode_index)`` for runs of a series, so
+        #: their events also reach the series' channel.
+        self._series_tags: dict[str, tuple[str, int]] = {}
+        #: Series with a job running in this process.
+        self._active_series: set[str] = set()
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------ lifecycle
 
@@ -209,7 +237,15 @@ class Worker:
     def execute_run(self, run_id: str) -> None:
         settings = get_settings()
         store = ArtifactStore(settings.artifacts_dir)
-        bus.publish(run_id, "run.queued", {"run_id": run_id})
+        with session_scope() as session:
+            tagged = session.get(Run, run_id)
+            if tagged is not None and tagged.series_id and tagged.episode_index is not None:
+                with self._lock:
+                    self._series_tags[run_id] = (tagged.series_id, tagged.episode_index)
+        # A run executes again after a pause; the previous execution's events,
+        # its terminal one above all, must not replay into this one's stream.
+        bus.clear(run_id)
+        self._emit(run_id, "run.queued", {"run_id": run_id})
 
         with session_scope() as session:
             run = session.get(Run, run_id)
@@ -222,10 +258,14 @@ class Worker:
                 run.error = "the document this run refers to no longer exists"
                 return
             run.status = "running"
+            run.error = None
+            run.finished_at = None
             if run.started_at is None:
                 run.started_at = datetime.now(UTC)
             flow_id = run.flow_id
             config = dict(run.config_json or {})
+            config.pop("verdict", None)
+            run.config_json = config
             resume = resume_outputs(run.manifest_json)
             previous_manifest = dict(run.manifest_json or {})
             format_spec = FormatSpec.model_validate(run.format_spec_json)
@@ -239,12 +279,16 @@ class Worker:
             )
             pdf_path = settings.uploads_dir / f"{document.sha256}.pdf"
 
-        bus.publish(run_id, "run.started", {"run_id": run_id, "flow": flow_id})
+        self._emit(run_id, "run.started", {"run_id": run_id, "flow": flow_id})
 
         flow = self._load_flow(flow_id)
         if flow is None:
             self._fail_run(run_id, f"flow '{flow_id}' is not available", None)
             return
+        stop_after = config.get("stop_after")
+        if stop_after:
+            # The first stage of a series episode: up to its outline, no script yet.
+            flow = truncate_flow(flow, str(stop_after))
 
         llm = self._build_llm(run_id=run_id)
         runner = FlowRunner(
@@ -252,7 +296,7 @@ class Worker:
             llm=llm,
             cache_lookup=_cache_lookup,
             on_node=lambda record: _persist_node(run_id, record),
-            progress=lambda event, data: bus.publish(run_id, event, data),
+            progress=lambda event, data: self._emit(run_id, event, data),
             document_path=pdf_path,
             force=bool(config.get("force")),
         )
@@ -262,6 +306,7 @@ class Worker:
             "target_minutes": int(config.get("target_minutes", format_spec.target_minutes)),
             "format_spec": format_spec,
             "audience_spec": audience_spec,
+            **_series_seeds(config, store),
         }
 
         result = runner.execute(
@@ -278,7 +323,7 @@ class Worker:
             if run is None:  # pragma: no cover - deleted mid-run
                 return
             run.manifest_json = result.manifest.model_dump(mode="json")
-            run.total_cost_usd = result.manifest.total_cost_usd
+            run.total_cost_usd = _run_cost(session, run_id, result.manifest.total_cost_usd)
             for record in result.manifest.nodes:
                 if record.artifact_hash:
                     _record_artifact(session, record.artifact_hash, record.name, 0)
@@ -291,6 +336,14 @@ class Worker:
 
         if result.status == "paused":
             self._pause_run(run_id, result, previous=previous_manifest)
+            return
+
+        if stop_after:
+            self._stop_run(run_id, "outlined", "run.outlined")
+            return
+        if "script" not in result.bag:
+            # A planner run: its output is the plan, there is no script to check.
+            self._stop_run(run_id, "completed", "run.completed")
             return
 
         try:
@@ -410,8 +463,9 @@ class Worker:
             selection=bag["selection"],
             budget=bag["budget"],
             format_spec=bag["format_spec"],
+            episode_brief=bag.get("episode_brief"),
         )
-        bus.publish(run_id, "gates.started", {"gates": flow.gates})
+        self._emit(run_id, "gates.started", {"gates": flow.gates})
         suite = run_gates(gate_context, flow.gates or None)
         stored = store.put_raw("gate_reports", suite.model_dump(mode="json"))
 
@@ -447,7 +501,7 @@ class Worker:
             run.status = "completed"
             run.finished_at = datetime.now(UTC)
 
-        bus.publish(
+        self._emit(
             run_id,
             "run.completed",
             {
@@ -456,6 +510,272 @@ class Worker:
                 "segments": len(script.segments),
             },
         )
+
+    def _stop_run(self, run_id: str, status: str, event: str) -> None:
+        """End an execution that has no script to check: a planner run or an outline stage."""
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            if run is None:  # pragma: no cover
+                return
+            run.status = status
+            run.error = None
+            run.finished_at = datetime.now(UTC) if status == "completed" else None
+        self._emit(run_id, event, {"run_id": run_id})
+
+    def _emit(self, run_id: str, event: str, data: dict[str, Any] | None = None) -> None:
+        """Publish a run's event; a series run's also goes to its series' channel."""
+        payload = dict(data or {})
+        bus.publish(run_id, event, payload)
+        with self._lock:
+            tag = self._series_tags.get(run_id)
+        if tag is not None:
+            series_id, episode = tag
+            bus.publish(
+                series_channel(series_id), event, {**payload, "run_id": run_id, "episode": episode}
+            )
+
+    # ---------------------------------------------------------------- series
+
+    def submit_series(self, series_id: str) -> Future[Any]:
+        return self.submit(self.execute_series, series_id)
+
+    def series_active(self, series_id: str) -> bool:
+        with self._lock:
+            return series_id in self._active_series
+
+    def execute_series(self, series_id: str) -> None:
+        """Drive a series as far as it can go: plan, outlines, then scripts in order.
+
+        Each stage skips what is already done, so the same call resumes a series
+        after an approval, a failure or a restart of the process.
+        """
+        with self._lock:
+            if series_id in self._active_series:
+                return
+            self._active_series.add(series_id)
+        try:
+            self._drive_series(series_id)
+        except Exception as exc:  # noqa: BLE001 - recorded on the series
+            logger.exception("series %s failed", series_id)
+            self._fail_series(series_id, f"{type(exc).__name__}: {exc}")
+        finally:
+            with self._lock:
+                self._active_series.discard(series_id)
+
+    def _drive_series(self, series_id: str) -> None:
+        store = ArtifactStore(get_settings().artifacts_dir)
+        channel = series_channel(series_id)
+        bus.clear(channel)
+
+        # -- 1. plan
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            if series is None:
+                logger.warning("series %s does not exist", series_id)
+                return
+            planner = plan_run(session, series_id)
+            if planner is None:
+                raise RuntimeError("the series has no planner run")
+            planner_id = planner.id
+            planned = planner.status == "completed" and series.plan_artifact_hash is not None
+            request = dict(series.request_json or {})
+            if not planned:
+                series.status = "planning"
+                if series.started_at is None:
+                    series.started_at = datetime.now(UTC)
+            series.error = None
+        if not planned:
+            bus.publish(channel, "series.planning", {"run_id": planner_id})
+            self.execute_run(planner_id)
+            with session_scope() as session:
+                series = session.get(Series, series_id)
+                planner = session.get(Run, planner_id)
+                if series is None or planner is None:  # pragma: no cover
+                    return
+                if planner.status != "completed":
+                    error = (planner.error or "the planner failed").split("\n\n")[0]
+                    self._hold_previous_plan(series_id, error)
+                    return
+                flow = catalogue.flows(session).get(planner.flow_id)
+                row = (
+                    last_row_for_key(session, run_id=planner_id, flow=flow, key="series_plan")
+                    if flow is not None
+                    else None
+                )
+                if row is None or not row.artifact_hash:
+                    self._hold_previous_plan(series_id, "the planner run produced no series plan")
+                    return
+                series.plan_artifact_hash = row.artifact_hash
+                if not request.get("approved"):
+                    series.status = "planned"
+                    held = True
+                else:
+                    held = False
+            if held:
+                bus.publish(channel, "series.planned", {"run_id": planner_id})
+                return
+
+        # -- 2. every episode up to its outline
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            assert series is not None
+            plan = load_plan(store, series)
+            if plan is None:
+                raise RuntimeError("the series plan artifact is missing")
+            series.status = "outlining"
+            todo: list[str] = []
+            runs = episode_runs(session, series_id)
+            for episode in plan.episodes:
+                run = runs.get(episode.index)
+                if run is None:
+                    brief = store.put("episode_brief", brief_for(plan, episode.index))
+                    run = Run(
+                        document_id=series.document_id,
+                        flow_id=series.flow_id,
+                        flow_version=series.flow_version,
+                        config_json={
+                            "target_minutes": int(request.get("minutes_per_episode") or 15),
+                            "language": request.get("language"),
+                            "force": bool(request.get("force")),
+                            "episode_brief_artifact": brief.hash,
+                            "stop_after": "outline",
+                        },
+                        format_spec_json=series.format_spec_json,
+                        audience_spec_json=series.audience_spec_json,
+                        status="queued",
+                        created_by=series.created_by,
+                        series_id=series_id,
+                        episode_index=episode.index,
+                    )
+                    session.add(run)
+                    session.flush()
+                    _record_artifact(session, brief.hash, "episode_brief", brief.size_bytes)
+                if run.status in SCRIPT_DONE or run.status == "outlined":
+                    continue
+                flow = catalogue.flows(session).get(run.flow_id)
+                if flow is not None and last_row_for_key(
+                    session, run_id=run.id, flow=flow, key="outline"
+                ):
+                    continue  # outlined before; it failed later, in its script
+                config = dict(run.config_json or {})
+                config["stop_after"] = "outline"
+                config.pop("series_context_artifact", None)
+                run.config_json = config
+                todo.append(run.id)
+        bus.publish(channel, "series.outlining", {"episodes": len(plan.episodes)})
+        for run_id in todo:
+            self.execute_run(run_id)
+            if not self._episode_reached(series_id, run_id, {"outlined", *SCRIPT_DONE}):
+                return
+
+        # -- 3. scripts, one after another
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            assert series is not None
+            series.status = "writing"
+        bus.publish(channel, "series.writing", {"episodes": len(plan.episodes)})
+        for episode in plan.episodes:
+            with session_scope() as session:
+                run = episode_runs(session, series_id)[episode.index]
+                if run.status in SCRIPT_DONE:
+                    continue
+                context = series_context_for(session, store, series_id, plan, episode.index)
+                stored = store.put("series_context", context)
+                _record_artifact(session, stored.hash, "series_context", stored.size_bytes)
+                config = dict(run.config_json or {})
+                config.pop("stop_after", None)
+                # A forced series recomputed everything up to the outline in its
+                # first stage; forcing again here would redo the outline the
+                # other episodes' context was built from.
+                config["force"] = False
+                config["series_context_artifact"] = stored.hash
+                run.config_json = config
+                run.context_hash = context_hash(context)
+                run.status = "queued"
+                run_id = run.id
+            bus.publish(channel, "episode.writing", {"episode": episode.index, "run_id": run_id})
+            self.execute_run(run_id)
+            if not self._episode_reached(series_id, run_id, set(SCRIPT_DONE)):
+                return
+
+        # -- 4. series checks
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            assert series is not None
+            runs = episode_runs(session, series_id)
+            scripts = {
+                index: script
+                for index, run in runs.items()
+                if (script := final_script(session, store, run)) is not None
+            }
+            planner = plan_run(session, series_id)
+            parsed = self._series_parse(session, store, planner)
+            checks = dict(series.checks_json or {})
+            if parsed is not None:
+                checks["S1"] = coverage_check(parsed, plan, scripts)
+            series.checks_json = checks
+            series.status = "completed"
+            series.finished_at = datetime.now(UTC)
+        bus.publish(channel, "series.completed", {"episodes": len(plan.episodes)})
+
+    def _episode_reached(self, series_id: str, run_id: str, states: set[str]) -> bool:
+        """Whether the episode run ended in one of ``states``; fails the series otherwise."""
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            if run is not None and run.status in states:
+                return True
+            index = run.episode_index if run is not None else "?"
+            error = ((run.error if run is not None else None) or "the run failed").split("\n\n")[0]
+        self._fail_series(series_id, f"Folge {index}: {error}")
+        return False
+
+    def _series_parse(
+        self, session: Session, store: ArtifactStore, planner: Run | None
+    ) -> ParsedDocument | None:
+        if planner is None:
+            return None
+        row = session.scalars(
+            sa_select(RunNode).where(RunNode.run_id == planner.id, RunNode.node_name == "ingest")
+        ).first()
+        if row is None or not row.artifact_hash or not store.exists(row.artifact_hash):
+            return None
+        return ParsedDocument.model_validate(store.get_raw(row.artifact_hash))
+
+    def _hold_previous_plan(self, series_id: str, error: str) -> None:
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            if series is None or not series.plan_artifact_hash:
+                self._fail_series(series_id, error)
+                return
+            failed = plan_run(session, series_id)
+            if failed is not None and failed.status != "completed":
+                session.delete(failed)
+                session.flush()
+            previous = plan_run(session, series_id)
+            request = dict(series.request_json or {})
+            seed = (
+                (previous.config_json or {}).get("series_request") if previous is not None else None
+            )
+            if isinstance(seed, dict):
+                request["episodes"] = seed.get("episodes")
+                request["minutes_per_episode"] = seed.get("minutes_per_episode")
+                request["hint"] = seed.get("hint")
+            request["approved"] = False
+            series.request_json = request
+            series.status = "planned"
+            series.error = error
+            series.finished_at = None
+        bus.publish(series_channel(series_id), "series.planned", {"error": error})
+
+    def _fail_series(self, series_id: str, error: str) -> None:
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            if series is None:
+                return
+            series.status = "failed"
+            series.error = error
+            series.finished_at = datetime.now(UTC)
+        bus.publish(series_channel(series_id), "series.failed", {"error": error})
 
     def _pause_run(
         self, run_id: str, result: Any, *, previous: dict[str, Any] | None = None
@@ -478,7 +798,7 @@ class Worker:
             for record in result.manifest.nodes:
                 if record.artifact_hash:
                     _record_artifact(session, record.artifact_hash, record.name, 0)
-        bus.publish(run_id, "run.paused", {"node": result.paused_at})
+        self._emit(run_id, "run.paused", {"node": result.paused_at})
 
     def _pause_bench(
         self, bench_id: str, result: Any, *, previous: dict[str, Any] | None = None
@@ -520,7 +840,7 @@ class Worker:
                 config = dict(run.config_json or {})
                 config["verdict"] = verdict
                 run.config_json = config
-        bus.publish(run_id, "run.failed", {"error": error, "verdict": verdict})
+        self._emit(run_id, "run.failed", {"error": error, "verdict": verdict})
 
     def _fail_bench(
         self, bench_id: str, error: str, traceback: str | None, verdict: str | None = None
@@ -602,6 +922,17 @@ def _persist_node(run_id: str, record: NodeRecord) -> None:
         existing = session.scalars(
             sa_select(RunNode).where(RunNode.run_id == run_id, RunNode.node_name == record.name)
         ).first()
+        if (
+            existing is not None
+            and record.cache_hit
+            and existing.artifact_hash
+            and existing.artifact_hash == record.artifact_hash
+            and existing.cache_key == record.cache_key
+        ):
+            # This run computed the node in an earlier execution (a series'
+            # outline stage, or before a pause). Keep that row: its cost,
+            # tokens and timing are what the node really took.
+            return
         row = existing or RunNode(run_id=run_id, node_name=record.name)
         row.node_version = record.version
         row.cache_key = record.cache_key
@@ -639,6 +970,25 @@ def _persist_bench_node(bench_id: str, record: NodeRecord) -> None:
         row.error = record.error
         if existing is None:
             session.add(row)
+
+
+def _series_seeds(config: dict[str, Any], store: ArtifactStore) -> dict[str, Any]:
+    """The extra seeds of a series run: its request, brief or context."""
+    seeds: dict[str, Any] = {}
+    if config.get("series_request"):
+        seeds["series_request"] = SeriesRequest.model_validate(config["series_request"])
+    if config.get("episode_brief_artifact"):
+        seeds["episode_brief"] = store.get(config["episode_brief_artifact"], EpisodeBrief)
+    if config.get("series_context_artifact"):
+        seeds["series_context"] = store.get(config["series_context_artifact"], SeriesContext)
+    return seeds
+
+
+def _run_cost(session: Session, run_id: str, fallback: float) -> float:
+    """What every node of the run cost, across all of its executions."""
+    rows = session.scalars(sa_select(RunNode).where(RunNode.run_id == run_id)).all()
+    total = round(sum(row.cost_usd or 0.0 for row in rows), 8)
+    return total if rows else fallback
 
 
 def _record_artifact(session: Session, digest: str, kind: str, size_bytes: int) -> None:

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import { api } from '@/api/client'
+import { openStream, type StreamHandle } from '@/stores/stream'
 import type {
   AudienceSpec,
   GateDetail,
@@ -24,13 +25,29 @@ export interface ProgressLine {
 }
 
 /** Terminal event types; the stream closes itself after either of them. */
-const TERMINAL = new Set(['run.completed', 'run.failed', 'run.paused'])
+export const TERMINAL = new Set(['run.completed', 'run.failed', 'run.paused'])
+
+const RUN_EVENTS = [
+  'run.queued',
+  'run.started',
+  'run.outlined',
+  'node.started',
+  'node.progress',
+  'node.finished',
+  'node.cached',
+  'node.failed',
+  'gates.started',
+  'run.completed',
+  'run.failed',
+  'run.paused',
+]
 
 export const useRunsStore = defineStore('runs', () => {
   const items = ref<RunOut[]>([])
   const current = ref<RunOut | null>(null)
   const progress = ref<ProgressLine[]>([])
-  let source: EventSource | null = null
+  const reconnecting = ref(false)
+  let stream: StreamHandle | null = null
 
   async function load(documentId?: string): Promise<void> {
     const query = documentId ? `?document_id=${encodeURIComponent(documentId)}` : ''
@@ -52,45 +69,41 @@ export const useRunsStore = defineStore('runs', () => {
     return api.post<RunOut>('/api/runs', payload)
   }
 
-  function watch(runId: string, onTerminal?: () => void): void {
+  /**
+   * Follow a run live. `onEvent` sees every event as it arrives, so the page
+   * can update the node it concerns; `onTerminal` runs when the run stops. A
+   * dropped connection is reopened, and `onTerminal` also runs then so the page
+   * reloads whatever it missed.
+   */
+  function watch(
+    runId: string,
+    onTerminal?: () => void,
+    onEvent?: (line: ProgressLine) => void,
+  ): void {
     stopWatching()
     progress.value = []
-    source = new EventSource(`/api/runs/${runId}/events`)
-
-    const handle = (event: MessageEvent) => {
-      try {
-        const line = JSON.parse(event.data) as ProgressLine
+    reconnecting.value = false
+    stream = openStream({
+      url: `/api/runs/${runId}/events`,
+      types: RUN_EVENTS,
+      terminal: TERMINAL,
+      onEvent: (event) => {
+        const line = event as unknown as ProgressLine
         progress.value = [...progress.value, line]
-        if (TERMINAL.has(line.type)) {
-          stopWatching()
-          onTerminal?.()
-        }
-      } catch {
-        /* a malformed frame is not worth breaking the stream over */
-      }
-    }
-
-    for (const type of [
-      'run.queued',
-      'run.started',
-      'node.started',
-      'node.progress',
-      'node.finished',
-      'node.cached',
-      'node.failed',
-      'gates.started',
-      'run.completed',
-      'run.failed',
-      'run.paused',
-    ]) {
-      source.addEventListener(type, handle as EventListener)
-    }
-    source.onerror = () => stopWatching()
+        onEvent?.(line)
+      },
+      onTerminal: () => onTerminal?.(),
+      onReconnect: () => onTerminal?.(),
+      onState: (state) => {
+        reconnecting.value = state === 'reconnecting'
+      },
+    })
   }
 
   function stopWatching(): void {
-    source?.close()
-    source = null
+    stream?.close()
+    stream = null
+    reconnecting.value = false
   }
 
   async function script(runId: string): Promise<ScriptOut> {
@@ -132,6 +145,7 @@ export const useRunsStore = defineStore('runs', () => {
     items,
     current,
     progress,
+    reconnecting,
     load,
     get,
     create,

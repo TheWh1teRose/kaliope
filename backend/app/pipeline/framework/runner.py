@@ -179,6 +179,9 @@ class FlowRunner:
                 self.progress("node.cached", {"node": node.name, "artifact": cached})
                 continue
 
+            # Recorded before the node runs, so a watcher can tell the node that
+            # is working from the ones still waiting.
+            self.on_node(record)
             self.progress("node.started", {"node": node.name})
             started = datetime.now(UTC)
             usage_before = self.llm.total_usage

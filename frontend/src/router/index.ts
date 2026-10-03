@@ -32,6 +32,12 @@ export const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: '/series/:id',
+    name: 'series',
+    component: () => import('@/views/SeriesView.vue'),
+    props: true,
+  },
+  {
     path: '/runs/:id/review',
     name: 'review',
     component: () => import('@/views/ReviewView.vue'),

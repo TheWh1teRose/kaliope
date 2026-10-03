@@ -31,6 +31,7 @@ from app.api import (
     output_folders,
     review,
     runs,
+    series,
     users,
 )
 from app.config import Settings, get_settings
@@ -125,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(folders.router)
     app.include_router(documents.router)
     app.include_router(runs.router)
+    app.include_router(series.router)
     app.include_router(review.router)
     app.include_router(authoring.router)
     app.include_router(bench.router)

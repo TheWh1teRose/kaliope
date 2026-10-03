@@ -14,7 +14,7 @@ from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
 from app.schemas.document import ParsedDocument
-from app.schemas.pipeline import ContentBudget
+from app.schemas.pipeline import ContentBudget, EpisodeBrief
 
 #: A grounded episode must select from meaningfully more material than it emits.
 DEFAULT_MIN_COMPRESSION = 2.5
@@ -25,6 +25,8 @@ MIN_VIABLE_MINUTES = 3.0
 class ContentBudgetInput(BaseModel):
     parsed: ParsedDocument
     target_minutes: int
+    #: Set for one episode of a series: only its own passages count.
+    episode_brief: EpisodeBrief | None = None
 
 
 class ContentBudgetNode:
@@ -40,7 +42,8 @@ class ContentBudgetNode:
         "the run when the answer is 'not enough'.",
         detail=[
             "Counts the narratable words in the parse — headings, exercises, page furniture "
-            "and reference lists do not count, because they will never be spoken.",
+            "and reference lists do not count, because they will never be spoken. In a "
+            "series episode only that episode's own passages are counted.",
             "Divides by the speaking rate for the document's language, then by the minimum "
             "compression. That gives the longest honestly supportable episode: an episode "
             "must be able to *choose* from more material than it emits, or the model starts "
@@ -55,6 +58,8 @@ class ContentBudgetNode:
         inputs={
             "parsed": "Narratable word count, language and the ingestion report.",
             "target_minutes": "The length the run asked for.",
+            "episode_brief": "Only in a series: the episode's share of the plan. Then only "
+            "the episode's own passages count towards the budget.",
         },
         output="A ContentBudget: the effective target in minutes and words, the compression "
         "ratio, the verdict, and a sentence explaining how it was reached.",
@@ -90,6 +95,11 @@ class ContentBudgetNode:
             raise NodeError("min_compression must be greater than zero")
 
         narratable = inp.parsed.narratable_word_count()
+        if inp.episode_brief is not None:
+            own = set(inp.episode_brief.episode.block_ids)
+            narratable = sum(
+                block.word_count() for block in inp.parsed.narratable_blocks() if block.id in own
+            )
         wpm = words_per_minute(inp.parsed.language)
         max_supportable = narratable / wpm / min_compression
 

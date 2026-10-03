@@ -128,6 +128,8 @@ class StubProvider:
 
         if "You label blocks" in system:
             return self._zones(text)
+        if "You split a source document into a series" in system:
+            return self._series_plan(text)
         if "You write the learning objectives" in system:
             return self._objectives()
         if "serve the given listener objectives" in system:
@@ -200,6 +202,43 @@ class StubProvider:
                 for block_id in ids
             ],
             "rationale": "Alle inhaltstragenden Passagen ausgewählt.",
+        }
+
+    def _series_plan(self, text: str) -> Any:
+        """Contiguous chunks of the passages, one per requested episode."""
+        match = re.search(r"Plan (\d+) episodes", text)
+        count = int(match.group(1)) if match else 2
+        sized = re.findall(r"^\[(b\w+)\] \(weight [\d.]+, (\d+) words\)", text, re.MULTILINE)
+        total = sum(int(words) for _, words in sized) or 1
+        # Contiguous chunks of about equal word count, the way a model would balance.
+        chunks: list[list[str]] = [[] for _ in range(count)]
+        seen = 0
+        for block_id, words in sized:
+            chunks[min(count - 1, int(seen * count / total))].append(block_id)
+            seen += int(words)
+        chunks = [chunk for chunk in chunks if chunk]
+        objectives = "The document states these objectives" in text
+        episodes = []
+        for index, chunk in enumerate(chunks):
+            episodes.append(
+                {
+                    "title": f"Folge {index + 1}: Teil {index + 1}",
+                    "role": "Einführung" if index == 0 else "Vertiefung",
+                    "summary": f"Die Passagen {chunk[0]} bis {chunk[-1]}.",
+                    "block_ids": chunk,
+                    "recap_block_ids": [chunks[index - 1][0]] if index else [],
+                    "goals": [f"Teil {index + 1} erklären", f"Teil {index + 1} anwenden"],
+                    "objectives": [1] if objectives else [],
+                    "recap": "Was in der letzten Folge geklärt wurde." if index else "",
+                    "preview": "Was als Nächstes kommt." if index < len(chunks) - 1 else "",
+                }
+            )
+        return {
+            "title": "Eine Serie",
+            "through_line": "Vom Grundsatz zur Anwendung.",
+            "terms": [{"term": "Regelkreis", "gloss": "Rückkopplung", "first_episode": 1}],
+            "episodes": episodes,
+            "unassigned": [],
         }
 
     def _objective_selection(self, text: str) -> Any:
