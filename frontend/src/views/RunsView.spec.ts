@@ -104,6 +104,18 @@ describe('runs list', () => {
     wrapper.unmount()
   })
 
+  it('offers stop for a queued or running run, not an outlined one', async () => {
+    runs.items = [
+      runRow('r-queue', 'queued'),
+      runRow('r-live', 'running'),
+      runRow('r-outline', 'outlined'),
+    ]
+    seriesStore.list.mockResolvedValue([])
+    const wrapper = await mountList()
+    expect(wrapper.findAll('[data-stop]')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
   it('shows Gestoppt with a neutral badge and no stop button', async () => {
     const wrapper = await mountList()
     const stoppedRun = wrapper.findAll('.badge').find((badge) => badge.text() === 'Gestoppt')

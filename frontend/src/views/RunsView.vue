@@ -13,6 +13,7 @@ import { useSeriesStore } from '@/stores/series'
 /** How often the list asks again while a run or series is still moving. */
 const POLL_MS = 4000
 const LIVE_RUN = new Set(['queued', 'running', 'outlined'])
+const STOPPABLE_RUN = new Set(['queued', 'running'])
 const LIVE_SERIES = new Set(['queued', 'planning', 'outlining', 'writing'])
 
 const runs = useRunsStore()
@@ -154,7 +155,7 @@ onUnmounted(() => {
           <td>
             <StatusPill :status="run.status" />
             <button
-              v-if="LIVE_RUN.has(run.status)"
+              v-if="STOPPABLE_RUN.has(run.status)"
               class="btn btn--sm"
               type="button"
               data-stop

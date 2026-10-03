@@ -128,10 +128,10 @@ class SpeechClient:
     def dialogue(self, request: DialogueRequest) -> SpeechResult:
         from app.pipeline.framework.cancel import RunStopped
 
-        if self._should_stop():
-            raise RunStopped()
         attempt = 0
         while True:
+            if self._should_stop():
+                raise RunStopped()
             attempt += 1
             started = time.perf_counter()
             try:

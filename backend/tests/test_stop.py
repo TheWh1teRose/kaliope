@@ -379,6 +379,36 @@ def test_stopping_a_series_keeps_the_plan_and_the_finished_episode(
     assert client.get(f"/api/series/{series_id}").json()["plan"]["title"] == plan_title
 
 
+def test_resuming_a_stopped_series_in_the_same_process_runs_it(
+    client: TestClient, document_id: str
+) -> None:
+    provider = BlockingProvider(lambda system, _content: "You split a source document" in system)
+    registry.register_provider("anthropic", provider)
+    try:
+        created = client.post(
+            "/api/series",
+            json={"document_id": document_id, "minutes_per_episode": 3, "episodes": 2},
+        )
+        assert created.status_code == 201, created.text
+        series_id = created.json()["id"]
+        assert provider.entered.wait(60), "the planner never started"
+        stopped = client.post(f"/api/series/{series_id}/stop")
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["outcome"] == "stopping"
+        provider.release.set()
+        done = _wait_series(client, series_id, {"stopped", "failed", "planned", "completed"})
+    finally:
+        provider.release.set()
+        registry.register_provider("anthropic", _STUB)
+
+    assert done["status"] == "stopped", done["error"]
+
+    resumed = client.post(f"/api/series/{series_id}/resume")
+    assert resumed.status_code == 200, resumed.text
+    continued = _wait_series(client, series_id, {"planned", "failed", "stopped", "completed"})
+    assert continued["status"] == "planned", continued["error"]
+
+
 def test_stopping_audio_at_the_approval_spends_nothing_further(
     client: TestClient, document_id: str
 ) -> None:

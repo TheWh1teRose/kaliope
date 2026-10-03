@@ -19,6 +19,7 @@ import pytest
 from app.llm.base import LLMClient
 from app.pipeline.audio_chunks import MAX_CHUNK_CHARACTERS, estimate, plan_chunks, select_lines
 from app.pipeline.framework.artifacts import ArtifactStore
+from app.pipeline.framework.cancel import RunStopped
 from app.pipeline.framework.node import NodeContext, NodeError, NodePause
 from app.pipeline.nodes.audio_approval import AudioApprovalInput, AudioApprovalNode
 from app.pipeline.nodes.audio_render import AudioRenderInput, AudioRenderNode
@@ -236,6 +237,26 @@ def test_the_client_retries_what_is_retryable_and_adds_up_the_cost() -> None:
     assert client.total_characters == 500
     assert client.total_cost_usd == pytest.approx(0.04)
     assert client.traces[0]["attempts"] == 3
+
+
+def test_a_stop_during_backoff_places_no_further_call() -> None:
+    stub = StubSpeech()
+    calls = {"n": 0}
+    stopped = {"value": False}
+
+    def flaky(_request: DialogueRequest) -> SpeechResult:
+        calls["n"] += 1
+        raise SpeechError("busy", status=429, retryable=True)
+
+    def pause(_seconds: float) -> None:
+        stopped["value"] = True
+
+    stub.dialogue = flaky  # type: ignore[method-assign]
+    client = SpeechClient(stub, sleep=pause, should_stop=lambda: stopped["value"])
+    with pytest.raises(RunStopped):
+        client.dialogue(DialogueRequest(inputs=[DialogueInput(text="a", voice_id="v")]))
+    assert calls["n"] == 1
+    assert client.calls == 0
 
 
 def test_the_client_gives_up_on_a_refusal_at_once() -> None:

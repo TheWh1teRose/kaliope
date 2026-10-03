@@ -1009,6 +1009,7 @@ class Worker:
         return None
 
     def _run_for_series(self, series_id: str, run_id: str) -> None:
+        self._arm(run_id)
         with self._lock:
             self._current_run[series_id] = run_id
         try:
