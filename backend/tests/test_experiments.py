@@ -19,6 +19,7 @@ from app.llm import registry
 from app.llm.base import LLMError
 from app.main import create_app
 from app.models import Document, LLMCall, Run, User
+from app.pipeline.audio_tags import AUDIO_SYSTEM, AUDIO_TEMPLATE, parse_lines, render_message
 from app.pipeline.bench import coerce_value, load_values
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.pipeline.framework.artifacts import ArtifactStore
@@ -351,3 +352,64 @@ def test_collect_list_and_delete_outputs(signed_in: TestClient) -> None:
     assert signed_in.delete(f"/api/experiments/outputs/{output['id']}").status_code == 204
     assert signed_in.delete(f"/api/experiments/outputs/{output['id']}").status_code == 404
     assert signed_in.get(f"/api/experiments/runs/{run['id']}").json()["status"] == "completed"
+
+
+# ---------------------------------------------------------------- audio tags
+
+
+def test_audio_tags_defaults_render_what_the_node_sends() -> None:
+    experiment = get_experiment("audio_tags")
+    setup: Any = experiment.defaults()
+    assert experiment.validate_setup(setup) == []
+    assert setup.system_prompt == AUDIO_SYSTEM
+    assert setup.user_template == AUDIO_TEMPLATE
+    lines, problems = parse_lines(setup.fields["lines"])
+    assert problems == [] and len(lines) == 6
+    fields = {**setup.fields, "lines": "\n".join(line.formatted() for line in lines)}
+    assert render(setup.user_template, fields).text == render_message(fields)
+
+
+def test_audio_tags_load_a_beat_from_a_run(signed_in: TestClient, finished_run: str) -> None:
+    body = signed_in.post("/api/experiments/audio_tags/source", json={"run_id": finished_run})
+    assert body.status_code == 200, body.text
+    first = body.json()
+    assert first["beats"] and first["source"]["beat_position"] == 1
+    assert first["fields"]["lines"].startswith("[")
+    assert first["fields"]["speakers"].startswith("- Moderator (")
+    assert first["fields"]["context"] == ""
+    assert "tag_language" not in first["fields"], "the tag settings stay as the person set them"
+
+    second = first["beats"][1]["id"]
+    other = signed_in.post(
+        "/api/experiments/audio_tags/source", json={"run_id": finished_run, "beat_id": second}
+    ).json()
+    assert other["source"]["beat_id"] == second
+    assert other["fields"]["context"].startswith("The line just before these")
+    assert second in other["fields"]["lines"]
+
+    missing = signed_in.post("/api/experiments/audio_tags/source", json={"run_id": "nope"})
+    assert missing.status_code == 422
+
+
+def test_audio_tags_run_checks_every_typed_line(signed_in: TestClient) -> None:
+    setup = get_experiment("audio_tags").defaults().model_dump(mode="json")
+    created = signed_in.post("/api/experiments/audio_tags/runs", json={"setup": setup})
+    assert created.status_code == 201, created.text
+    body = _wait(signed_in, created.json()["id"])
+
+    assert body["status"] == "completed", body["error"]
+    audio = body["output"]["audio_script"]
+    assert [line["segment_id"] for line in audio["lines"]] == [f"l{i:03d}" for i in range(1, 7)]
+    assert body["output"]["guard"]["passed"] == 6
+    assert audio["lines"][0]["tagged"].startswith("[thoughtful] ")
+    sent = body["calls"][0]["messages"][0]["content"]
+    assert "[l001] Moderator: Wovon lebt eigentlich eine Pflanze" in sent
+    assert "[l002] Expertin (claim): Von Licht" in sent
+
+
+def test_audio_tags_refuses_lines_without_a_speaker(signed_in: TestClient) -> None:
+    setup = get_experiment("audio_tags").defaults().model_dump(mode="json")
+    setup["fields"]["lines"] = "Nur ein Satz ohne Sprecher"
+    refused = signed_in.post("/api/experiments/audio_tags/runs", json={"setup": setup})
+    assert refused.status_code == 422
+    assert "Speaker: text" in refused.json()["detail"]

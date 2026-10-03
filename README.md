@@ -139,6 +139,30 @@ citation rather than character offsets — a model cannot count characters, so t
 node locates the quote in the block and turns it into an anchor. Gate G1
 verifies the result.
 
+### Audio pipelines (first step)
+
+An **audio pipeline** runs on a finished script and is chosen separately from
+the pipeline that writes it, so another speech provider later is another audio
+pipeline. A flow is one when it contains an audio node (`purpose: audio` in
+`/api/flows`); it cannot start a run or a series.
+
+```
+elevenlabs_dialog_v0:  audio_script        (tags + word guard; generation follows later)
+```
+
+`audio_script` prepares the script for ElevenLabs Text to Dialogue (Eleven v4),
+one call per beat: audio tags in square brackets (`[curious]`, `[short pause]`)
+and numbers or abbreviations written as spoken, each declared as a spoken form
+(`1,5 %` → `eins Komma fünf Prozent`). A deterministic guard
+(`pipeline/audio_tags.py`) removes the tags, applies the declared forms to the
+script's line and compares word by word; case and punctuation do not count. A
+refused line is asked for once more and otherwise spoken untagged, marked
+`fallback`, so a tag never fails a run. Beats are cached one by one. No speech
+API is called yet.
+
+The experiment **Audio ausprobieren** runs the same prompt and guard on a short
+script typed with any speakers, or on a beat loaded from a run.
+
 ### Series of episodes
 
 A run can also produce a **series**: several episodes that together cover the
@@ -329,14 +353,15 @@ backend/app/
 ├─ api/          auth · folders · documents · runs · series · review
 ├─ llm/          provider protocol, pricing and capability registry, three providers
 ├─ lang/         detection, per-language resources, readability formulas
-├─ experiments/  verbalized sampling: prompts, schemas, parsing, checks, cost
+├─ experiments/  prompt experiments (script, outline, selection, audio tags) · verbalized sampling
 ├─ ingestion/    runs · extract · layout · repetition · normalize · blocks ·
 │                anchors · structure · zones · tables · report · pipeline
 └─ pipeline/
    ├─ framework/ node · registry · artifacts · keys · runner
-   ├─ nodes/     ingest · content_budget · select · outline · script · series_plan
+   ├─ nodes/     ingest · content_budget · select · outline · script · series_plan ·
+   │             audio_script
    ├─ gates/     G0–G8
-   └─ flows/     baseline_v0.yaml · series_plan_v0.yaml
+   └─ flows/     baseline_v0.yaml · series_plan_v0.yaml · elevenlabs_dialog_v0.yaml
 frontend/src/    views · components · api · stores · i18n
 ```
 

@@ -1,0 +1,12 @@
+id: elevenlabs_dialog_v0
+version: "0.1"
+description: >-
+  Audio pipeline for ElevenLabs Text to Dialogue (Eleven v4). Runs on a finished
+  script and is chosen separately from the pipeline that writes it. This first
+  version prepares the script for speech: audio tags and spoken forms, with every
+  word checked against the script. The approval pause and the audio generation
+  follow in later versions. It does not start a run on its own yet.
+nodes:
+  - node: audio_script
+    config: {model: claude-sonnet-5-5}
+gates: []

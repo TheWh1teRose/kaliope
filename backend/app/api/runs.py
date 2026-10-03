@@ -150,12 +150,15 @@ def create_run(
         flow = catalogue.get_flow(db, payload.flow_id)
     except CatalogueError as exc:
         raise problem(404, "No such flow", str(exc)) from exc
-    if flow_purpose(flow) != "episode":
-        raise problem(
-            422,
-            "Not an episode flow",
-            f"'{flow.id}' plans a series and makes no script. Start a series with it instead.",
+    purpose = flow_purpose(flow)
+    if purpose != "episode":
+        detail = (
+            f"'{flow.id}' is an audio pipeline: it runs on a finished script and cannot "
+            "start a run."
+            if purpose == "audio"
+            else f"'{flow.id}' plans a series and makes no script. Start a series with it instead."
         )
+        raise problem(422, "Not an episode flow", detail)
 
     try:
         format_spec = catalogue.get_format_spec(db, payload.format_id)

@@ -5,11 +5,13 @@ import ArtifactView from './ArtifactView.vue'
 import {
   loadArtifactMode,
   pickRenderer,
+  readAudioScript,
   readBeat,
   readOutline,
   readScript,
   readSelection,
   setArtifactMode,
+  tagParts,
 } from './artifactView'
 
 const selectionPayload = {
@@ -71,11 +73,12 @@ const scriptPayload = {
 }
 
 describe('pickRenderer', () => {
-  it('names the four models that have a text view', () => {
+  it('names the models that have a text view', () => {
     expect(pickRenderer('Outline')).toBe('outline')
     expect(pickRenderer('Beat')).toBe('beat')
     expect(pickRenderer('Script')).toBe('script')
     expect(pickRenderer('Selection')).toBe('selection')
+    expect(pickRenderer('AudioScript')).toBe('audio')
   })
 
   it('returns none for every other model name', () => {
@@ -108,6 +111,55 @@ describe('payload shape', () => {
   it('rejects a preview string that is not an object', () => {
     expect(readOutline('{ "beats": [{ "title": "abgeschnitten"')).toBeNull()
     expect(readScript('{"segments":')).toBeNull()
+  })
+})
+
+const audioPayload = {
+  lines: [
+    {
+      segment_id: 's1',
+      speaker: 'Expertin',
+      kind: 'claim',
+      text: 'Rund 1 bis 2 % des Lichts.',
+      spoken: 'Rund eins bis zwei Prozent des Lichts.',
+      tagged: '[thoughtful] Rund eins bis zwei Prozent des Lichts. [short pause]',
+      spoken_forms: [{ original: '1 bis 2 %', spoken: 'eins bis zwei Prozent' }],
+      tags: ['[thoughtful]', '[short pause]'],
+      guard: 'pass',
+      problem: null,
+    },
+  ],
+}
+
+describe('audio script', () => {
+  it('reads lines with their spoken forms and rejects other shapes', () => {
+    const lines = readAudioScript(audioPayload)
+    expect(lines?.[0].spoken_forms).toEqual([
+      { original: '1 bis 2 %', spoken: 'eins bis zwei Prozent' },
+    ])
+    expect(readAudioScript({ lines: [{ segment_id: 's1' }] })).toBeNull()
+    expect(readAudioScript({ segments: [] })).toBeNull()
+  })
+
+  it('splits a tagged line into tags and words', () => {
+    expect(tagParts('[curious] Wovon lebt sie? [sighs]')).toEqual([
+      { text: '[curious]', tag: true },
+      { text: ' Wovon lebt sie? ', tag: false },
+      { text: '[sighs]', tag: true },
+    ])
+    expect(tagParts('ohne Tags')).toEqual([{ text: 'ohne Tags', tag: false }])
+  })
+
+  it('shows tags apart from the words and the spoken forms below', () => {
+    const wrapper = mount(ArtifactView, {
+      props: { model: 'AudioScript', payload: audioPayload, mode: 'text' },
+    })
+    expect(wrapper.findAll('.audio-tag').map((tag) => tag.text())).toEqual([
+      '[thoughtful]',
+      '[short pause]',
+    ])
+    expect(wrapper.text()).toContain('„1 bis 2 %“ → „eins bis zwei Prozent“')
+    expect(wrapper.text()).toContain('Wächter: ok')
   })
 })
 
