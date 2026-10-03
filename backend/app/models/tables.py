@@ -197,6 +197,8 @@ class Series(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: Optional display name. Unset keeps the plan title, or the document title.
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     #: The flow every episode runs, such as ``baseline_v0``.
     flow_id: Mapped[str] = mapped_column(String(100))
     flow_version: Mapped[str] = mapped_column(String(20))
@@ -226,6 +228,8 @@ class Run(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: Optional display name. Unset keeps the document title.
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     flow_id: Mapped[str] = mapped_column(String(100))
     flow_version: Mapped[str] = mapped_column(String(20))
     #: Which saved revision of the flow this run used. 0 means the flow was

@@ -147,9 +147,15 @@ def test_a_series_holds_at_its_plan_then_writes_every_episode_in_order(
 ) -> None:
     created = client.post(
         "/api/series",
-        json={"document_id": document_id, "minutes_per_episode": 3, "episodes": 2},
+        json={
+            "document_id": document_id,
+            "minutes_per_episode": 3,
+            "episodes": 2,
+            "name": "  Klimaserie  ",
+        },
     )
     assert created.status_code == 201, created.text
+    assert created.json()["name"] == "Klimaserie"
     series_id = created.json()["id"]
 
     held = _wait(client, series_id, {"planned", "failed"})
@@ -196,9 +202,12 @@ def test_a_series_holds_at_its_plan_then_writes_every_episode_in_order(
     earlier = second[0].split("Earlier episodes in full", 1)[1].split("Series rules:", 1)[0]
     assert not re.search(r"^\[b\d+\]", earlier, re.MULTILINE), "no passage headers in it"
 
+    assert done["name"] == "Klimaserie"
     episode = done["episodes"][1]
+    assert episode["name"] == "Klimaserie Teil 2"
     run = client.get(f"/api/runs/{episode['run_id']}").json()
     assert run["series_id"] == series_id and run["episode_index"] == 2
+    assert run["name"] == "Klimaserie Teil 2"
     assert {g["id"] for g in run["gates"]} >= {"G1", "G4", "G8"}
     with session_scope() as session:
         rows = session.query(RunNode).filter(RunNode.run_id == episode["run_id"]).all()
@@ -228,8 +237,12 @@ def test_a_series_holds_at_its_plan_then_writes_every_episode_in_order(
 
     exported = client.get(f"/api/series/{series_id}/export?format=zip")
     assert exported.status_code == 200
-    names = zipfile.ZipFile(io.BytesIO(exported.content)).namelist()
+    assert "kalliope-serie-klimaserie.zip" in exported.headers["content-disposition"]
+    archive = zipfile.ZipFile(io.BytesIO(exported.content))
+    names = archive.namelist()
     assert len([n for n in names if n.startswith("folge-")]) == 3 and "serie.json" in names
+    episode_file = next(n for n in names if n.startswith("folge-02"))
+    assert "Klimaserie Teil 2" in archive.read(episode_file).decode()
 
 
 def test_a_failed_episode_resumes_where_it_stopped(
@@ -246,6 +259,7 @@ def test_a_failed_episode_resumes_where_it_stopped(
                 "hint": "zweiter Lauf",
             },
         )
+        assert created.json()["name"] is None
         series_id = created.json()["id"]
         held = _wait(client, series_id, {"planned", "failed"})
         assert held["status"] == "planned", held["error"]
@@ -272,6 +286,7 @@ def test_a_failed_episode_resumes_where_it_stopped(
     assert done["status"] == "completed", done["error"]
     assert done["episodes"][1]["error"] is None
     recovered = client.get(f"/api/runs/{failed_run_id}").json()
+    assert recovered["name"] is None
     assert recovered["status"] == "completed"
     assert recovered["error"] is None
     assert recovered["verdict"] is None

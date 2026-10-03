@@ -63,6 +63,7 @@ from app.series import (
     brief_for,
     context_hash,
     coverage_check,
+    episode_run_name,
     episode_runs,
     final_script,
     load_plan,
@@ -646,6 +647,7 @@ class Worker:
                         created_by=series.created_by,
                         series_id=series_id,
                         episode_index=episode.index,
+                        name=episode_run_name(series.name, episode.index),
                     )
                     session.add(run)
                     session.flush()

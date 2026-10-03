@@ -27,6 +27,7 @@ import NotesEditor from '@/components/NotesEditor.vue'
 import ParamField from '@/components/ParamField.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { t } from '@/i18n'
+import { runTitle } from '@/titles'
 import { useBenchStore } from '@/stores/bench'
 import { useCatalogueStore } from '@/stores/catalogue'
 import { useDocumentsStore } from '@/stores/documents'
@@ -950,7 +951,7 @@ onBeforeRouteLeave(() => {
       <ul class="pick">
         <li v-for="run in finishedRuns" :key="run.id">
           <button class="pick__item" @click="loadRun(run.id)">
-            <span class="item__name">{{ run.document_title || run.document_id }}</span>
+            <span class="item__name">{{ runTitle(run) }}</span>
             <span class="meta">{{ run.flow_id }} · {{ when(run.created_at) }}</span>
           </button>
         </li>

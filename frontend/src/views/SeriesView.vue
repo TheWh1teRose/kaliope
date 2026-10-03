@@ -8,6 +8,7 @@ import NodeInspector from '@/components/NodeInspector.vue'
 import PipelineCanvas from '@/components/PipelineCanvas.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
+import { seriesTitle } from '@/titles'
 import type { PlacedNode } from '@/series/canvas'
 import { MAX_EPISODES, MIN_EPISODES } from '@/series/estimate'
 import { liveNote, waitingReasons } from '@/series/live'
@@ -207,7 +208,7 @@ onUnmounted(() => {
     <header class="head">
       <div class="grow">
         <RouterLink :to="{ name: 'runs' }" class="eyebrow back">← {{ t.nav.runs }}</RouterLink>
-        <h1 class="h-page">{{ plan?.title || series.document_title || t.series.title }}</h1>
+        <h1 class="h-page">{{ seriesTitle(series, t.series.title) }}</h1>
         <p class="meta">
           {{ series.flow_id }} v{{ series.flow_version }} · {{ series.plan_flow_id }} ·
           {{ series.document_title }} · {{ series.id }}

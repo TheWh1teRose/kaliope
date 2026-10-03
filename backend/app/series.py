@@ -74,6 +74,19 @@ def plan_run(session: Session, series_id: str) -> Run | None:
     ).first()
 
 
+def episode_run_name(series_name: str | None, index: int) -> str | None:
+    """``"<Name> Teil N"`` when the series was named; otherwise no name of its own."""
+    if not series_name:
+        return None
+    return f"{series_name} Teil {index}"
+
+
+def apply_episode_names(session: Session, series: Series) -> None:
+    """Point every episode run at the series name. An unnamed series clears them."""
+    for index, run in episode_runs(session, series.id).items():
+        run.name = episode_run_name(series.name, index)
+
+
 def episode_runs(session: Session, series_id: str) -> dict[int, Run]:
     """The newest run of every episode, keyed by its 1-based index."""
     rows = session.scalars(

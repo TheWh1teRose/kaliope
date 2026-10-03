@@ -12,6 +12,7 @@ import type { ExperimentSource, ExperimentSourceMeta, RunOut } from '@/api/types
 import ModalDialog from '@/components/ModalDialog.vue'
 import { loadSource } from '@/experiments/api'
 import { t } from '@/i18n'
+import { runTitle, sourceTitle } from '@/titles'
 
 const FINISHED_RUN = new Set(['completed', 'in_review', 'reviewed', 'failed', 'paused'])
 
@@ -83,11 +84,11 @@ async function applyPicked(): Promise<void> {
     <div class="grow">
       <p class="eyebrow">{{ labels.source }}</p>
       <p v-if="source?.beat_title" class="small">
-        <strong>{{ source.document_title }}</strong> · {{ labels.sourceBeat }}
+        <strong>{{ sourceTitle(source) }}</strong> · {{ labels.sourceBeat }}
         {{ source.beat_position }}/{{ source.beat_total }}: <em>{{ source.beat_title }}</em>
       </p>
       <p v-else-if="source?.run_id" class="small">
-        <strong>{{ source.document_title }}</strong> · {{ labels.sourceRun }}
+        <strong>{{ sourceTitle(source) }}</strong> · {{ labels.sourceRun }}
       </p>
       <p v-else class="small muted">{{ sampleLabel ?? labels.sourceSample }}</p>
     </div>
@@ -114,7 +115,7 @@ async function applyPicked(): Promise<void> {
           :class="{ 'pick__item--on': pickedRun === item.id }"
           @click="pickRun(item.id)"
         >
-          <span>{{ item.document_title || item.document_id }}</span>
+          <span>{{ runTitle(item) }}</span>
           <span class="meta">{{ item.flow_id }} · {{ new Date(item.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) }}</span>
         </button>
       </li>

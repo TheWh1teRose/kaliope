@@ -328,6 +328,7 @@ def load_selection_source(session: Session, store: ArtifactStore, source: Source
         source={
             "run_id": run.id,
             "document_id": run.document_id,
+            "name": run.name,
             "document_title": (document.title or document.filename) if document else None,
             "selection": payloads.get("selection"),
         },

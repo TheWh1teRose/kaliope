@@ -274,6 +274,8 @@ export interface RunOut {
   id: string
   document_id: string
   document_title: string | null
+  /** Set when the reviewer named the run. Otherwise the document title is the title. */
+  name?: string | null
   flow_id: string
   flow_version: string
   status: RunStatus
@@ -870,6 +872,8 @@ export interface ExperimentBeat {
 export interface ExperimentSourceMeta {
   run_id: string
   document_id?: string
+  /** The run's display name, when one was set. */
+  name?: string | null
   document_title?: string | null
   beat_id?: string
   beat_title?: string
@@ -1047,6 +1051,8 @@ export type SeriesStatus =
 export interface SeriesEpisode {
   index: number
   title: string
+  /** The episode run's display name, such as "<Serie> Teil 1". */
+  name?: string | null
   role: string
   target_minutes: number | null
   run_id: string | null
@@ -1082,6 +1088,8 @@ export interface SeriesOut {
   id: string
   document_id: string
   document_title: string | null
+  /** Set when the reviewer named the series. Otherwise the plan or document title is used. */
+  name?: string | null
   flow_id: string
   flow_version: string
   plan_flow_id: string
@@ -1125,6 +1133,7 @@ export interface CreateSeriesPayload {
   minutes_per_episode: number
   hint?: string
   audience_spec?: AudienceSpec
+  name?: string
 }
 
 /** One event of a series' stream, tagged with the run and episode it came from. */
