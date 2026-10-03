@@ -62,6 +62,11 @@ function minutesText(value: number): string {
   return value.toLocaleString('de-DE', { maximumFractionDigits: 1 })
 }
 
+function episodeMinutesText(perEpisode: number, reason: string): string {
+  const shown = reason === 'tooThin' ? Math.floor(perEpisode * 10) / 10 : perEpisode
+  return minutesText(shown)
+}
+
 const estimateNote = computed(() => {
   const e = estimate.value
   if (!e) return ''
@@ -70,7 +75,7 @@ const estimateNote = computed(() => {
     minutes: targetMinutes.value,
     total: e.episodes * targetMinutes.value,
     max: minutesText(supportable.value),
-    per: minutesText(e.perEpisode),
+    per: episodeMinutesText(e.perEpisode, e.reason),
   }
   switch (e.reason) {
     case 'tooFew':
@@ -332,7 +337,7 @@ onMounted(async () => {
             <b>{{
               fill(estimate.episodes === 1 ? t.series.oneEpisode : t.series.episodesOf, {
                 n: estimate.episodes,
-                minutes: minutesText(estimate.perEpisode),
+                minutes: episodeMinutesText(estimate.perEpisode, estimate.reason),
               })
             }}</b>
             · {{ fill(t.series.uses, { used: minutesText(estimate.used), total: minutesText(supportable) }) }}

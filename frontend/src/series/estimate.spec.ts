@@ -39,6 +39,7 @@ describe('series estimate', () => {
       reason: 'tooThin',
       tone: 'fail',
     })
+    expect(estimateSeries(11.85, 15, 4).perEpisode).toBe(11.85 / 4)
   })
 
   it('warns when the suggestion is a series of one', () => {
