@@ -270,7 +270,7 @@ def replan(
 def resume_series(
     series_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> SeriesOut:
-    """Continue a series that failed or was cut off; finished steps are not repeated."""
+    """Continue a series that failed or was stopped; finished steps are not repeated."""
     series = _require_series(db, series_id)
     if series.status in {"completed", "planned"}:
         raise problem(409, "Nothing to resume", f"The series is '{series.status}'.")

@@ -286,7 +286,7 @@ class Worker:
             tagged = session.get(Run, run_id)
             if tagged is None:
                 logger.warning("execution requested for unknown run %s", run_id)
-                return
+                return None
             if tagged.status == "stopped":
                 return False
             if tagged.series_id and tagged.episode_index is not None:
@@ -301,7 +301,7 @@ class Worker:
             run = session.get(Run, run_id)
             if run is None:
                 logger.warning("execution requested for unknown run %s", run_id)
-                return
+                return None
             halted = False
             if run.status == "stopped":
                 return False
@@ -313,7 +313,7 @@ class Worker:
             if not halted and document is None:
                 run.status = "failed"
                 run.error = "the document this run refers to no longer exists"
-                return
+                return None
             if not halted:
                 assert document is not None
                 run.status = "running"
@@ -341,14 +341,14 @@ class Worker:
 
         if halted:
             self._emit(run_id, "run.stopped", {"run_id": run_id})
-            return
+            return None
 
         self._emit(run_id, "run.started", {"run_id": run_id, "flow": flow_id})
 
         flow = self._load_flow(flow_id)
         if flow is None:
             self._fail_run(run_id, f"flow '{flow_id}' is not available", None)
-            return
+            return None
         stop_after = config.get("stop_after")
         if stop_after:
             # The first stage of a series episode: up to its outline, no script yet.
@@ -389,7 +389,7 @@ class Worker:
         with session_scope() as session:
             run = session.get(Run, run_id)
             if run is None:  # pragma: no cover - deleted mid-run
-                return
+                return None
             run.manifest_json = result.manifest.model_dump(mode="json")
             run.total_cost_usd = _run_cost(session, run_id, result.manifest.total_cost_usd)
             for record in result.manifest.nodes:
@@ -400,31 +400,32 @@ class Worker:
             self._run_should_stop(run_id) and result.status != "completed"
         ):
             self._commit_run_stopped(run_id, self._stop_user(run_id), result)
-            return
+            return None
 
         if result.status == "failed":
             self._fail_run(
                 run_id, result.error or "the run failed", result.traceback, result.verdict
             )
-            return
+            return None
 
         if result.status == "paused":
             self._pause_run(run_id, result, previous=previous_manifest)
-            return
+            return None
 
         if stop_after:
             self._stop_run(run_id, "outlined", "run.outlined")
-            return
+            return None
         if "script" not in result.bag:
             # A planner run: its output is the plan, there is no script to check.
             self._stop_run(run_id, "completed", "run.completed")
-            return
+            return None
 
         try:
             self._finish_run(run_id, result.bag, flow, store)
         except Exception as exc:  # noqa: BLE001
             logger.exception("post-processing run %s failed", run_id)
             self._fail_run(run_id, f"{type(exc).__name__}: {exc}", traceback_module.format_exc())
+        return None
 
     def execute_bench(self, bench_id: str) -> None:
         """Run a bench chain. No gates, no segments, no review rows."""

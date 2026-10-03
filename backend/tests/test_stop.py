@@ -419,9 +419,7 @@ def test_resuming_a_stopped_series_in_the_same_process_runs_it(
     assert continued["status"] == "planned", continued["error"]
 
 
-def test_stopping_a_later_queued_episode_skips_it(
-    client: TestClient, document_id: str
-) -> None:
+def test_stopping_a_later_queued_episode_skips_it(client: TestClient, document_id: str) -> None:
     created = client.post(
         "/api/series",
         json={"document_id": document_id, "minutes_per_episode": 3, "episodes": 2, "force": True},

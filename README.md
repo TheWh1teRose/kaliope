@@ -215,7 +215,7 @@ inside its source-word budget; the rest stay unassigned. An assignment past
 that budget is kept and named in a warning on the plan. Episodes keep the
 length that was asked for. The model's split of passages is checked rather
 than trusted.
-The series always stops after the plan until someone approves it, and can be
+The series always waits after the plan until someone approves it, and can be
 planned again with another count, length or hint while it waits.
 
 Each episode is an ordinary run (`runs.series_id`, `episode_index`), so review,
@@ -227,7 +227,8 @@ still come only from its own passages). Two inputs keep the cache precise:
 `episode_brief` (this episode's share of the plan) feeds the early nodes and
 `series_context` feeds only the script. A flow without the planner never has
 either, so its prompts and cache keys are unchanged (pinned by
-`tests/test_series_golden.py`). Series that fail resume where they stopped.
+`tests/test_series_golden.py`). Series that fail or were stopped resume where
+they left off.
 
 The series view shows the whole pipeline on one pannable canvas — the planner as
 a column, one lane per episode — compact (state, cost, tokens, duration) or with
@@ -365,7 +366,7 @@ GET /api/flows/{id}/graph               # the flow's nodes, ports and wiring
 GET /api/runs/{id}/graph                # the same, as it actually ran
 GET /api/runs/{id}/nodes/{node}/io      # one node's real inputs and output
 GET /api/documents/{id}/budget          # how many minutes a document supports
-POST /api/series                        # start a series; approve, replan, resume below it
+POST /api/series                        # start a series; approve, replan, stop and resume below it
 GET /api/series/{id}/graph              # the planner run and every episode run
 GET /api/series/{id}/events             # one live stream for the whole series
 GET /api/folders                        # the folder tree, with rolled-up counts
@@ -419,10 +420,10 @@ thresholds are aggregate over the corpus, never per document.
 
 ## Not in this build
 
-Text-to-speech and audio handling; the fact-check repair loop; AI persona
-feedback; pairwise evaluation, judges or rubrics; vision-based extraction of
-diagram content; multi-tenancy or customer-facing upload; OCR of scanned pages.
-None of these are partially implemented.
+The fact-check repair loop; AI persona feedback; pairwise evaluation, judges or
+rubrics; vision-based extraction of diagram content; multi-tenancy or
+customer-facing upload; OCR of scanned pages. None of these are partially
+implemented.
 # kaliope
 
 ## Deploy
