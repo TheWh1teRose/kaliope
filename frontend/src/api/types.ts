@@ -888,6 +888,8 @@ export interface ExperimentSourceMeta {
   outline?: unknown
   /** The run's selection, for experiments that load the selection step's input. */
   selection?: unknown
+  /** The run's series plan, when the run planned a series. */
+  plan?: unknown
 }
 
 export interface ExperimentSource {
@@ -1005,6 +1007,8 @@ export interface LearningGoal {
   id: string
   text: string
   source: 'document' | 'generated'
+  bloom_level?: 'remember' | 'understand' | 'apply' | 'analyse' | 'evaluate' | 'create' | null
+  derivation?: string | null
 }
 
 export interface SeriesTerm {
@@ -1035,7 +1039,7 @@ export interface SeriesPlan {
   terms: SeriesTerm[]
   episodes: EpisodePlan[]
   unassigned: { block_id: string; reason: string }[]
-  /** Episodes that carry more source words than the dialogue budget allows. */
+  /** An episode over its source-word budget, or one with no usable learning goal. */
   warnings: string[]
   budget: {
     max_supportable_minutes: number

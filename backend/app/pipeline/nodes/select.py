@@ -3,6 +3,8 @@
 Learning goals come from the document's own stated objectives when it has any,
 and are generated otherwise. Both paths are first-class: the ``source`` field
 records which one ran, and AC-BL-3 checks that the corpus exercises both.
+A series episode keeps the goals the plan fixed. When the plan left none,
+selection stops instead of inventing them.
 
 The prompt shows each candidate block as an id, a weight and its text. No zone
 is named in prose — the model receives generic labels and weights, so the
@@ -117,7 +119,8 @@ class SelectNode:
             "they are handed over and the goals are derived from them. If it states none, the "
             "goals are inferred from the material. Which path ran is recorded on every goal as "
             "'document' or 'generated'. In a series, goals the plan already fixed are kept; "
-            "the model only maps passages onto them.",
+            "the model only maps passages onto them. An episode the plan left with no goal "
+            "is not a request to invent one.",
             "The reply is filtered, not trusted: block ids that do not exist are discarded and "
             "counted, duplicates are dropped, and goal references that point at no goal are "
             "stripped. What survives is sorted back into document order.",
@@ -141,6 +144,8 @@ class SelectNode:
             "reference.",
             "The model returned no learning goals, or no block id that exists in the parse. "
             "Usually a sign the prompt was edited into something the model answers in prose.",
+            "A series episode whose plan has no learning goal. Selection does not invent "
+            "one; the plan already asked for a new plan.",
         ],
         cost="One call, with the whole candidate set in it. The largest single prompt in the "
         "flow; the system prompt is cached across runs.",
@@ -209,6 +214,10 @@ class SelectNode:
             candidates = [b for b in candidates if b.id in own or b.id in recap_ids]
         if not candidates:
             raise NodeError("no narratable blocks are available to select from")
+        if brief is not None and not brief.episode.goals:
+            raise NodeError(
+                f"Folge {brief.episode.index} hat keine verwertbaren Lernziele, bitte neu planen"
+            )
 
         section_titles = {s.id: s.title for s in (inp.parsed.sections or [])}
         payload, truncated_share = _candidate_payload(
@@ -275,7 +284,7 @@ class SelectNode:
             for index, g in enumerate(data.get("learning_goals", []))
             if str(g.get("text", "")).strip()
         ]
-        if brief is not None and brief.episode.goals:
+        if brief is not None:
             # The series plan fixed this episode's goals; the model only maps to them.
             goals = list(brief.episode.goals)
         if not goals:
@@ -354,14 +363,10 @@ def _episode_instruction(brief: EpisodeBrief, recap_ids: set[str]) -> str:
             "Passages marked as recap belong to earlier episodes. Select one only if a "
             "short recap at the start needs to cite it."
         )
-    if episode.goals:
-        lines.append(
-            "The series plan fixed this episode's learning goals. Return exactly these, "
-            "with these ids:"
-        )
-        lines.extend(f"- {goal.id}: {goal.text}" for goal in episode.goals)
-    else:
-        lines.append("Infer learning goals for this episode from its passages.")
+    lines.append(
+        "The series plan fixed this episode's learning goals. Return exactly these, with these ids:"
+    )
+    lines.extend(f"- {goal.id}: {goal.text}" for goal in episode.goals)
     return "\n".join(lines)
 
 

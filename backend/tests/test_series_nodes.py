@@ -133,7 +133,26 @@ def test_select_sees_only_the_episode_and_keeps_the_planned_goals(tmp_path: Path
     )
     assert "This is episode 2 of 3 of the series" in message
     assert "- ep02-g0: Folgen erklären" in message
+    assert "Infer learning goals for this episode" not in message
     assert [g.id for g in selection.learning_goals] == ["ep02-g0"]
+
+
+def test_select_does_not_invent_goals_when_the_plan_has_none(tmp_path: Path) -> None:
+    budget = ContentBudgetNode().run(
+        ContentBudgetInput(parsed=DOC, target_minutes=8),
+        _context(StubProvider(), tmp_path),
+    )
+    episode = _brief().episode.model_copy(update={"goals": []})
+    brief = _brief().model_copy(update={"episode": episode})
+    provider = StubProvider()
+    with pytest.raises(
+        NodeError, match="Folge 2 hat keine verwertbaren Lernziele, bitte neu planen"
+    ):
+        SelectNode().run(
+            SelectInput(parsed=DOC, budget=budget, audience_spec=AUDIENCE, episode_brief=brief),
+            _context(provider, tmp_path),
+        )
+    assert provider.calls == []
 
 
 def test_outline_learns_where_the_episode_stands(tmp_path: Path) -> None:

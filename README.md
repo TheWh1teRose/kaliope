@@ -221,14 +221,19 @@ each episode:    content_budget → select → outline          (all episodes fi
 ```
 
 `series_plan` decides which passages and learning goals belong to which
-episode, with a title, a through-line and the key terms. The number of episodes
+episode, with a title, a through-line and the key terms. Each episode's goals
+are formulated by the same rule as the objectives node: a checkable change
+derived from the desired outcome, limited to that episode's time, at the
+lowest honest Bloom level. The number of episodes
 asked for is what the content budget carries at the chosen length (two to eight)
 unless the reviewer sets it. If the plan comes back with a different count, the
 planner is asked once more; a count that still differs is kept and shown on the
 plan screen. An episode that cannot carry three minutes is merged into its
 neighbour. Passages the model left out join an episode only while it stays
 inside its source-word budget; the rest stay unassigned. An assignment past
-that budget is kept and named in a warning on the plan. Episodes keep the
+that budget is kept and named in a warning on the plan. An episode whose goals
+are all unusable is kept as well, with the warning that it needs a new plan;
+selection does not invent goals for it. Episodes keep the
 length that was asked for. The model's split of passages is checked rather
 than trusted.
 The series always stops after the plan until someone approves it, and can be
@@ -249,6 +254,10 @@ The series view shows the whole pipeline on one pannable canvas — the planner 
 a column, one lane per episode — compact (state, cost, tokens, duration) or with
 every input and output, and follows the run live. After the last episode the S1
 check reports how much of the document the series covers.
+
+The experiment **Folgen planen** starts from the planner's system prompt and
+the same user message production sends. Both stay editable, along with the
+model settings, and a run can be saved and collected.
 
 ### Gates
 
@@ -404,7 +413,7 @@ backend/app/
 ├─ llm/          provider protocol, pricing and capability registry, three providers
 ├─ speech/       speech provider protocol, client (retries, cost), ElevenLabs
 ├─ lang/         detection, per-language resources, readability formulas
-├─ experiments/  prompt experiments (script, outline, selection, audio tags) · verbalized sampling
+├─ experiments/  prompt experiments (script, outline, selection, series planner, audio tags) · verbalized sampling
 ├─ ingestion/    runs · extract · layout · repetition · normalize · blocks ·
 │                anchors · structure · zones · tables · report · pipeline
 └─ pipeline/
