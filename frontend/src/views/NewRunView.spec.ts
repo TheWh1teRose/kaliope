@@ -2,9 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { CreateSeriesPayload } from '@/api/types'
+
 import NewRunView from './NewRunView.vue'
 
-const createSeries = vi.fn(async () => ({ id: 's1' }))
+const createSeries = vi.fn(async (_payload: CreateSeriesPayload) => ({ id: 's1' }))
 const createRun = vi.fn(async () => ({ id: 'r1' }))
 
 vi.mock('@/stores/catalogue', () => ({

@@ -147,7 +147,7 @@ describe('series view', () => {
     store.get.mockResolvedValueOnce(planned)
     const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
     await flushPromises()
-    expect(wrapper.get('[data-replan-hint]').element.value).toBe('Paris extra')
+    expect((wrapper.get('[data-replan-hint]').element as HTMLInputElement).value).toBe('Paris extra')
     await wrapper.get('[data-replan]').trigger('click')
     await flushPromises()
     expect(store.replan).toHaveBeenCalledWith('s1', {
