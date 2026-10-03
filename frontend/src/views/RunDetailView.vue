@@ -11,7 +11,7 @@ import NodeInspector from '@/components/NodeInspector.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { t } from '@/i18n'
-import { useRunsStore } from '@/stores/runs'
+import { type ProgressLine, useRunsStore } from '@/stores/runs'
 
 const props = defineProps<{ id: string }>()
 
@@ -27,7 +27,9 @@ const draftNotes = ref<Note[]>([])
 const notesBusy = ref(false)
 const notesError = ref('')
 
-const live = computed(() => run.value?.status === 'queued' || run.value?.status === 'running')
+const live = computed(() =>
+  ['queued', 'running', 'outlined'].includes(run.value?.status ?? ''),
+)
 const totalTokens = computed(() =>
   (run.value?.nodes ?? []).reduce((sum, node) => sum + node.tokens_in + node.tokens_out, 0),
 )
@@ -52,6 +54,27 @@ async function reload(): Promise<void> {
     feedback.value = null
     notesOpen.value = false
   }
+}
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * A node event arrived: refresh the run and its graph shortly after, so the
+ * node table and the flow chart move with the run instead of waiting for its
+ * end. Bursts of events collapse into one refresh.
+ */
+function onLiveEvent(line: ProgressLine): void {
+  if (!line.type.startsWith('node.') && line.type !== 'run.started') return
+  if (refreshTimer) return
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null
+    run.value = await runs.get(props.id)
+    graph.value = await runs.graph(props.id).catch(() => graph.value)
+  }, 400)
+}
+
+function follow(): void {
+  if (live.value) runs.watch(props.id, reload, onLiveEvent)
 }
 
 async function loadFeedback(): Promise<void> {
@@ -91,7 +114,7 @@ async function submitNotes(): Promise<void> {
     notesOpen.value = false
     feedback.value = null
     await reload()
-    if (live.value) runs.watch(props.id, reload)
+    follow()
   } catch (exc) {
     notesError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
   } finally {
@@ -117,10 +140,13 @@ function closeInspector(): void {
 
 onMounted(async () => {
   await reload()
-  if (live.value) runs.watch(props.id, reload)
+  follow()
 })
 
-onUnmounted(() => runs.stopWatching())
+onUnmounted(() => {
+  runs.stopWatching()
+  if (refreshTimer) clearTimeout(refreshTimer)
+})
 </script>
 
 <template>
@@ -217,6 +243,7 @@ onUnmounted(() => runs.stopWatching())
 
         <div v-if="live || runs.progress.length" class="sheet">
           <h2 class="h-section">{{ t.run.progress }}</h2>
+          <p v-if="runs.reconnecting" class="muted hint">{{ t.run.reconnecting }}</p>
           <ol class="log scroll">
             <li v-for="(line, index) in runs.progress" :key="index" class="log__line">
               <span class="meta">{{ new Date(line.at).toLocaleTimeString('de-DE') }}</span>

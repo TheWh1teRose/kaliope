@@ -369,7 +369,7 @@ def build_run_graph(db: Session, run: Run) -> RunGraphOut:
                 tokens_in=row.tokens_in if row else 0,
                 tokens_out=row.tokens_out if row else 0,
                 cost_usd=row.cost_usd if row else 0.0,
-                wall_ms=record.get("wall_ms"),
+                wall_ms=_wall_ms(row, record),
                 started_at=_iso(row.started_at) if row else None,
                 finished_at=_iso(row.finished_at) if row else None,
                 error=row.error if row else None,
@@ -443,6 +443,10 @@ def node_io(
             source = None
 
         if source is None:
+            if key not in seed_values and not node.Input.model_fields[key].is_required():
+                # An optional input this run does not have, such as a series
+                # input on an ordinary run: nothing to show.
+                continue
             value = seed_values.get(key)
             inputs.append(
                 _value_out(
@@ -665,6 +669,17 @@ def _description(node: Node) -> str | None:
     return " ".join(doc.split()) or None
 
 
+def _wall_ms(row: RunNode | None, record: dict[str, Any]) -> int | None:
+    """How long the node took. A row kept from an earlier execution of the run
+    (a series' outline stage) knows that; the latest manifest only saw a cache hit."""
+    wall = record.get("wall_ms")
+    if row is not None and not row.cache_hit and row.started_at and row.finished_at:
+        measured = int((row.finished_at - row.started_at).total_seconds() * 1000)
+        if not wall or record.get("cache_hit"):
+            return measured
+    return int(wall) if isinstance(wall, (int, float)) else None
+
+
 def _series_seed_keys(config: dict[str, Any]) -> tuple[str, ...]:
     """The optional seeds a series run carries, so its graph shows them."""
     keys: list[str] = []
@@ -785,6 +800,17 @@ def _seed_values(db: Session, run: Run) -> dict[str, Any]:
             "parsed_artifact_hash": document.parsed_artifact_hash,
             "language_override": config.get("language"),
         }
+    # A series run's own seeds: its request, its share of the plan, its context.
+    if config.get("series_request"):
+        seeds["series_request"] = config["series_request"]
+    store = _store()
+    for key, field in (
+        ("episode_brief", "episode_brief_artifact"),
+        ("series_context", "series_context_artifact"),
+    ):
+        digest = config.get(field)
+        if digest and store.exists(digest):
+            seeds[key] = store.get_raw(digest)
     return {key: value for key, value in seeds.items() if value is not None}
 
 
