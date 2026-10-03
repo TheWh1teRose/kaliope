@@ -29,7 +29,11 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
-from app.pipeline.nodes.content_budget import MIN_VIABLE_MINUTES, source_word_budget
+from app.pipeline.nodes.content_budget import (
+    MIN_VIABLE_MINUTES,
+    episode_source_words,
+    source_word_budget,
+)
 from app.pipeline.objective_rule import (
     DOCUMENT_OBJECTIVES_NOTE,
     FORMULATED_GOAL_PROPERTIES,
@@ -380,9 +384,9 @@ def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, min
     total_words = sum(block.word_count() for block in candidates)
     expansion = inp.budget.dialogue_expansion
     wpm = inp.budget.words_per_minute
-    per_episode_cap = source_word_budget(minutes, wpm, expansion)
-    even_share = max(1, total_words // max(count, 1))
-    target_source = min(per_episode_cap, even_share)
+    target_source, per_episode_cap, even_share = episode_source_words(
+        total_words, count, minutes, wpm, expansion
+    )
     return (
         f"Plan {count} episodes of about {minutes} minutes each.\n"
         f"Each episode should use about {target_source} words of source material "

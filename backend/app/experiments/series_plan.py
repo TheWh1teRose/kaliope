@@ -2,12 +2,12 @@
 
 It starts from the production ``series_plan`` system prompt and response schema.
 The user message is a template over the fields the planner needs: a document
-summary, the selection, the content budget, format and audience, and how many
-episodes of what length. One run is one model call. The answer is read as a
-series plan when it has episodes with titles, roles, goals and passage ids;
-any other shape stays raw text with a warning. Goals use the same formulation
-rule as the objectives node. Nothing here assigns leftover passages or warns
-about the source-word budget: the page shows what the model planned.
+summary, the content budget, format and audience, and how many episodes of
+what length. One run is one model call. The answer is read as a series plan
+when it has episodes with titles, roles, goals and passage ids; any other
+shape stays raw text with a warning. Goals use the same formulation rule as
+the objectives node. Nothing here assigns leftover passages or warns about the
+source-word budget: the page shows what the model planned.
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ from app.experiments.base import (
 )
 from app.experiments.registry import register_experiment
 from app.llm.base import LLMClient, LLMError, parse_json
-from app.models import Document, Run
+from app.models import Document, Run, Series
 from app.pipeline.bench import coerce_value, load_values
 from app.pipeline.framework.artifacts import ArtifactStore
-from app.pipeline.nodes.content_budget import source_word_budget
+from app.pipeline.nodes.content_budget import episode_source_words, supportable_minutes
 from app.pipeline.nodes.series_plan import _SCHEMA as PLAN_SCHEMA
 from app.pipeline.nodes.series_plan import _SYSTEM as PLAN_SYSTEM
 from app.pipeline.nodes.series_plan import PASSAGE_CHARS
@@ -44,7 +44,7 @@ from app.pipeline.objective_rule import (
     time_budget_constraint,
 )
 from app.schemas.document import Block, ParsedDocument
-from app.schemas.pipeline import AudienceSpec, ContentBudget, FormatSpec, Selection
+from app.schemas.pipeline import AudienceSpec, ContentBudget, FormatSpec, SeriesRequest
 
 #: The series planner pins this model and this ``max_tokens``.
 PRODUCTION_MODEL = "claude-opus-5"
@@ -54,7 +54,6 @@ SERIES_TEMPLATE = (
     "Plan {{episode_count}} episodes of about {{minutes_per_episode}} minutes each.\n"
     "{{content_budget}}\n"
     "{{format_audience}}\n"
-    "Selection:\n{{selection}}\n\n"
     "Document:\n{{document}}\n"
 )
 
@@ -64,7 +63,11 @@ SAMPLE_SERIES: dict[str, str] = {
     "content_budget": (
         "810 narratable words support about 15.0 minutes at 135 words per minute "
         "with a 2.5× dialogue expansion. Each episode should use about 405 words "
-        "of source so the 15 minutes have room for dialogue."
+        "of source material so the 15 minutes have room for dialogue, explanation "
+        "and questions. 810 words is the most one episode should carry; "
+        "the document's 810 narratable words spread across 2 episodes "
+        "come to about 405 words each. Prefer the smaller figure, and prefer "
+        "fewer, richer topics. Passages beyond that stay unassigned."
     ),
     "format_audience": (
         "Format: Zwei Stimmen im Gespräch. Speakers: Moderator (asks the questions "
@@ -74,11 +77,6 @@ SAMPLE_SERIES: dict[str, str] = {
         "Die Hörerin kann erklären, wie Fotosynthese Licht in Zucker verwandelt.\n"
         "Time budget (constraint — only write objectives a listener can reach in "
         "this time): 15.0 minutes per episode."
-    ),
-    "selection": (
-        "Learning goals:\n"
-        "- g0: Erklären, wo die Lichtreaktion stattfindet und was sie liefert.\n"
-        "Selected passages: b12, b14"
     ),
     "document": (
         "## Licht\n"
@@ -145,22 +143,21 @@ def _passage_line(block: Block) -> str:
     )
 
 
-def selection_summary(selection: Selection | None) -> str:
-    if selection is None:
-        return "No selection."
-    goals = "\n".join(f"- {goal.id}: {goal.text}" for goal in selection.learning_goals) or "(none)"
-    ids = ", ".join(item.block_id for item in selection.selected_blocks) or "(none)"
-    return f"Learning goals:\n{goals}\nSelected passages: {ids}"
-
-
-def budget_summary(budget: ContentBudget, minutes: int, count: int) -> str:
-    per_episode = source_word_budget(minutes, budget.words_per_minute, budget.dialogue_expansion)
+def budget_summary(parsed: ParsedDocument, budget: ContentBudget, minutes: int, count: int) -> str:
+    total = parsed.narratable_word_count()
+    wpm = budget.words_per_minute
+    expansion = budget.dialogue_expansion
+    supportable = supportable_minutes(total, wpm, expansion)
+    target, cap, even_share = episode_source_words(total, count, minutes, wpm, expansion)
     return (
-        f"{budget.narratable_words} narratable words support about "
-        f"{budget.max_supportable_minutes:.1f} minutes at {budget.words_per_minute} words "
-        f"per minute with a {budget.dialogue_expansion:g}× dialogue expansion. "
-        f"Each of {count} episodes of {minutes} minutes should use about {per_episode} "
-        "words of source so there is room for dialogue."
+        f"{total} narratable words support about {supportable:.1f} minutes at {wpm} words "
+        f"per minute with a {expansion:g}× dialogue expansion. "
+        f"Each episode should use about {target} words of source material "
+        f"so the {minutes} minutes have room for dialogue, explanation and questions. "
+        f"{cap} words is the most one episode should carry; "
+        f"the document's {total} narratable words spread across {count} episodes "
+        f"come to about {even_share} words each. Prefer the smaller figure, and prefer "
+        f"fewer, richer topics. Passages beyond that stay unassigned."
     )
 
 
@@ -182,7 +179,6 @@ def format_audience_text(format_spec: FormatSpec, audience: AudienceSpec, minute
 
 def series_fields(
     parsed: ParsedDocument,
-    selection: Selection | None,
     budget: ContentBudget,
     format_spec: FormatSpec,
     audience: AudienceSpec,
@@ -193,11 +189,63 @@ def series_fields(
     return {
         "episode_count": str(episode_count),
         "minutes_per_episode": str(minutes),
-        "content_budget": budget_summary(budget, minutes, episode_count),
+        "content_budget": budget_summary(parsed, budget, minutes, episode_count),
         "format_audience": format_audience_text(format_spec, audience, minutes),
-        "selection": selection_summary(selection),
         "document": document_summary(parsed),
     }
+
+
+def planner_minutes_and_count(
+    plan: dict[str, Any] | None,
+    request: SeriesRequest | None,
+    target_minutes: Any,
+) -> tuple[int, int]:
+    """Per-episode minutes and the requested episode count.
+
+    Taken from the plan budget, then from the series request. ``target_minutes``
+    is used only when neither has a length. A missing count is one episode.
+    """
+    budget = plan.get("budget") if isinstance(plan, dict) else None
+    if not isinstance(budget, dict):
+        budget = {}
+    minutes = _as_int(budget.get("minutes_per_episode"))
+    count = _as_int(budget.get("requested_episodes"))
+    if request is not None:
+        if minutes is None:
+            minutes = _as_int(request.minutes_per_episode)
+        if count is None:
+            count = _as_int(request.episodes)
+    if minutes is None:
+        minutes = _as_int(target_minutes) or 15
+    if count is None:
+        count = 1
+    return minutes, count
+
+
+def _as_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _series_request(raw: Any) -> SeriesRequest | None:
+    if not isinstance(raw, dict):
+        return None
+    minutes = _as_int(raw.get("minutes_per_episode"))
+    if minutes is None:
+        return None
+    hint = raw.get("hint")
+    return SeriesRequest(
+        episodes=_as_int(raw.get("episodes")),
+        minutes_per_episode=minutes,
+        hint=hint if isinstance(hint, str) and hint.strip() else None,
+    )
 
 
 def read_series_plan(payload: Any) -> tuple[PlanView | None, str | None]:
@@ -278,7 +326,6 @@ class SeriesPlanner(PromptExperiment):
             FieldSpec(key="minutes_per_episode", label="Minuten je Folge"),
             FieldSpec(key="content_budget", label="Inhaltsbudget", multiline=True),
             FieldSpec(key="format_audience", label="Format und Zielgruppe", multiline=True),
-            FieldSpec(key="selection", label="Auswahl", multiline=True),
             FieldSpec(
                 key="document",
                 label="Dokument",
@@ -328,7 +375,6 @@ def load_series_source(session: Session, store: ArtifactStore, source: SourceIn)
             run_id=run.id,
             keys=[
                 "parsed",
-                "selection",
                 "budget",
                 "format_spec",
                 "audience_spec",
@@ -346,14 +392,12 @@ def load_series_source(session: Session, store: ArtifactStore, source: SourceIn)
         if needed not in payloads:
             raise LookupError(f"run '{run.id}' has no {needed} yet")
 
-    minutes = int(payloads.get("target_minutes") or 15)
-    plan_payload = payloads.get("series_plan")
-    episode_count = 2
-    if isinstance(plan_payload, dict) and isinstance(plan_payload.get("episodes"), list):
-        episode_count = max(2, len(plan_payload["episodes"]))
+    plan_payload, request = _plan_and_request(session, store, run, payloads)
+    minutes, episode_count = planner_minutes_and_count(
+        plan_payload, request, payloads.get("target_minutes")
+    )
     fields = series_fields(
         coerce_value("parsed", payloads["parsed"]),
-        coerce_value("selection", payloads["selection"]) if "selection" in payloads else None,
         coerce_value("budget", payloads["budget"]),
         coerce_value("format_spec", payloads["format_spec"]),
         coerce_value("audience_spec", payloads["audience_spec"]),
@@ -361,6 +405,7 @@ def load_series_source(session: Session, store: ArtifactStore, source: SourceIn)
         minutes=minutes,
     )
     document = session.get(Document, run.document_id)
+    own_plan = payloads.get("series_plan")
     return SourceOut(
         fields=fields,
         beats=[],
@@ -369,9 +414,28 @@ def load_series_source(session: Session, store: ArtifactStore, source: SourceIn)
             "document_id": run.document_id,
             "name": run.name,
             "document_title": (document.title or document.filename) if document else None,
-            "plan": plan_payload,
+            "plan": own_plan if isinstance(own_plan, dict) else None,
         },
     )
+
+
+def _plan_and_request(
+    session: Session, store: ArtifactStore, run: Run, payloads: dict[str, Any]
+) -> tuple[dict[str, Any] | None, SeriesRequest | None]:
+    own_plan = payloads.get("series_plan")
+    plan = own_plan if isinstance(own_plan, dict) else None
+    raw = (run.config_json or {}).get("series_request")
+    if run.series_id and (plan is None or not isinstance(raw, dict)):
+        series = session.get(Series, run.series_id)
+        if series is not None:
+            if not isinstance(raw, dict) and isinstance(series.request_json, dict):
+                raw = series.request_json
+            digest = series.plan_artifact_hash
+            if plan is None and digest and store.exists(digest):
+                loaded = store.get_raw(digest)
+                if isinstance(loaded, dict):
+                    plan = loaded
+    return plan, _series_request(raw)
 
 
 register_experiment(SeriesPlanner())

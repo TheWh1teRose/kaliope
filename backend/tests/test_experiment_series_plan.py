@@ -6,6 +6,7 @@ import hashlib
 import json
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,15 +14,32 @@ from fastapi.testclient import TestClient
 
 import app.experiments  # noqa: F401 - registers every experiment
 from app.db import session_scope
+from app.experiments.base import SourceIn
 from app.experiments.registry import get_experiment
-from app.experiments.series_plan import SAMPLE_SERIES, SERIES_TEMPLATE, read_series_plan
+from app.experiments.series_plan import (
+    SAMPLE_SERIES,
+    SERIES_TEMPLATE,
+    load_series_source,
+    planner_minutes_and_count,
+    read_series_plan,
+    series_fields,
+)
 from app.llm import registry
 from app.main import create_app
-from app.models import Document, LLMCall, Run, User
+from app.models import Document, LLMCall, Run, RunNode, Series, User
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
+from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.nodes.series_plan import _SCHEMA, _SYSTEM
+from app.schemas.pipeline import (
+    ContentBudget,
+    EpisodePlan,
+    SeriesBudget,
+    SeriesPlan,
+    SeriesRequest,
+)
 from app.security import hash_password
 from app.worker import worker
+from tests.series_support import AUDIENCE, FORMAT, learning_document
 from tests.support import StubProvider, write_learning_pdf
 
 PASSWORD = "series-plan-experiment-password-1"
@@ -184,11 +202,12 @@ def test_fields_from_a_run_fill_the_planner_inputs(
     assert body["source"]["run_id"] == finished_run
     assert body["source"]["document_title"]
     assert body["source"]["plan"] is None
-    assert body["fields"]["episode_count"] == "2"
+    assert body["fields"]["episode_count"] == "1"
     assert body["fields"]["minutes_per_episode"] == "15"
+    assert "selection" not in body["fields"]
     assert "dialogue expansion" in body["fields"]["content_budget"]
+    assert "Prefer the smaller figure" in body["fields"]["content_budget"]
     assert "b" in body["fields"]["document"]
-    assert "Learning goals:" in body["fields"]["selection"]
     assert "Speakers:" in body["fields"]["format_audience"]
 
     missing = signed_in.post(f"/api/experiments/{KEY}/source", json={"run_id": "nope"})
@@ -210,7 +229,10 @@ def test_run_parses_a_plan_and_tracks_its_cost(
     assert body["output"]["payload"]["episodes"][0]["title"] == episode["title"]
     call = body["calls"][0]
     assert call["system"] == _SYSTEM
-    assert "Plan 2 episodes of about 15 minutes" in call["messages"][0]["content"]
+    message = call["messages"][0]["content"]
+    assert "Plan 2 episodes of about 15 minutes" in message
+    assert "Selection:" not in message
+    assert "Learning goals:" not in message
     assert provider.calls[-1].json_schema == _SCHEMA
     assert body["total_cost_usd"] > 0
     with session_scope() as session:
@@ -255,3 +277,188 @@ def test_collect_keeps_the_plan_and_the_settings(signed_in: TestClient) -> None:
     assert listed[0]["id"] == output["id"]
     stats = signed_in.get(f"/api/experiments/{KEY}").json()["stats"]
     assert stats["saved_count"] >= 1 and stats["spent_usd"] > 0
+
+
+DOC = learning_document()
+
+
+def _budget(*, words: int, supportable: float) -> ContentBudget:
+    return ContentBudget(
+        narratable_words=words,
+        words_per_minute=135,
+        min_compression=2.5,
+        dialogue_expansion=2.5,
+        max_supportable_minutes=supportable,
+        requested_minutes=15,
+        target_minutes=15,
+        compression_ratio=1.0,
+        verdict="ok",
+        explanation="",
+    )
+
+
+def _stored_plan(*, emitted: int, requested: int) -> SeriesPlan:
+    episodes = [
+        EpisodePlan(
+            id=f"ep{index:02d}",
+            index=index,
+            title=f"Folge {index}",
+            block_ids=[f"b{index:06d}"],
+            target_minutes=15,
+            supportable_minutes=10,
+        )
+        for index in range(1, emitted + 1)
+    ]
+    return SeriesPlan(
+        title="Serie",
+        episodes=episodes,
+        budget=SeriesBudget(
+            max_supportable_minutes=51.85,
+            minutes_per_episode=15,
+            requested_episodes=requested,
+            verdict="reduced" if emitted != requested else "ok",
+            explanation="",
+        ),
+    )
+
+
+def test_minutes_and_count_follow_the_request_not_the_series_total() -> None:
+    plan = {
+        "episodes": [{}, {}, {}],
+        "budget": {"minutes_per_episode": 15, "requested_episodes": 4},
+    }
+    assert planner_minutes_and_count(
+        plan, SeriesRequest(episodes=4, minutes_per_episode=15), 60
+    ) == (15, 4)
+    assert planner_minutes_and_count(
+        {"episodes": [{}, {}], "budget": {"minutes_per_episode": 15}},
+        SeriesRequest(episodes=5, minutes_per_episode=15),
+        75,
+    ) == (15, 5)
+    assert planner_minutes_and_count(None, None, 15) == (15, 1)
+    assert planner_minutes_and_count(
+        None, SeriesRequest(episodes=None, minutes_per_episode=15), 15
+    ) == (15, 1)
+    assert planner_minutes_and_count(
+        None, SeriesRequest(episodes=2, minutes_per_episode=15), 30
+    ) == (15, 2)
+
+
+def test_source_sentence_uses_the_whole_document_and_spreads_it() -> None:
+    thin = _budget(words=400, supportable=7.41)
+    five = series_fields(DOC, thin, FORMAT, AUDIENCE, episode_count=5, minutes=15)
+    assert "2800 narratable words" in five["content_budget"]
+    assert "about 560 words of source" in five["content_budget"]
+    assert "400 narratable" not in five["content_budget"]
+    assert "b000019" in five["document"]
+    two = series_fields(DOC, thin, FORMAT, AUDIENCE, episode_count=2, minutes=15)
+    assert "about 810 words of source" in two["content_budget"]
+
+
+def _node(session: Any, run_id: str, name: str, digest: str) -> None:
+    session.add(
+        RunNode(
+            run_id=run_id,
+            node_name=name,
+            node_version="1",
+            cache_key=digest[:64],
+            artifact_hash=digest,
+        )
+    )
+
+
+@pytest.mark.usefixtures("signed_in")
+def test_plan_run_loads_per_episode_minutes_and_the_requested_count(tmp_path: Path) -> None:
+    store = ArtifactStore(tmp_path)
+    plan = _stored_plan(emitted=3, requested=4)
+    with session_scope() as session:
+        document = Document(
+            filename="plan.pdf", sha256="p" * 64, parse_status="parsed", title="Plan"
+        )
+        session.add(document)
+        session.flush()
+        run = Run(
+            document_id=document.id,
+            flow_id="series_plan_v0",
+            flow_version="1.0",
+            config_json={
+                "target_minutes": 60,
+                "series_request": {"episodes": 4, "minutes_per_episode": 15, "hint": None},
+            },
+            format_spec_json=FORMAT.model_dump(mode="json"),
+            audience_spec_json=AUDIENCE.model_dump(mode="json"),
+            status="completed",
+            episode_index=0,
+        )
+        session.add(run)
+        session.flush()
+        _node(session, run.id, "ingest", store.put("parsed", DOC).hash)
+        budget = store.put("budget", _budget(words=2800, supportable=51.85))
+        _node(session, run.id, "content_budget", budget.hash)
+        _node(session, run.id, "series_plan", store.put("series_plan", plan).hash)
+        loaded = load_series_source(session, store, SourceIn(run_id=run.id))
+    assert loaded.fields["minutes_per_episode"] == "15"
+    assert loaded.fields["episode_count"] == "4"
+    assert "about 700 words of source" in loaded.fields["content_budget"]
+    assert "about 3240" not in loaded.fields["content_budget"]
+    assert loaded.source["plan"]["budget"]["requested_episodes"] == 4
+    assert "selection" not in loaded.fields
+
+
+@pytest.mark.usefixtures("signed_in")
+def test_episode_run_keeps_the_document_and_the_series_request(tmp_path: Path) -> None:
+    store = ArtifactStore(tmp_path)
+    plan = _stored_plan(emitted=3, requested=4)
+    with session_scope() as session:
+        document = Document(
+            filename="episode.pdf", sha256="e" * 64, parse_status="parsed", title="Episode"
+        )
+        session.add(document)
+        session.flush()
+        series = Series(
+            document_id=document.id,
+            flow_id="baseline_v0",
+            flow_version="1.0",
+            plan_flow_id="series_plan_v0",
+            request_json={
+                "episodes": 4,
+                "minutes_per_episode": 15,
+                "hint": None,
+                "approved": True,
+            },
+            format_spec_json=FORMAT.model_dump(mode="json"),
+            audience_spec_json=AUDIENCE.model_dump(mode="json"),
+            plan_artifact_hash=store.put("series_plan", plan).hash,
+            status="outlining",
+        )
+        session.add(series)
+        session.flush()
+        run = Run(
+            document_id=document.id,
+            flow_id="baseline_v0",
+            flow_version="1.0",
+            config_json={"target_minutes": 15, "episode_brief_artifact": "brief"},
+            format_spec_json=FORMAT.model_dump(mode="json"),
+            audience_spec_json=AUDIENCE.model_dump(mode="json"),
+            status="outlined",
+            series_id=series.id,
+            episode_index=1,
+        )
+        session.add(run)
+        session.flush()
+        _node(session, run.id, "ingest", store.put("parsed", DOC).hash)
+        _node(
+            session,
+            run.id,
+            "content_budget",
+            store.put("budget", _budget(words=400, supportable=7.41)).hash,
+        )
+        loaded = load_series_source(session, store, SourceIn(run_id=run.id))
+    assert loaded.fields["minutes_per_episode"] == "15"
+    assert loaded.fields["episode_count"] == "4"
+    assert "2800 narratable words" in loaded.fields["content_budget"]
+    assert "about 700 words of source" in loaded.fields["content_budget"]
+    assert "400 narratable" not in loaded.fields["content_budget"]
+    assert "b000019" in loaded.fields["document"]
+    assert loaded.source["plan"] is None
+    assert "selection" not in loaded.fields

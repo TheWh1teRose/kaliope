@@ -880,7 +880,7 @@ export default {
         'Das Modell antwortet im JSON-Schema des Serienplaners. Aus: freier Text; JSON in der Antwort wird trotzdem gelesen.',
       sourceSample: 'Beispiel-Eingabe (kein Lauf geladen)',
       loadFromRunLead:
-        'Ein fertiger Lauf liefert Dokument, Auswahl, Inhaltsbudget, Format und Zielgruppe sowie Folgenzahl und Minuten. Ein Folgenplan des Laufs wird als Referenz gezeigt.',
+        'Ein fertiger Lauf liefert Dokument, Inhaltsbudget, Format und Zielgruppe sowie Folgenzahl und Minuten. Ein Folgenplan des Laufs wird als Referenz gezeigt.',
       reference: 'Folgenplan dieses Laufs',
     },
     selection: {
