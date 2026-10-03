@@ -28,6 +28,7 @@ from app.pipeline.framework.node import (
     input_keys,
 )
 from app.pipeline.framework.registry import Flow, get_node
+from app.speech.base import SpeechClient
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ class FlowRunner:
         progress: ProgressSink | None = None,
         document_path: Path | None = None,
         force: bool = False,
+        speech: SpeechClient | None = None,
     ) -> None:
         self.artifacts = artifacts
         self.llm = llm
@@ -106,6 +108,7 @@ class FlowRunner:
         self.progress = progress or (lambda _event, _data: None)
         self.document_path = document_path
         self.force = force
+        self.speech = speech
 
     def execute(
         self,
@@ -185,13 +188,16 @@ class FlowRunner:
             self.progress("node.started", {"node": node.name})
             started = datetime.now(UTC)
             usage_before = self.llm.total_usage
-            cost_before = self.llm.total_cost_usd
+            cost_before = self._spent()
             calls_before = self.llm.calls
             self.llm.node_name = node.name
+            if self.speech is not None:
+                self.speech.node_name = node.name
 
             context = NodeContext(
                 run_id=run_id,
                 llm=self.llm,
+                speech=self.speech,
                 artifacts=self.artifacts,
                 config=config,
                 logger=logging.getLogger(f"kalliope.node.{node.name}"),
@@ -247,7 +253,7 @@ class FlowRunner:
             record.wall_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
             record.tokens_in = usage_delta.input_tokens + usage_delta.cache_read_tokens
             record.tokens_out = usage_delta.output_tokens
-            record.cost_usd = round(self.llm.total_cost_usd - cost_before, 8)
+            record.cost_usd = round(self._spent() - cost_before, 8)
 
             bag[node.produces] = output
             hashes[node.produces] = stored.hash
@@ -264,6 +270,11 @@ class FlowRunner:
         manifest.recompute_total()
         return RunResult(status="completed", manifest=manifest, bag=bag, artifact_hashes=hashes)
 
+    def _spent(self) -> float:
+        """Everything paid so far in this execution: model calls and speech."""
+        speech = self.speech.total_cost_usd if self.speech is not None else 0.0
+        return self.llm.total_cost_usd + speech
+
     def _finish_failed_node(
         self,
         record: NodeRecord,
@@ -279,7 +290,7 @@ class FlowRunner:
         record.wall_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
         record.tokens_in = usage_delta.input_tokens + usage_delta.cache_read_tokens
         record.tokens_out = usage_delta.output_tokens
-        record.cost_usd = round(self.llm.total_cost_usd - cost_before, 8)
+        record.cost_usd = round(self._spent() - cost_before, 8)
         manifest.nodes.append(record)
         manifest.finished_at = _now()
         manifest.recompute_total()

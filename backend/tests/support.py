@@ -16,6 +16,7 @@ from typing import Any
 import pymupdf as fitz
 
 from app.llm.base import Completion, CompletionRequest, Usage, parse_json
+from app.speech.base import DialogueRequest, SpeechError, SpeechResult, Voice, VoiceSegment
 
 TOPICS: list[tuple[str, str]] = [
     (
@@ -398,3 +399,37 @@ class StubProvider:
             "block_ids": ids[:3] or ["b0"],
             "word_budget": 700,
         }
+
+
+class StubSpeech:
+    """Deterministic stand-in: a short fake MP3 per request, 1.5 s per input."""
+
+    name = "stub"
+
+    def __init__(self) -> None:
+        self.requests: list[DialogueRequest] = []
+        self.fail_with: SpeechError | None = None
+
+    def available(self) -> bool:
+        return True
+
+    def dialogue(self, request: DialogueRequest) -> SpeechResult:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.requests.append(request)
+        body = json.dumps([item.text for item in request.inputs]).encode()
+        return SpeechResult(
+            audio=b"ID3" + body,
+            request_id=f"req-{len(self.requests)}",
+            character_cost=request.characters(),
+            segments=[
+                VoiceSegment(input_index=i, start_s=i * 1.5, end_s=i * 1.5 + 1.4)
+                for i in range(len(request.inputs))
+            ],
+        )
+
+    def voices(self) -> list[Voice]:
+        return [
+            Voice(voice_id="v-mod", name="Jonas", language="de"),
+            Voice(voice_id="v-exp", name="Mara", language="de"),
+        ]

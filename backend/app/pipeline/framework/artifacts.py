@@ -68,6 +68,26 @@ class ArtifactStore:
     def get(self, digest: str, model_type: type[BaseModel]) -> Any:
         return model_type.model_validate(self.get_raw(digest))
 
+    # ------------------------------------------------------------- blobs
+
+    def blob_path(self, digest: str, suffix: str) -> Path:
+        """Where a binary file such as generated audio lives, next to the artifacts."""
+        return self.root / "media" / digest[:2] / f"{digest}{suffix}"
+
+    def has_blob(self, digest: str, suffix: str) -> bool:
+        return self.blob_path(digest, suffix).exists()
+
+    def put_blob(self, data: bytes, suffix: str) -> str:
+        """Store bytes under their own hash; never overwritten, never deleted."""
+        digest = hashlib.sha256(data).hexdigest()
+        path = self.blob_path(digest, suffix)
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_bytes(data)
+            temporary.replace(path)
+        return digest
+
     # ------------------------------------------------------------- steps
 
     def step_path(self, key: str) -> Path:

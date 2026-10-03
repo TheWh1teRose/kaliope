@@ -325,4 +325,10 @@ def test_the_audio_pipeline_is_its_own_kind_and_valid() -> None:
     checked = validate_flow([n.model_dump() for n in audio.nodes], audio.gates)
     assert checked.valid, checked.errors
     assert checked.warnings == []
-    assert set(checked.seeds) == {"script", "format_spec", "parsed"}
+    assert set(checked.seeds) == {
+        "script",
+        "format_spec",
+        "parsed",
+        "voice_cast",
+        "audio_request",
+    }

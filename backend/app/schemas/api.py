@@ -417,6 +417,8 @@ class HealthOut(BaseModel):
     status: str
     version: str
     llm_configured: bool
+    #: Whether audio can be generated (ElevenLabs key set).
+    speech_configured: bool = False
     flows: list[str]
 
 

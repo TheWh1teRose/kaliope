@@ -70,6 +70,8 @@ gcloud iam workload-identity-pools providers describe github-oidc --project=$PRO
 
 Set `GCP_SERVICE_ACCOUNT` to `$DEPLOYER_SA`. The runtime service account must already read both secrets (`roles/secretmanager.secretAccessor`) and the bucket; the Cloud Run service agent pulls from Artifact Registry in the same project.
 
+Audio generation needs one more, optional secret: `elevenlabs-api-key`, bound as `ELEVENLABS_API_KEY` (commands in the README under "Audio pipelines"). Without it the app runs normally and the audio panel explains the setup.
+
 ### Roll back
 
 Actions → Deploy → Run workflow, set `image_tag` to an earlier commit SHA (skips the build, deploys that tag). Tags are listed with

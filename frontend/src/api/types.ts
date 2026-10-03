@@ -1149,3 +1149,89 @@ export interface SeriesEvent {
   message?: string
   error?: string
 }
+
+// --------------------------------------------------------------------- audio
+
+export interface VoiceChoice {
+  speaker: string
+  voice_id: string
+  voice_name?: string | null
+}
+
+export interface VoiceCast {
+  voices: VoiceChoice[]
+  model_id: string
+  stability: number
+  seed?: number | null
+  language_code?: string | null
+}
+
+export interface SpeechVoice {
+  voice_id: string
+  name: string
+  category: string | null
+  description: string | null
+  language: string | null
+  preview_url: string | null
+}
+
+export interface AudioStatus {
+  configured: boolean
+  /** How to set it up, when nothing can be generated yet. */
+  message: string | null
+  flows: { id: string; version: string; description: string | null }[]
+  models: string[]
+  usd_per_1k_characters: Record<string, number>
+}
+
+export interface FormatVoices {
+  format_id: string
+  speakers: string[]
+  cast: VoiceCast
+  saved: boolean
+}
+
+export interface AudioApprovalOut {
+  lines: number
+  characters: number
+  requests: number
+  estimate_usd: number
+  model_id: string
+  missing_voices: string[]
+}
+
+export interface AudioChunkOut {
+  index: number
+  url: string
+  characters: number
+  duration_s: number
+  cost_usd: number
+  segment_ids: string[]
+}
+
+export type TakeStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed'
+
+export interface AudioTakeOut {
+  id: string
+  run_id: string
+  flow_id: string
+  flow_version: string
+  status: TakeStatus
+  scope: string
+  created_at: string | null
+  finished_at: string | null
+  error: string | null
+  total_cost_usd: number
+  voice_cast: VoiceCast
+  speakers: string[]
+  approval: AudioApprovalOut | null
+  audio_script: Record<string, unknown> | null
+  audio: Record<string, unknown> | null
+  chunks: AudioChunkOut[]
+}
+
+export interface RunAudioOut {
+  configured: boolean
+  message: string | null
+  takes: AudioTakeOut[]
+}
