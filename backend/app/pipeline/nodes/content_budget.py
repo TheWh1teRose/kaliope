@@ -40,6 +40,25 @@ def source_word_budget(minutes: float, words_per_minute: int, expansion: float) 
     return max(1, int(round(minutes * words_per_minute / expansion)))
 
 
+def episode_source_words(
+    total_words: int,
+    count: int,
+    minutes: float,
+    words_per_minute: int,
+    expansion: float,
+) -> tuple[int, int, int]:
+    """``(target, cap, even_share)`` for one episode of a series.
+
+    ``cap`` is what ``minutes`` can carry with room for dialogue. ``even_share``
+    is the document split across ``count`` episodes. The episode should use the
+    smaller of the two, so a higher count spreads the source instead of filling
+    every episode up to the cap.
+    """
+    cap = source_word_budget(minutes, words_per_minute, expansion)
+    even_share = max(1, total_words // max(count, 1))
+    return min(cap, even_share), cap, even_share
+
+
 class ContentBudgetInput(BaseModel):
     parsed: ParsedDocument
     target_minutes: int

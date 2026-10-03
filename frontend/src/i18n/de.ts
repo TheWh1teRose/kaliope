@@ -872,6 +872,17 @@ export default {
       reference: 'Ablaufplan dieses Laufs',
       beats: 'Abschnitte',
     },
+    series_plan: {
+      systemPromptHint: 'Startet mit dem Prompt des Serienplaners, wie er in der Produktion läuft.',
+      shapeHint:
+        'Andere JSON-Form ausprobieren: im Tab Modell die strukturierte Ausgabe ausschalten und die Form im System-Prompt beschreiben. Passt die Antwort nicht zum Folgenplan, erscheint sie als Rohtext mit Hinweis.',
+      structuredHint:
+        'Das Modell antwortet im JSON-Schema des Serienplaners. Aus: freier Text; JSON in der Antwort wird trotzdem gelesen.',
+      sourceSample: 'Beispiel-Eingabe (kein Lauf geladen)',
+      loadFromRunLead:
+        'Ein fertiger Lauf liefert Dokument, Inhaltsbudget, Format und Zielgruppe sowie Folgenzahl und Minuten. Ein Folgenplan des Laufs wird als Referenz gezeigt.',
+      reference: 'Folgenplan dieses Laufs',
+    },
     selection: {
       systemPromptHint: 'Startet mit dem Prompt des Knotens select, wie er in der Produktion läuft.',
       shapeHint:

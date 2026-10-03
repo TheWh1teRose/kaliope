@@ -20,6 +20,7 @@ the episodes' scripts still take every fact from their own passages.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -29,7 +30,11 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
-from app.pipeline.nodes.content_budget import MIN_VIABLE_MINUTES, source_word_budget
+from app.pipeline.nodes.content_budget import (
+    MIN_VIABLE_MINUTES,
+    episode_source_words,
+    source_word_budget,
+)
 from app.pipeline.objective_rule import (
     DOCUMENT_OBJECTIVES_NOTE,
     FORMULATED_GOAL_PROPERTIES,
@@ -344,9 +349,34 @@ def episode_count(supportable: float, minutes: int, requested: int | None) -> in
     return max(MIN_EPISODES, min(MAX_EPISODES, math.floor(supportable / max(minutes, 1))))
 
 
-def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, minutes: int) -> str:
-    request = inp.series_request
-    section_titles = {s.id: s.title for s in (inp.parsed.sections or [])}
+_PLACEHOLDER = re.compile(r"\{\{\s*([a-z0-9_]+)\s*\}\}")
+
+PLANNER_USER_TEMPLATE = (
+    "Plan {{episode_count}} episodes of about {{minutes_per_episode}} minutes each.\n"
+    "{{source_budget}}\n"
+    "Format: {{format_name}}. Speakers: {{speakers}}.\n"
+    "Audience: {{audience}}\n"
+    "{{outcome}}\n"
+    "{{time_budget}} per episode.\n"
+    "Document language: {{language}}\n"
+    "{{hint}}\n"
+    "{{objectives}}\n\n"
+    "Passages ({{passage_count}}):{{passages}}"
+)
+
+
+def planner_user_fields(
+    parsed: ParsedDocument,
+    budget: ContentBudget,
+    format_spec: FormatSpec,
+    audience: AudienceSpec,
+    candidates: list[Block],
+    count: int,
+    minutes: int,
+    hint: str | None,
+) -> dict[str, str]:
+    """The pieces of the planner user message, in the order the template joins them."""
+    section_titles = {section.id: section.title for section in (parsed.sections or [])}
     lines: list[str] = []
     current: str | None = "\0"
     for block in candidates:
@@ -361,45 +391,68 @@ def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, min
             f"[{block.id}] (weight {round(block.salience, 2)}, {block.word_count()} words)\n{text}"
         )
 
-    objectives = inp.parsed.objectives
+    objectives = parsed.objectives
     objective_text = (
         DOCUMENT_OBJECTIVES_NOTE
         + " List the numbers each episode serves:\n"
-        + "\n".join(f"{i + 1}. {o}" for i, o in enumerate(objectives))
+        + "\n".join(f"{index + 1}. {objective}" for index, objective in enumerate(objectives))
         if objectives
         else "The document states no objectives of its own."
     )
-    desired = (inp.audience_spec.desired_outcome or "").strip()
+    desired = (audience.desired_outcome or "").strip()
     outcome_text = (
         desired_outcome_source(desired)
         if desired
         else "The audience states no desired outcome. Do not invent ambition from the document."
     )
-    hint_text = (request.hint or "").strip()
-    hint = f"Guidance on the split: {hint_text}\n" if hint_text else ""
+    hint_text = (hint or "").strip()
+    guidance = f"Guidance on the split: {hint_text}\n" if hint_text else ""
     total_words = sum(block.word_count() for block in candidates)
-    expansion = inp.budget.dialogue_expansion
-    wpm = inp.budget.words_per_minute
-    per_episode_cap = source_word_budget(minutes, wpm, expansion)
-    even_share = max(1, total_words // max(count, 1))
-    target_source = min(per_episode_cap, even_share)
-    return (
-        f"Plan {count} episodes of about {minutes} minutes each.\n"
-        f"Each episode should use about {target_source} words of source material "
-        f"so the {minutes} minutes have room for dialogue, explanation and questions. "
-        f"{per_episode_cap} words is the most one episode should carry; "
-        f"the document's {total_words} narratable words spread across {count} episodes "
-        f"come to about {even_share} words each. Prefer the smaller figure, and prefer "
-        f"fewer, richer topics. Passages beyond that stay unassigned.\n"
-        f"Format: {inp.format_spec.name}. "
-        f"Speakers: {', '.join(f'{s.name} ({s.role})' for s in inp.format_spec.speakers)}.\n"
-        f"Audience: {inp.audience_spec.description}\n"
-        f"{outcome_text}\n"
-        f"{time_budget_constraint(float(minutes))} per episode.\n"
-        f"Document language: {inp.parsed.language}\n"
-        f"{hint}\n"
-        f"{objective_text}\n\n"
-        f"Passages ({len(candidates)}):" + "\n".join(lines)
+    target_source, per_episode_cap, even_share = episode_source_words(
+        total_words, count, minutes, budget.words_per_minute, budget.dialogue_expansion
+    )
+    return {
+        "episode_count": str(count),
+        "minutes_per_episode": str(minutes),
+        "source_budget": (
+            f"Each episode should use about {target_source} words of source material "
+            f"so the {minutes} minutes have room for dialogue, explanation and questions. "
+            f"{per_episode_cap} words is the most one episode should carry; "
+            f"the document's {total_words} narratable words spread across {count} episodes "
+            f"come to about {even_share} words each. Prefer the smaller figure, and prefer "
+            f"fewer, richer topics. Passages beyond that stay unassigned."
+        ),
+        "format_name": format_spec.name,
+        "speakers": ", ".join(
+            f"{speaker.name} ({speaker.role})" for speaker in format_spec.speakers
+        ),
+        "audience": audience.description,
+        "outcome": outcome_text,
+        "time_budget": time_budget_constraint(float(minutes)),
+        "language": parsed.language,
+        "hint": guidance,
+        "objectives": objective_text,
+        "passage_count": str(len(candidates)),
+        "passages": "\n".join(lines),
+    }
+
+
+def fill_planner_template(fields: dict[str, str]) -> str:
+    return _PLACEHOLDER.sub(lambda match: fields[match.group(1)], PLANNER_USER_TEMPLATE)
+
+
+def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, minutes: int) -> str:
+    return fill_planner_template(
+        planner_user_fields(
+            inp.parsed,
+            inp.budget,
+            inp.format_spec,
+            inp.audience_spec,
+            candidates,
+            count,
+            minutes,
+            inp.series_request.hint,
+        )
     )
 
 

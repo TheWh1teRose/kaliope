@@ -3,6 +3,8 @@
 Learning goals come from the document's own stated objectives when it has any,
 and are generated otherwise. Both paths are first-class: the ``source`` field
 records which one ran, and AC-BL-3 checks that the corpus exercises both.
+A series episode keeps the goals the plan fixed. When the plan left none,
+selection stops instead of inventing them.
 
 The prompt shows each candidate block as an id, a weight and its text. No zone
 is named in prose — the model receives generic labels and weights, so the

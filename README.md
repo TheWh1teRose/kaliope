@@ -210,6 +210,10 @@ a column, one lane per episode — compact (state, cost, tokens, duration) or wi
 every input and output, and follows the run live. After the last episode the S1
 check reports how much of the document the series covers.
 
+The experiment **Folgen planen** starts from the planner's system prompt and
+the same user message production sends. Both stay editable, along with the
+model settings, and a run can be saved and collected.
+
 ### Gates
 
 | ID | Rule | On violation |
@@ -363,7 +367,7 @@ backend/app/
 ├─ api/          auth · folders · documents · runs · series · review
 ├─ llm/          provider protocol, pricing and capability registry, three providers
 ├─ lang/         detection, per-language resources, readability formulas
-├─ experiments/  prompt experiments (script, outline, selection, audio tags) · verbalized sampling
+├─ experiments/  prompt experiments (script, outline, selection, series planner, audio tags) · verbalized sampling
 ├─ ingestion/    runs · extract · layout · repetition · normalize · blocks ·
 │                anchors · structure · zones · tables · report · pipeline
 └─ pipeline/
