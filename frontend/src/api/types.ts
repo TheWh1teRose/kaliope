@@ -993,6 +993,7 @@ export interface DocumentBudget {
   narratable_words: number
   words_per_minute: number
   min_compression: number
+  dialogue_expansion: number
   max_supportable_minutes: number
 }
 

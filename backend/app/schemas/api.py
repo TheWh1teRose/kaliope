@@ -429,6 +429,7 @@ class DocumentBudgetOut(BaseModel):
     narratable_words: int
     words_per_minute: int
     min_compression: float
+    dialogue_expansion: float
     max_supportable_minutes: float
 
 

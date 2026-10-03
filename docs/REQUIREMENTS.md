@@ -386,10 +386,13 @@ compression_ratio, verdict, explanation}`
 
 - Speaking rate is a per-language constant in `lang/resources.py` (German: 135
   wpm). Never hardcoded in the node.
-- `max_supportable_minutes = narratable_words / wpm / MIN_COMPRESSION`, default
-  `MIN_COMPRESSION = 2.5`. Rationale: a grounded episode must *select* from
-  meaningfully more material than it emits.
-- `target_minutes > max_supportable_minutes` → clamp, `verdict="clamped"`.
+- A plain read-through is `narratable_words / wpm`. Podcast minutes multiply that
+  by `DIALOGUE_EXPANSION` (default 2.5): questions, explanation and dialogue need
+  the extra time, so the episode does not read the document down. A 15-minute
+  episode is budgeted at about 810 German source words.
+- `target_minutes > max_supportable_minutes` on a single episode → clamp,
+  `verdict="clamped"`. A series episode that clears the floor keeps the requested
+  length so a higher episode count spreads the source instead of shortening it.
 - `max_supportable_minutes < 3` → fail the run, `verdict="insufficient"`, with an
   explanation citing narratable word count and `visual_content_ratio`.
 

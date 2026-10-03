@@ -1,9 +1,9 @@
-"""Flows without a series planner behave exactly as before the series feature.
+"""Flows without a series planner keep a pinned prompt and cache fingerprint.
 
-``golden/baseline_prompts.json`` was recorded on the code before the series
-inputs existed. Every prompt the baseline nodes send, every node cache key and
-every beat key must still match it byte for byte, so existing caches stay valid
-and a single-episode run is unchanged.
+Dialogue expansion changed the content-budget artifact (higher supportable
+minutes, node version 1.1), so cache keys moved once and this file was
+re-recorded. An unclamped short target still speaks the same number of words.
+Later series work must not move the fingerprint again.
 """
 
 from __future__ import annotations

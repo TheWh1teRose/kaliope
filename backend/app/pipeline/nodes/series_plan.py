@@ -4,9 +4,11 @@ The model decides which passages and learning goals belong to which episode,
 and gives the series a title, a through-line and its key terms. Everything
 arithmetic is done here afterwards, never trusted to the model: unknown ids are
 dropped, every narratable block gets at most one home, blocks the model did not
-mention join the episode around them, each episode's supportable length is
-measured from its own passages, and an episode that cannot carry three minutes
-is merged into its neighbour. If that plan does not have the asked-for number of
+mention join a neighbour only while that episode stays within its source budget,
+each episode's supportable length is measured from its own passages, and an
+episode that cannot carry three minutes is merged into its neighbour. Episodes
+keep the requested length, so a higher count spreads the source instead of
+shortening every episode. If that plan does not have the asked-for number of
 episodes, the model is asked once more; a count that still differs is kept.
 
 The planner writes no facts. Titles, summaries and goals describe the material;
@@ -25,7 +27,7 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
-from app.pipeline.nodes.content_budget import MIN_VIABLE_MINUTES
+from app.pipeline.nodes.content_budget import MIN_VIABLE_MINUTES, source_word_budget
 from app.schemas.document import Block, ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
@@ -48,10 +50,11 @@ MIN_EPISODES = 2
 MAX_RECAP_BLOCKS = 3
 #: Characters of each passage shown to the planner.
 PASSAGE_CHARS = 600
+#: Why a passage the model skipped stays out once an episode is full.
+LEFT_OUT_FOR_DIALOGUE = "Left out to leave room for dialogue."
 
 _SYSTEM = """\
-You split a source document into a series of grounded audio episodes, so that
-the whole document is covered across the series.
+You split a source document into a series of grounded audio episodes.
 
 You are given the document's passages grouped by section. Each passage has an
 id, a weight, its word count and the start of its text. A higher weight means
@@ -59,10 +62,17 @@ the author gave it more prominence.
 
 Rules:
 - Plan exactly the number of episodes you are asked for.
-- Give every passage that carries content to exactly one episode, by id. Keep
-  related passages together and keep the document's order where it teaches
-  well: set up before payoff, general before specific.
-- Balance the episodes: each needs enough material for its target length.
+- Every episode needs room for dialogue, explanation and questions. It develops
+  a few topics; it does not read its passages down or rush through them.
+- Give each episode about the source-word budget in the user message, by
+  passage id. Prefer fewer, richer topics. Keep related passages together and
+  keep the document's order where it teaches well: set up before payoff,
+  general before specific.
+- Keep each episode at the length you were asked for. When more episodes are
+  asked for, give each episode fewer passages so the material spreads and each
+  episode still has room to talk.
+- List passages that do not fit an episode's source budget under unassigned
+  with a reason. Never invent ids.
 - Each episode has a title, a role in the series (for example introduction,
   core, deepening, application, closing), a one-sentence summary and two to
   four learning goals that say what a listener can do or explain afterwards.
@@ -74,8 +84,6 @@ Rules:
   episodes build on each other.
 - List the key terms with a short gloss and the episode that introduces each
   one, so every episode uses the same name for the same idea.
-- If a passage should be left out on purpose, list it under unassigned with a
-  reason. Never invent ids.
 - Do not state facts of your own. Titles, summaries and goals describe the
   material; they do not add to it.
 - Write in the document's language.
@@ -146,14 +154,14 @@ class SeriesPlanInput(BaseModel):
 class SeriesPlanNode:
     name = "series_plan"
     title = "Folgen planen"
-    version = "1.0"
+    version = "1.1"
     Input: type[BaseModel] = SeriesPlanInput
     Output: type[BaseModel] = SeriesPlan
     produces = "series_plan"
 
     doc = NodeDoc(
-        summary="Splits the document into a series of episodes so that the whole document "
-        "is covered, and decides what each episode is about.",
+        summary="Splits the document into episodes with room for dialogue, and decides what "
+        "each episode is about.",
         detail=[
             "The number of episodes is either the one the run asked for or, when it asked "
             "for none, as many as the content budget carries at the requested length (at "
@@ -164,10 +172,11 @@ class SeriesPlanNode:
             "through-line and key terms. If that answer does not have the asked-for number "
             "of episodes, it is asked once more; a count that still differs is kept.",
             "The answer is then checked, not trusted: unknown ids are dropped, a passage "
-            "named twice keeps its first episode, passages the model did not mention join "
-            "the episode they sit in, and each episode's length is measured from its own "
-            "passages. An episode below three supportable minutes is merged into its "
-            "smaller neighbour; one that cannot carry the requested length is shortened.",
+            "named twice keeps its first episode, and passages the model did not mention "
+            "join a neighbour only while that episode stays within its source-word budget. "
+            "The rest stay unassigned, so an episode cannot be filled past the point where "
+            "dialogue still fits. An episode below three supportable minutes is merged into "
+            "its smaller neighbour. Episodes keep the requested length.",
             "The planner writes no facts. Each episode later selects, outlines and writes "
             "from its own passages through the normal nodes.",
         ],
@@ -326,10 +335,20 @@ def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, min
     )
     hint_text = (request.hint or "").strip()
     hint = f"Guidance on the split: {hint_text}\n" if hint_text else ""
+    total_words = sum(block.word_count() for block in candidates)
+    expansion = inp.budget.dialogue_expansion
+    wpm = inp.budget.words_per_minute
+    per_episode_cap = source_word_budget(minutes, wpm, expansion)
+    even_share = max(1, total_words // max(count, 1))
+    target_source = min(per_episode_cap, even_share)
     return (
         f"Plan {count} episodes of about {minutes} minutes each.\n"
-        f"The whole document supports about {inp.budget.max_supportable_minutes:.1f} minutes "
-        f"of grounded narration.\n"
+        f"Each episode should use about {target_source} words of source material "
+        f"so the {minutes} minutes have room for dialogue, explanation and questions. "
+        f"{per_episode_cap} words is the most one episode should carry; "
+        f"the document's {total_words} narratable words spread across {count} episodes "
+        f"come to about {even_share} words each. Prefer the smaller figure, and prefer "
+        f"fewer, richer topics. Passages beyond that stay unassigned.\n"
         f"Format: {inp.format_spec.name}. "
         f"Speakers: {', '.join(f'{s.name} ({s.role})' for s in inp.format_spec.speakers)}.\n"
         f"Audience: {inp.audience_spec.description}\n"
@@ -352,7 +371,8 @@ def build_plan(
 
     ``count`` is how many episodes were asked for; it is recorded and nothing is
     dropped or invented to match it. An episode under three minutes is merged
-    into a neighbour, which is the only change to the model's split.
+    into a neighbour. Forgotten passages join a neighbour only while it stays
+    within the source-word budget for ``minutes``.
     """
     candidates = parsed.narratable_blocks()
     known = {b.id: b for b in candidates}
@@ -381,27 +401,48 @@ def build_plan(
             )
     left_out = {u.block_id for u in unassigned}
 
-    # Passages nobody mentioned join the episode around them, so the series
-    # covers the document even when the model forgot a stretch of it.
+    # Passages nobody mentioned join a neighbour only while that episode stays
+    # inside its source budget. Anything more would turn the episode into a
+    # read-through. The model's own assignments are kept even when they run over.
+    wpm = words_per_minute(parsed.language)
+    expansion = budget.dialogue_expansion if budget.dialogue_expansion > 0 else 1.0
+    cap = source_word_budget(minutes, wpm, expansion)
+
+    def _words(ids: list[str]) -> int:
+        return sum(known[block_id].word_count() for block_id in ids)
+
+    def _absorb(home: int, block_ids: list[str]) -> list[str]:
+        left: list[str] = []
+        for block_id in block_ids:
+            if _words(drafts[home]["ids"]) + known[block_id].word_count() <= cap:
+                homes[block_id] = home
+                drafts[home]["ids"].append(block_id)
+            else:
+                left.append(block_id)
+        return left
+
+    def _leave_out(block_ids: list[str]) -> None:
+        for block_id in block_ids:
+            unassigned.append(UnassignedBlock(block_id=block_id, reason=LEFT_OUT_FOR_DIALOGUE))
+
     if any(d["ids"] for d in drafts):
         last_home: int | None = None
-        orphans: list[str] = []
+        pending: list[str] = []
         for block in candidates:
             if block.id in homes:
+                if pending and last_home is None:
+                    pending = _absorb(homes[block.id], pending)
+                _leave_out(pending)
+                pending = []
                 last_home = homes[block.id]
-                for orphan in orphans:
-                    homes[orphan] = last_home
-                    drafts[last_home]["ids"].append(orphan)
-                orphans = []
             elif block.id not in left_out:
                 if last_home is None:
-                    orphans.append(block.id)
+                    pending.append(block.id)
                 else:
-                    homes[block.id] = last_home
-                    drafts[last_home]["ids"].append(block.id)
-        if orphans and last_home is not None:
-            for orphan in orphans:
-                drafts[last_home]["ids"].append(orphan)
+                    pending.extend(_absorb(last_home, [block.id]))
+        if last_home is not None:
+            pending = _absorb(last_home, pending)
+        _leave_out(pending)
 
     drafts = [d for d in drafts if d["ids"]]
     if not drafts:
@@ -409,12 +450,9 @@ def build_plan(
     for draft in drafts:
         draft["ids"].sort(key=lambda block_id: order[block_id])
 
-    wpm = words_per_minute(parsed.language)
-    compression = budget.min_compression or 1.0
-
     def supportable(ids: list[str]) -> float:
         words = sum(known[block_id].word_count() for block_id in ids)
-        return words / wpm / compression
+        return words / wpm * expansion
 
     merged = False
     while len(drafts) > 1:
@@ -438,16 +476,12 @@ def build_plan(
     objectives = parsed.objectives
     source = "document" if objectives else "generated"
     episodes: list[EpisodePlan] = []
-    clamped = False
     for position, draft in enumerate(drafts):
         entry = draft["entry"]
         index = position + 1
         episode_id = f"ep{index:02d}"
         can_carry = round(supportable(draft["ids"]), 2)
         target = float(minutes)
-        if can_carry < target:
-            target = can_carry
-            clamped = True
         earlier = {block_id for d in drafts[:position] for block_id in d["ids"]}
         recap_ids = [
             str(b).strip() for b in entry.get("recap_block_ids", []) if str(b).strip() in earlier
@@ -503,15 +537,13 @@ def build_plan(
             )
         )
 
-    verdict = "reduced" if merged else "clamped" if clamped else "ok"
+    verdict = "reduced" if merged else "ok"
     explanation = (
-        f"The document supports about {budget.max_supportable_minutes:.1f} minutes. "
-        f"{len(episodes)} episode(s) of up to {minutes} minutes"
+        f"The document supports about {budget.max_supportable_minutes:.1f} minutes "
+        f"of dialogue. {len(episodes)} episode(s) of {minutes} minutes"
     )
     if merged:
         explanation += "; episodes below three minutes were merged into a neighbour"
-    if clamped:
-        explanation += "; episodes whose passages carry less were shortened"
     explanation += "."
 
     return SeriesPlan(

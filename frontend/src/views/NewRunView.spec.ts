@@ -31,6 +31,7 @@ vi.mock('@/stores/series', () => ({
       narratable_words: 15600,
       words_per_minute: 135,
       min_compression: 2.5,
+      dialogue_expansion: 2.5,
       max_supportable_minutes: 46.2,
     })),
   }),
@@ -69,7 +70,8 @@ describe('start screen', () => {
     await wrapper.get('[data-step="1"]').trigger('click')
     await wrapper.get('[data-step="1"]').trigger('click')
     expect(wrapper.get('[data-count-out]').text()).toBe('5')
-    expect(wrapper.get('[data-supports]').text()).toContain('gekürzt')
+    expect(wrapper.get('[data-supports]').text()).toContain('verteilt')
+    expect(wrapper.get('[data-supports]').text()).not.toContain('gekürzt')
 
     await wrapper.get('[data-step="-1"]').trigger('click')
     await wrapper.get('form').trigger('submit')

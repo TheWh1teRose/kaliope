@@ -122,8 +122,11 @@ def _beat_calls(provider: StubProvider, episode: int) -> list[str]:
 
 def test_the_budget_says_how_long_the_document_can_be(client: TestClient, document_id: str) -> None:
     body = client.get(f"/api/documents/{document_id}/budget").json()
-    assert body["max_supportable_minutes"] >= 9, body
     assert body["words_per_minute"] == 135
+    assert body["dialogue_expansion"] == 2.5
+    assert body["max_supportable_minutes"] == round(
+        body["narratable_words"] / body["words_per_minute"] * body["dialogue_expansion"], 2
+    )
 
 
 def test_a_planner_flow_is_not_a_single_run_and_a_pausing_flow_not_a_series(

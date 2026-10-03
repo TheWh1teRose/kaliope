@@ -15,9 +15,9 @@ describe('series estimate', () => {
     expect(auto.used).toBe(45)
   })
 
-  it('shortens every episode when more are asked for than the budget carries', () => {
+  it('keeps the length and spreads the source when more episodes are asked for', () => {
     const more = estimateSeries(46.2, 15, 5)
-    expect(more).toMatchObject({ episodes: 5, perEpisode: 9.2, reason: 'more', tone: 'warn' })
+    expect(more).toMatchObject({ episodes: 5, perEpisode: 15, reason: 'more', tone: 'warn' })
   })
 
   it('says that fewer episodes leave material out', () => {

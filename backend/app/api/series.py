@@ -36,7 +36,7 @@ from app.pipeline.catalogue import CatalogueError
 from app.pipeline.formats import DEFAULT_AUDIENCE
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.registry import Flow, flow_purpose
-from app.pipeline.nodes.content_budget import DEFAULT_MIN_COMPRESSION
+from app.pipeline.nodes.content_budget import DEFAULT_MIN_COMPRESSION, supportable_minutes
 from app.pipeline.nodes.series_plan import MAX_EPISODES, MIN_EPISODES
 from app.schemas.api import (
     CreateSeriesRequest,
@@ -50,6 +50,7 @@ from app.schemas.api import (
     SeriesGraphOut,
     SeriesOut,
 )
+from app.schemas.pipeline import DEFAULT_DIALOGUE_EXPANSION
 from app.security import current_user
 from app.series import (
     PAUSING_NODES,
@@ -92,7 +93,10 @@ def document_budget(
         narratable_words=narratable,
         words_per_minute=wpm,
         min_compression=DEFAULT_MIN_COMPRESSION,
-        max_supportable_minutes=round(narratable / wpm / DEFAULT_MIN_COMPRESSION, 2),
+        dialogue_expansion=DEFAULT_DIALOGUE_EXPANSION,
+        max_supportable_minutes=round(
+            supportable_minutes(narratable, wpm, DEFAULT_DIALOGUE_EXPANSION), 2
+        ),
     )
 
 

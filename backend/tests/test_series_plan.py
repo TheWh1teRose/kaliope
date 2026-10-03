@@ -12,18 +12,20 @@ import pytest
 from app.llm.base import Completion, CompletionRequest, LLMClient, Usage
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import NodeContext, NodeError
+from app.pipeline.nodes.content_budget import source_word_budget, supportable_minutes
 from app.pipeline.nodes.series_plan import (
+    LEFT_OUT_FOR_DIALOGUE,
     MAX_EPISODES,
     SeriesPlanInput,
     SeriesPlanNode,
     build_plan,
     episode_count,
 )
-from app.schemas.pipeline import ContentBudget, SeriesRequest
+from app.schemas.pipeline import DEFAULT_DIALOGUE_EXPANSION, ContentBudget, SeriesRequest
 from tests.series_support import AUDIENCE, FORMAT, learning_document
 from tests.support import StubProvider
 
-#: 20 blocks of 140 words: 2,800 words, 8.3 supportable minutes at 135 wpm, 2.5×.
+#: 20 blocks of 140 words: 2,800 words. At 135 wpm and 2.5× dialogue expansion, about 51.9 minutes.
 DOC = learning_document()
 IDS = [b.id for b in DOC.blocks]
 
@@ -63,6 +65,41 @@ def _episode(ids: list[str], **extra: Any) -> dict[str, Any]:
     return {"title": "T", "block_ids": ids, "goals": ["Ziel"], **extra}
 
 
+def test_sample_word_counts_expand_a_read_through_and_suggest_episodes() -> None:
+    expansion = DEFAULT_DIALOGUE_EXPANSION
+    read_through = 2800 / 135
+    supported = supportable_minutes(2800, 135, expansion)
+    assert supported == pytest.approx(read_through * expansion)
+    assert supported == pytest.approx(51.85, abs=0.01)
+    assert source_word_budget(15, 135, expansion) == 810
+    assert episode_count(supported, 15, None) == 3
+
+
+def test_raising_the_episode_count_lowers_the_source_budget(tmp_path: Path) -> None:
+    def message(episodes: int) -> str:
+        provider = StubProvider()
+        SeriesPlanNode().run(
+            SeriesPlanInput(
+                parsed=DOC,
+                budget=_budget(51.85),
+                format_spec=FORMAT,
+                audience_spec=AUDIENCE,
+                series_request=SeriesRequest(episodes=episodes, minutes_per_episode=15),
+            ),
+            _context(tmp_path, provider),
+        )
+        sent = provider.calls[0]
+        assert sent.system is not None
+        assert "room for dialogue, explanation and questions" in sent.system
+        assert "grounded narration" not in sent.messages[0].content
+        return sent.messages[0].content
+
+    two = message(2)
+    five = message(5)
+    assert "about 810 words of source material" in two
+    assert "about 560 words of source material" in five
+
+
 def test_count_follows_the_budget_unless_the_run_asked_for_one() -> None:
     assert episode_count(46.2, 15, None) == 3
     assert episode_count(20.0, 15, None) == 2, "a series has at least two episodes"
@@ -86,28 +123,31 @@ def test_unknown_ids_are_dropped_and_each_block_keeps_its_first_home() -> None:
     assert [e.index for e in plan.episodes] == [1, 2]
 
 
-def test_blocks_the_model_forgot_join_the_episode_around_them() -> None:
+def test_forgotten_passages_join_only_while_the_episode_has_source_room() -> None:
+    # Six minutes × 135 wpm / 2.5 = 324 source words: two blocks fit, a third does not.
     plan = _plan(
         {
             "title": "S",
-            "episodes": [_episode(IDS[2:8]), _episode(IDS[10:17])],
-            "unassigned": [{"block_id": IDS[19], "reason": "Wiederholung"}],
-        }
+            "episodes": [_episode(IDS[1:2]), _episode(IDS[10:11])],
+        },
+        minutes=6,
     )
     first, second = plan.episodes
-    assert first.block_ids == IDS[:10], "leading and in-between orphans join the earlier home"
-    assert second.block_ids == IDS[10:19]
-    assert [(u.block_id, u.reason) for u in plan.unassigned] == [(IDS[19], "Wiederholung")]
+    assert first.block_ids == IDS[:2]
+    assert second.block_ids == IDS[10:12]
+    left_out = [u.block_id for u in plan.unassigned]
+    assert IDS[2] in left_out and IDS[12] in left_out
+    assert all(u.reason == LEFT_OUT_FOR_DIALOGUE for u in plan.unassigned)
 
 
 def test_an_episode_below_three_minutes_merges_into_its_neighbour() -> None:
     plan = _plan(
         {
             "title": "S",
-            "episodes": [_episode(IDS[:9]), _episode(IDS[9:18]), _episode(IDS[18:])],
+            "episodes": [_episode(IDS[:9]), _episode(IDS[9:19]), _episode(IDS[19:])],
         }
     )
-    # The last episode has 280 words (0.8 min): it merges into the second.
+    # One block is 140 words: 140 / 135 × 2.5 ≈ 2.6 minutes, under the floor.
     assert len(plan.episodes) == 2
     assert plan.episodes[1].block_ids == IDS[9:]
     assert plan.budget.verdict == "reduced"
@@ -138,12 +178,14 @@ def test_fewer_episodes_than_asked_are_kept() -> None:
     assert plan.budget.requested_episodes == 4
 
 
-def test_an_episode_that_cannot_carry_its_length_is_shortened() -> None:
-    plan = _plan({"title": "S", "episodes": [_episode(IDS[:10]), _episode(IDS[10:])]}, minutes=5)
+def test_an_episode_keeps_its_length_when_its_passages_support_less() -> None:
+    plan = _plan({"title": "S", "episodes": [_episode(IDS[:10]), _episode(IDS[10:])]}, minutes=40)
     for episode in plan.episodes:
-        assert episode.supportable_minutes == pytest.approx(4.15, abs=0.01)
-        assert episode.target_minutes == episode.supportable_minutes
-    assert plan.budget.verdict == "clamped"
+        assert episode.supportable_minutes == pytest.approx(
+            supportable_minutes(1400, 135, DEFAULT_DIALOGUE_EXPANSION), abs=0.01
+        )
+        assert episode.target_minutes == 40
+    assert plan.budget.verdict == "ok"
 
 
 def test_recap_ids_must_come_from_earlier_episodes_and_goals_get_ids() -> None:
