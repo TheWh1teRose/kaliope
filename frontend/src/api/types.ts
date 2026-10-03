@@ -1198,6 +1198,9 @@ export interface AudioApprovalOut {
   estimate_usd: number
   model_id: string
   missing_voices: string[]
+  /** Requests an earlier take already spoke; reused, not paid again. */
+  cached_requests: number
+  cached_characters: number
 }
 
 export interface AudioChunkOut {
@@ -1207,6 +1210,29 @@ export interface AudioChunkOut {
   duration_s: number
   cost_usd: number
   segment_ids: string[]
+}
+
+export type ChunkStatus = 'done' | 'cached' | 'running' | 'waiting' | 'failed'
+
+export interface ChunkStatusOut {
+  index: number
+  characters: number
+  segment_ids: string[]
+  status: ChunkStatus
+}
+
+export interface LineTime {
+  segment_id: string
+  start_s: number
+  end_s: number
+}
+
+export interface AudioMixOut {
+  url: string
+  download_url: string
+  duration_s: number
+  chunk_offsets_s: number[]
+  lines: LineTime[]
 }
 
 export type TakeStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed'
@@ -1228,10 +1254,32 @@ export interface AudioTakeOut {
   audio_script: Record<string, unknown> | null
   audio: Record<string, unknown> | null
   chunks: AudioChunkOut[]
+  plan: ChunkStatusOut[]
+  mix: AudioMixOut | null
+  /** A failed take that kept its approval continues where it stopped. */
+  resumable: boolean
 }
 
 export interface RunAudioOut {
   configured: boolean
   message: string | null
   takes: AudioTakeOut[]
+}
+
+export interface EpisodeAudioOut {
+  index: number
+  name: string | null
+  run_id: string
+  run_status: string
+  take: AudioTakeOut | null
+}
+
+export interface SeriesAudioOut {
+  series_id: string
+  configured: boolean
+  message: string | null
+  format_id: string | null
+  episodes: EpisodeAudioOut[]
+  waiting: number
+  estimate_usd: number
 }

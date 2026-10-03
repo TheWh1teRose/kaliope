@@ -39,6 +39,10 @@ WORKDIR /app
 COPY backend/pyproject.toml ./
 RUN uv pip install --system --no-cache -r pyproject.toml
 
+# Audio is joined with the static ffmpeg the imageio-ffmpeg wheel ships (about
+# 80 MB; apt's ffmpeg would add 466 MB). Fail the build if it cannot run.
+RUN python -c "import imageio_ffmpeg, subprocess; subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-hide_banner', '-version'], check=True, capture_output=True)"
+
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./alembic.ini

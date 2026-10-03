@@ -184,8 +184,8 @@ def test_takes_are_refused_where_they_cannot_run(client: TestClient, run_id: str
     wrong = client.post(f"/api/runs/{run_id}/audio", json={"flow_id": "baseline_v0"})
     assert wrong.status_code == 422
     assert client.post("/api/runs/nope/audio", json={}).status_code == 404
-    full = client.post(f"/api/runs/{run_id}/audio", json={"scope": "full"})
-    assert full.status_code == 422, "only the sample in this version"
+    unknown = client.post(f"/api/runs/{run_id}/audio", json={"scope": "half"})
+    assert unknown.status_code == 422
     take = client.get(f"/api/runs/{run_id}/audio").json()["takes"][0]
     again = client.post(f"/api/audio/takes/{take['id']}/approve", json={})
     assert again.status_code == 409

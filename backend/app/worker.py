@@ -44,7 +44,12 @@ from app.models import (
 )
 from app.pipeline import catalogue
 from app.pipeline.bench import coerce_value, jsonable
-from app.pipeline.feedback import last_row_for_key, resume_outputs, write_pause
+from app.pipeline.feedback import (
+    last_row_for_key,
+    pause_from_manifest,
+    resume_outputs,
+    write_pause,
+)
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.registry import Flow, FlowNode, flow_directory
 from app.pipeline.framework.runner import FlowRunner, NodeRecord
@@ -975,6 +980,11 @@ class Worker:
             )
         spent = result.manifest.total_cost_usd
         if result.status == "failed":
+            # Keep the approval: resuming continues at the first chunk without audio
+            # and never asks, or pays, again for what is done.
+            approved = pause_from_manifest(previous)
+            if approved and approved.get("submitted_hash"):
+                manifest["pause"] = approved
             error = result.error or "the audio take failed"
             self._end_take(take_id, "failed", error=error, manifest=manifest, spent=spent)
         else:

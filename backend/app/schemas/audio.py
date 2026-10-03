@@ -110,6 +110,8 @@ class LineTiming(BaseModel):
     segment_id: str
     start_s: float
     end_s: float
+    #: Which input of its chunk's request this line was.
+    input_index: int | None = None
 
 
 class AudioChunk(BaseModel):
@@ -138,3 +140,17 @@ class Audio(BaseModel):
     #: what a take actually paid is on the take.
     cost_usd: float
     duration_s: float
+
+
+class AudioMix(BaseModel):
+    """The chunks joined into one file, with where every line is heard in it."""
+
+    blob: str
+    suffix: str = ".mp3"
+    duration_s: float
+    gap_s: float
+    loudness_lufs: float
+    #: When each chunk starts in the joined file.
+    chunk_offsets_s: list[float]
+    #: Every spoken line, on the joined file's clock.
+    lines: list[LineTiming] = Field(default_factory=list)
