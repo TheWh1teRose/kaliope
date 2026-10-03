@@ -220,6 +220,9 @@ class RunOut(BaseModel):
     gates: list[GateReport] = Field(default_factory=list)
     manifest: dict[str, Any] | None = None
     pause: PauseOut | None = None
+    #: Set for a run of a series: 0 is the planner run, 1… the episodes.
+    series_id: str | None = None
+    episode_index: int | None = None
 
 
 class AnchorOut(BaseModel):
@@ -410,3 +413,93 @@ class HealthOut(BaseModel):
     version: str
     llm_configured: bool
     flows: list[str]
+
+
+# ------------------------------------------------------------------ series
+
+
+class DocumentBudgetOut(BaseModel):
+    """How many minutes a document supports, for the start form's estimate."""
+
+    document_id: str
+    narratable_words: int
+    words_per_minute: int
+    min_compression: float
+    max_supportable_minutes: float
+
+
+class CreateSeriesRequest(BaseModel):
+    document_id: str
+    flow_id: str = "baseline_v0"
+    plan_flow_id: str = "series_plan_v0"
+    format_id: str = "two_host_dialogue"
+    #: ``None`` lets the planner choose the count from the budget.
+    episodes: int | None = None
+    minutes_per_episode: int | None = None
+    hint: str | None = None
+    #: Stop after the plan until someone approves it.
+    review_plan: bool = True
+    audience_spec: AudienceSpec | None = None
+    language: str | None = None
+    force: bool = False
+
+
+class ReplanRequest(BaseModel):
+    """A new plan for a series that is waiting at its plan."""
+
+    episodes: int | None = None
+    minutes_per_episode: int | None = None
+    hint: str | None = None
+
+
+class SeriesEpisodeOut(BaseModel):
+    index: int
+    title: str
+    role: str = ""
+    target_minutes: float | None = None
+    run_id: str | None = None
+    status: str = "pending"
+    total_cost_usd: float = 0.0
+    error: str | None = None
+
+
+class SeriesOut(BaseModel):
+    id: str
+    document_id: str
+    document_title: str | None = None
+    flow_id: str
+    flow_version: str
+    plan_flow_id: str
+    status: str
+    error: str | None = None
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    request: dict[str, Any] = Field(default_factory=dict)
+    plan: dict[str, Any] | None = None
+    checks: dict[str, Any] = Field(default_factory=dict)
+    plan_run_id: str | None = None
+    plan_run_status: str | None = None
+    plan_cost_usd: float = 0.0
+    total_cost_usd: float = 0.0
+    episodes: list[SeriesEpisodeOut] = Field(default_factory=list)
+    #: ``outlined`` and ``written`` episodes, for the progress strip.
+    progress: dict[str, int] = Field(default_factory=dict)
+    #: Whether a worker job is driving the series right now.
+    active: bool = False
+
+
+class SeriesGraphEpisodeOut(BaseModel):
+    index: int
+    title: str
+    run_id: str | None = None
+    graph: RunGraphOut
+
+
+class SeriesGraphOut(BaseModel):
+    """The whole pipeline of a series: the planner run and every episode's run."""
+
+    series_id: str
+    status: str
+    plan: RunGraphOut | None = None
+    episodes: list[SeriesGraphEpisodeOut] = Field(default_factory=list)

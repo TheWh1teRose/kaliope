@@ -31,7 +31,10 @@ from tests.support import StubProvider
 SECTIONS = [
     ("Wetter und Klima", "Wetter beschreibt den Zustand der Atmosphäre an einem Ort"),
     ("Der Treibhauseffekt", "Treibhausgase lassen Sonnenlicht durch und halten Wärme zurück"),
-    ("Folgen der Erwärmung", "Der Meeresspiegel steigt, weil Eis schmilzt und Wasser sich ausdehnt"),
+    (
+        "Folgen der Erwärmung",
+        "Der Meeresspiegel steigt, weil Eis schmilzt und Wasser sich ausdehnt",
+    ),
     ("Klimaschutz", "Klimaschutz senkt die Emissionen, Anpassung mindert die Folgen"),
 ]
 BLOCKS_PER_SECTION = 5
@@ -126,9 +129,7 @@ BASELINE_NODES = [
 ]
 
 
-def run_baseline(
-    store_root: Path, provider: StubProvider, *, target_minutes: int = 5
-) -> RunResult:
+def run_baseline(store_root: Path, provider: StubProvider, *, target_minutes: int = 5) -> RunResult:
     """The baseline nodes after ``ingest``, over the synthetic document."""
     bootstrap_nodes()
     flow = Flow(id="golden", version="1", nodes=BASELINE_NODES)

@@ -42,6 +42,11 @@ REQUIRED_OUTPUT_KEYS: tuple[str, ...] = (
     "script",
 )
 
+#: A series planner flow ends at the plan: each episode runs its own flow later.
+PLANNER_OUTPUT_KEYS: tuple[str, ...] = ("parsed", "budget", "series_plan")
+#: What the worker additionally seeds a planner run with.
+PLANNER_SEED_KEYS: tuple[str, ...] = ("series_request",)
+
 
 class WiringOut(BaseModel):
     """One input of one node, and where its value comes from."""
@@ -97,6 +102,9 @@ def validate_flow(
     as available the same way a run treats ``document_ref``.
     """
     entries = [_entry(item) for item in nodes]
+    planner = any(name == "series_plan" for name, _config in entries)
+    if planner:
+        extra_seeds = (*extra_seeds, *PLANNER_SEED_KEYS)
     errors: list[str] = []
     warnings: list[str] = []
     checks: list[NodeCheckOut] = []
@@ -176,7 +184,7 @@ def validate_flow(
         published[node.produces] = name
 
     if as_pipeline:
-        for key in REQUIRED_OUTPUT_KEYS:
+        for key in PLANNER_OUTPUT_KEYS if planner else REQUIRED_OUTPUT_KEYS:
             if key not in published:
                 errors.append(
                     f"Nothing in this pipeline publishes '{key}'. The run would execute and then "
@@ -189,7 +197,7 @@ def validate_flow(
             f"Unknown quality check(s): {', '.join(unknown_gates)}. "
             f"Known: {', '.join(ALL_GATE_IDS)}."
         )
-    if as_pipeline and not gates:
+    if as_pipeline and not gates and not planner:
         warnings.append(
             "No quality checks are selected. The run produces a script that nothing reports on."
         )

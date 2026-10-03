@@ -282,9 +282,7 @@ def episode_count(supportable: float, minutes: int, requested: int | None) -> in
     return max(MIN_EPISODES, min(MAX_EPISODES, math.floor(supportable / max(minutes, 1))))
 
 
-def _user_message(
-    inp: SeriesPlanInput, candidates: list[Block], count: int, minutes: int
-) -> str:
+def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, minutes: int) -> str:
     request = inp.series_request
     section_titles = {s.id: s.title for s in (inp.parsed.sections or [])}
     lines: list[str] = []
@@ -308,7 +306,8 @@ def _user_message(
         if objectives
         else "The document states no objectives of its own."
     )
-    hint = f"Guidance on the split: {request.hint.strip()}\n" if (request.hint or "").strip() else ""
+    hint_text = (request.hint or "").strip()
+    hint = f"Guidance on the split: {hint_text}\n" if hint_text else ""
     return (
         f"Plan {count} episodes of about {minutes} minutes each.\n"
         f"The whole document supports about {inp.budget.max_supportable_minutes:.1f} minutes "
@@ -430,11 +429,10 @@ def build_plan(
         recap_ids = [
             str(b).strip() for b in entry.get("recap_block_ids", []) if str(b).strip() in earlier
         ][:MAX_RECAP_BLOCKS]
+        goal_texts = [t for t in (str(g).strip() for g in entry.get("goals", [])) if t]
         goals = [
             LearningGoal(id=f"{episode_id}-g{i}", text=text, source=source)  # type: ignore[arg-type]
-            for i, text in enumerate(
-                t for t in (str(g).strip() for g in entry.get("goals", [])) if t
-            )
+            for i, text in enumerate(goal_texts)
         ]
         refs: list[str] = []
         for number in entry.get("objectives", []) or []:

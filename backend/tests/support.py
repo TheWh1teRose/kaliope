@@ -208,9 +208,15 @@ class StubProvider:
         """Contiguous chunks of the passages, one per requested episode."""
         match = re.search(r"Plan (\d+) episodes", text)
         count = int(match.group(1)) if match else 2
-        ids = self._ids(text)
-        size = max(1, -(-len(ids) // count))
-        chunks = [ids[i : i + size] for i in range(0, len(ids), size)][:count]
+        sized = re.findall(r"^\[(b\w+)\] \(weight [\d.]+, (\d+) words\)", text, re.MULTILINE)
+        total = sum(int(words) for _, words in sized) or 1
+        # Contiguous chunks of about equal word count, the way a model would balance.
+        chunks: list[list[str]] = [[] for _ in range(count)]
+        seen = 0
+        for block_id, words in sized:
+            chunks[min(count - 1, int(seen * count / total))].append(block_id)
+            seen += int(words)
+        chunks = [chunk for chunk in chunks if chunk]
         objectives = "The document states these objectives" in text
         episodes = []
         for index, chunk in enumerate(chunks):

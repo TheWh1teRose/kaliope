@@ -506,9 +506,9 @@ def series_section(context: SeriesContext) -> str:
             "\nEarlier episodes in full, for continuity only. Do not cite them and take no "
             "facts from them; facts come only from this beat's passages."
         )
-        for episode in context.earlier:
-            lines.append(f"[Episode {episode.index}: {episode.title}]")
-            lines.extend(episode.lines)
+        for earlier in context.earlier:
+            lines.append(f"[Episode {earlier.index}: {earlier.title}]")
+            lines.extend(earlier.lines)
     lines.append(
         "\nSeries rules:\n"
         "- Refer back to earlier episodes by name where it helps. Do not explain again what "

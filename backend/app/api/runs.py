@@ -148,6 +148,12 @@ def create_run(
         flow = catalogue.get_flow(db, payload.flow_id)
     except CatalogueError as exc:
         raise problem(404, "No such flow", str(exc)) from exc
+    if flow_purpose(flow) != "episode":
+        raise problem(
+            422,
+            "Not an episode flow",
+            f"'{flow.id}' plans a series and makes no script. Start a series with it instead.",
+        )
 
     try:
         format_spec = catalogue.get_format_spec(db, payload.format_id)
@@ -187,7 +193,13 @@ def list_runs(
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[RunOut]:
-    statement = select(Run).order_by(Run.created_at.desc()).limit(max(1, min(limit, 500)))
+    statement = (
+        select(Run)
+        # A series' planner run makes no script; the series view shows it.
+        .where((Run.episode_index.is_(None)) | (Run.episode_index > 0))
+        .order_by(Run.created_at.desc())
+        .limit(max(1, min(limit, 500)))
+    )
     if document_id:
         statement = statement.where(Run.document_id == document_id)
     return [_run_out(db, run, detailed=False) for run in db.scalars(statement).all()]
@@ -310,9 +322,15 @@ def run_graph(
     run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> RunGraphOut:
     """The flow as it actually ran: per node, what happened and what it cost."""
-    run = _require_run(db, run_id)
+    return build_run_graph(db, _require_run(db, run_id))
+
+
+def build_run_graph(db: Session, run: Run) -> RunGraphOut:
+    """A run's graph: the flow's wiring with each node's status, cost and findings."""
+    run_id = run.id
     flow = _require_flow(db, run.flow_id)
-    nodes, edges, seeds = _topology(flow)
+    config = run.config_json or {}
+    nodes, edges, seeds = _topology(flow, present_seeds=_series_seed_keys(config))
 
     rows = {
         row.node_name: row
@@ -647,7 +665,19 @@ def _description(node: Node) -> str | None:
     return " ".join(doc.split()) or None
 
 
-def _topology(flow: Flow) -> tuple[list[FlowNodeOut], list[EdgeOut], list[PortOut]]:
+def _series_seed_keys(config: dict[str, Any]) -> tuple[str, ...]:
+    """The optional seeds a series run carries, so its graph shows them."""
+    keys: list[str] = []
+    if config.get("episode_brief_artifact"):
+        keys.append("episode_brief")
+    if config.get("series_context_artifact"):
+        keys.append("series_context")
+    return tuple(keys)
+
+
+def _topology(
+    flow: Flow, *, present_seeds: tuple[str, ...] = ()
+) -> tuple[list[FlowNodeOut], list[EdgeOut], list[PortOut]]:
     """Nodes, wiring and run seeds, derived from the node classes themselves.
 
     Wiring is by field name — exactly the rule the runner applies — so adding a
@@ -671,7 +701,12 @@ def _topology(flow: Flow) -> tuple[list[FlowNodeOut], list[EdgeOut], list[PortOu
             source = producers.get(key)
             if source is not None and _position(flow, source) >= index:
                 source = None
-            if source is None and key not in RUN_SEED_KEYS and not info.is_required():
+            if (
+                source is None
+                and key not in RUN_SEED_KEYS
+                and key not in present_seeds
+                and not info.is_required()
+            ):
                 continue
             if source is None and key not in seed_keys:
                 seed_keys.append(key)
@@ -702,7 +737,8 @@ def _node_status(row: RunNode | None, *, reached: bool, run_status: str) -> Node
     if row is None:
         if reached or run_status == "failed":
             return "blocked"
-        return "running" if run_status == "running" else "pending"
+        # A node gets its row when it starts, so one without a row is still waiting.
+        return "pending"
     if row.error:
         return "failed"
     if row.finished_at is None:
@@ -974,6 +1010,8 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         gates=gates,
         manifest=run.manifest_json if detailed else None,
         pause=pause_out(run.manifest_json),
+        series_id=run.series_id,
+        episode_index=run.episode_index,
     )
 
 
