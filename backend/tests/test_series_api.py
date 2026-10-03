@@ -264,3 +264,25 @@ def test_a_failed_episode_resumes_where_it_stopped(
     assert systems and all("You write one beat" in s for s in systems), (
         "only episode 2's script runs again"
     )
+
+
+def test_a_forced_series_outlines_each_episode_once(
+    client: TestClient, document_id: str, provider: SeriesStub
+) -> None:
+    calls_before = len(provider.calls)
+    created = client.post(
+        "/api/series",
+        json={
+            "document_id": document_id,
+            "minutes_per_episode": 3,
+            "episodes": 2,
+            "review_plan": False,
+            "force": True,
+        },
+    )
+    done = _wait(client, created.json()["id"], {"completed", "failed"})
+    assert done["status"] == "completed", done["error"]
+    outlines = [
+        c for c in provider.calls[calls_before:] if "You plan the running order" in (c.system or "")
+    ]
+    assert len(outlines) == 2, "the script stage reuses the outline its context was built from"

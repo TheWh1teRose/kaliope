@@ -680,6 +680,10 @@ class Worker:
                 _record_artifact(session, stored.hash, "series_context", stored.size_bytes)
                 config = dict(run.config_json or {})
                 config.pop("stop_after", None)
+                # A forced series recomputed everything up to the outline in its
+                # first stage; forcing again here would redo the outline the
+                # other episodes' context was built from.
+                config["force"] = False
                 config["series_context_artifact"] = stored.hash
                 run.config_json = config
                 run.context_hash = context_hash(context)
