@@ -193,6 +193,18 @@ describe('series view', () => {
     expect(wrapper.get('[data-budget-warning]').text()).toBe(warning)
   })
 
+  it('shows a warning when an episode has no usable learning goal', async () => {
+    const planned = series('planned')
+    const warning = 'Folge 1 hat keine verwertbaren Lernziele, bitte neu planen'
+    planned.plan!.warnings = [warning]
+    planned.plan!.episodes[0].goals = []
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-budget-warning]').text()).toBe(warning)
+    expect(wrapper.get('[data-panel="plan"]').text()).toContain(warning)
+  })
+
   it('warns when the plan has a different episode count than was asked', async () => {
     const planned = series('planned')
     planned.plan!.budget.requested_episodes = 4

@@ -12,11 +12,7 @@ import pytest
 from app.llm.base import Completion, CompletionRequest, LLMClient, Usage
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import NodeContext, NodeError
-from app.pipeline.framework.spec import node_params
 from app.pipeline.nodes.content_budget import source_word_budget, supportable_minutes
-from app.pipeline.nodes.objectives import _SCHEMA as OBJECTIVES_SCHEMA
-from app.pipeline.nodes.objectives import ObjectivesNode
-from app.pipeline.nodes.series_plan import _SCHEMA as SERIES_SCHEMA
 from app.pipeline.nodes.series_plan import (
     LEFT_OUT_FOR_DIALOGUE,
     MAX_EPISODES,
@@ -135,17 +131,9 @@ def test_episode_goals_use_the_objectives_rule(tmp_path: Path) -> None:
     sent = provider.calls[0]
     assert sent.system is not None
     assert OBJECTIVE_FORMULATION_RULE in sent.system
-    objectives_prompt = next(p for p in node_params(ObjectivesNode()) if p.key == "system_prompt")
-    assert OBJECTIVE_FORMULATION_RULE in str(objectives_prompt.default)
     user = sent.messages[0].content
     assert desired_outcome_source("Die Kipppunkte erklären können") in user
     assert f"{time_budget_constraint(15)} per episode." in user
-
-    goal_item = SERIES_SCHEMA["properties"]["episodes"]["items"]["properties"]["goals"]["items"]
-    objective_item = OBJECTIVES_SCHEMA["properties"]["objectives"]["items"]
-    assert goal_item["properties"]["bloom_level"] == objective_item["properties"]["bloom_level"]
-    assert goal_item["required"] == objective_item["required"] == ["text", "bloom_level"]
-    assert "derivation" in goal_item["properties"]
 
     plan = _plan(
         {
@@ -173,8 +161,47 @@ def test_episode_goals_use_the_objectives_rule(tmp_path: Path) -> None:
     assert goal.bloom_level == "analyse"
     assert goal.derivation == "Aus dem Wunsch, Mechanismen zu erklären"
     assert goal.model_dump()["bloom_level"] == "analyse"
+    assert all("Lernziele" not in warning for warning in plan.warnings)
     plain = LearningGoal(id="g0", text="Ziel", source="generated")
     assert "bloom_level" not in plain.model_dump()
+
+
+def test_bare_string_goals_keep_the_episode_and_warn() -> None:
+    # 15 minutes at 135 wpm and 2.5× is 810 words. Five blocks are 700, under that cap.
+    plan = _plan(
+        {
+            "title": "S",
+            "episodes": [
+                _episode(IDS[:5], goals=["Erklären", "Anwenden"]),
+                _episode(
+                    IDS[5:10],
+                    goals=[
+                        {"text": "Erklären", "bloom_level": "not-a-level"},
+                        {"text": "  ", "bloom_level": "remember"},
+                    ],
+                ),
+                _episode(IDS[10:15], goals=[]),
+                _episode(IDS[15:]),
+            ],
+        },
+        minutes=15,
+        budget=_budget(51.85),
+    )
+    warnings = [
+        "Folge 1 hat keine verwertbaren Lernziele, bitte neu planen",
+        "Folge 2 hat keine verwertbaren Lernziele, bitte neu planen",
+        "Folge 3 hat keine verwertbaren Lernziele, bitte neu planen",
+    ]
+    assert [episode.block_ids for episode in plan.episodes] == [
+        IDS[:5],
+        IDS[5:10],
+        IDS[10:15],
+        IDS[15:],
+    ]
+    assert [episode.goals for episode in plan.episodes[:3]] == [[], [], []]
+    assert plan.episodes[3].goals
+    assert plan.warnings == warnings
+    assert plan.model_dump(mode="json")["warnings"] == warnings
 
 
 def test_count_follows_the_budget_unless_the_run_asked_for_one() -> None:

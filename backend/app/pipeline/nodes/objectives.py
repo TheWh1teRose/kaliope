@@ -21,7 +21,6 @@ from app.pipeline.objective_rule import (
     FORMULATED_GOAL_PROPERTIES,
     FORMULATED_GOAL_REQUIRED,
     OBJECTIVE_FORMULATION_RULE,
-    bloom_level,
     desired_outcome_source,
     formulated_goal,
     time_budget_constraint,
@@ -257,11 +256,6 @@ class ObjectivesNode:
             desired_outcome=desired,
             rationale=str(data.get("rationale", "")).strip(),
         )
-
-
-def _bloom_level(raw: Any) -> Any:
-    """Kept so callers that snap Bloom labels share the one alias table."""
-    return bloom_level(raw)
 
 
 def _user_prompt(

@@ -206,8 +206,10 @@ class SeriesPlanNode:
             "join a neighbour only while that episode stays within its source-word budget. "
             "The rest stay unassigned, so an episode cannot be filled past the point where "
             "dialogue still fits. An episode the model filled past that budget keeps its "
-            "passages and is named in a warning. An episode below three supportable minutes "
-            "is merged into its smaller neighbour. Episodes keep the requested length.",
+            "passages and is named in a warning. An episode left with no usable learning "
+            "goal is kept and named in a warning. An episode below three supportable "
+            "minutes is merged into its smaller neighbour. Episodes keep the requested "
+            "length.",
             "The planner writes no facts. Each episode later selects, outlines and writes "
             "from its own passages through the normal nodes.",
         ],
@@ -221,7 +223,8 @@ class SeriesPlanNode:
         },
         output="A SeriesPlan: title, through-line, terms, the episodes with their passages "
         "and goals, the passages left out on purpose, the budget verdict, and a warning "
-        "for each episode that carries more source words than its budget.",
+        "for each episode that carries more source words than its budget or has no "
+        "usable learning goal.",
         failure_modes=[
             "The document supports fewer than two episodes of three minutes — verdict "
             "'insufficient'; a single episode fits better.",
@@ -414,7 +417,8 @@ def build_plan(
     dropped or invented to match it. An episode under three minutes is merged
     into a neighbour. Forgotten passages join a neighbour only while it stays
     within the source-word budget for ``minutes``. An episode that still holds
-    more source words than that budget keeps them and records a warning.
+    more source words than that budget keeps them and records a warning. An
+    episode whose goals are all unusable is kept and records a warning.
     """
     candidates = parsed.narratable_blocks()
     known = {b.id: b for b in candidates}
@@ -592,6 +596,10 @@ def build_plan(
 
     warnings: list[str] = []
     for episode in episodes:
+        if not episode.goals:
+            warnings.append(
+                f"Folge {episode.index} hat keine verwertbaren Lernziele, bitte neu planen"
+            )
         words = _words(episode.block_ids)
         if words > cap:
             warnings.append(
