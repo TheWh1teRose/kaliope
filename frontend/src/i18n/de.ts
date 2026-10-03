@@ -436,6 +436,7 @@ export default {
     supportable: 'trägt {n} min',
     clamped: 'gekürzt',
     merged: 'Folgen zusammengelegt',
+    countDiffers: 'angefragt: {asked}, geplant: {planned}',
     unassigned: 'Nicht zugeordnet',
     budget: 'Budget',
     approve: 'Plan freigeben',

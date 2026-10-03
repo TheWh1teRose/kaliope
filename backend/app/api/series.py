@@ -222,7 +222,6 @@ def replan(
     _check_request(request.get("episodes"), int(request["minutes_per_episode"]))
     request["approved"] = False
     series.request_json = request
-    series.plan_artifact_hash = None
     series.status = "queued"
     series.error = None
     series.finished_at = None

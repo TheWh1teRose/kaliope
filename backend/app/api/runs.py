@@ -681,11 +681,12 @@ def _wall_ms(row: RunNode | None, record: dict[str, Any]) -> int | None:
 
 
 def _series_seed_keys(config: dict[str, Any]) -> tuple[str, ...]:
-    """The optional seeds a series run carries, so its graph shows them."""
+    """The optional seeds a series episode carries, so its graph shows them."""
     keys: list[str] = []
-    if config.get("episode_brief_artifact"):
+    series_episode = bool(config.get("episode_brief_artifact"))
+    if series_episode:
         keys.append("episode_brief")
-    if config.get("series_context_artifact"):
+    if series_episode or config.get("series_context_artifact"):
         keys.append("series_context")
     return tuple(keys)
 

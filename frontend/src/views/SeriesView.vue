@@ -30,7 +30,7 @@ const busy = ref(false)
 const error = ref('')
 const replanCount = ref<number | null>(null)
 const replanMinutes = ref<number | null>(null)
-const replanHint = ref('')
+const replanHint = ref<string | null>(null)
 
 const IDLE = new Set(['planned', 'completed', 'failed'])
 
@@ -56,6 +56,12 @@ const coverage = computed(() => series.value?.checks.S1 ?? null)
 const scriptNote = computed(() => {
   const notes = Object.entries(live.value).filter(([key]) => key.endsWith(':script'))
   return notes.length ? notes[notes.length - 1][1] : ''
+})
+const countWarning = computed(() => {
+  const asked = plan.value?.budget.requested_episodes
+  const planned = plan.value?.episodes.length
+  if (asked == null || planned == null || asked === planned) return ''
+  return fill(t.series.countDiffers, { asked, planned })
 })
 const budgetLine = computed(() => {
   if (!plan.value) return ''
@@ -89,6 +95,9 @@ async function reload(): Promise<void> {
   }
   if (replanMinutes.value === null) {
     replanMinutes.value = series.value.request.minutes_per_episode
+  }
+  if (replanHint.value === null) {
+    replanHint.value = series.value.request.hint ?? ''
   }
 }
 
@@ -150,7 +159,7 @@ function replan(): Promise<void> {
     seriesStore.replan(props.id, {
       episodes: replanCount.value,
       minutes_per_episode: replanMinutes.value ?? series.value?.request.minutes_per_episode,
-      hint: replanHint.value,
+      hint: replanHint.value ?? '',
     }),
   )
 }
@@ -231,7 +240,7 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <p v-if="series.error" class="notice notice--fail">{{ series.error }}</p>
+    <p v-if="series.error" class="notice notice--fail" data-series-error>{{ series.error }}</p>
     <p v-else-if="stuck" class="notice notice--warn">{{ t.series.stuck }}</p>
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
     <p v-if="seriesStore.reconnecting" class="muted hint">{{ t.run.reconnecting }}</p>
@@ -347,6 +356,7 @@ onUnmounted(() => {
           <span v-if="plan.budget.verdict !== 'ok'" class="badge badge--warn" :title="plan.budget.explanation">
             {{ plan.budget.verdict === 'reduced' ? t.series.merged : t.series.clamped }}
           </span>
+          <span v-if="countWarning" class="badge badge--warn" data-count-warning>{{ countWarning }}</span>
           <span v-if="coverage?.uncited_sections.length" class="meta">
             {{ fill(t.series.coverageUncited, { sections: coverage.uncited_sections.join(', ') }) }}
           </span>
@@ -430,7 +440,12 @@ onUnmounted(() => {
             data-replan-minutes
           />
           <output class="num" data-replan-minutes-out>{{ replanMinutes }}</output>
-          <input v-model="replanHint" class="input hint-input" :placeholder="t.series.hintPlaceholder" />
+          <input
+            v-model="replanHint"
+            class="input hint-input"
+            data-replan-hint
+            :placeholder="t.series.hintPlaceholder"
+          />
           <button class="btn btn--sm" type="button" :disabled="busy" data-replan @click="replan">
             {{ t.series.replan }}
           </button>

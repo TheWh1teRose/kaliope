@@ -594,7 +594,7 @@ class Worker:
                     return
                 if planner.status != "completed":
                     error = (planner.error or "the planner failed").split("\n\n")[0]
-                    self._fail_series(series_id, error)
+                    self._hold_previous_plan(series_id, error)
                     return
                 flow = catalogue.flows(session).get(planner.flow_id)
                 row = (
@@ -603,7 +603,7 @@ class Worker:
                     else None
                 )
                 if row is None or not row.artifact_hash:
-                    self._fail_series(series_id, "the planner run produced no series plan")
+                    self._hold_previous_plan(series_id, "the planner run produced no series plan")
                     return
                 series.plan_artifact_hash = row.artifact_hash
                 if not request.get("approved"):
@@ -740,6 +740,20 @@ class Worker:
         if row is None or not row.artifact_hash or not store.exists(row.artifact_hash):
             return None
         return ParsedDocument.model_validate(store.get_raw(row.artifact_hash))
+
+    def _hold_previous_plan(self, series_id: str, error: str) -> None:
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            if series is None or not series.plan_artifact_hash:
+                self._fail_series(series_id, error)
+                return
+            failed = plan_run(session, series_id)
+            if failed is not None and failed.status != "completed":
+                session.delete(failed)
+            series.status = "planned"
+            series.error = error
+            series.finished_at = None
+        bus.publish(series_channel(series_id), "series.planned", {"error": error})
 
     def _fail_series(self, series_id: str, error: str) -> None:
         with session_scope() as session:

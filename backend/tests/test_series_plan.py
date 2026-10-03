@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app.llm.base import LLMClient
+from app.llm.base import Completion, CompletionRequest, LLMClient, Usage
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.nodes.series_plan import (
@@ -44,7 +45,6 @@ def _budget(minutes: float = 8.3) -> ContentBudget:
 def _plan(
     data: dict[str, Any],
     minutes: int = 4,
-    requested: int | None = None,
     count: int | None = None,
     budget: Any = None,
 ) -> Any:
@@ -55,7 +55,6 @@ def _plan(
         parsed=DOC,
         budget=budget or _budget(),
         minutes=minutes,
-        requested=requested,
         count=count,
     )
 
@@ -114,29 +113,29 @@ def test_an_episode_below_three_minutes_merges_into_its_neighbour() -> None:
     assert plan.budget.verdict == "reduced"
 
 
-def test_extra_viable_episodes_fold_down_to_the_asked_count() -> None:
+def test_extra_viable_episodes_stay_when_fewer_were_asked() -> None:
     cuts = [0, 4, 8, 11, 14, 17, 20]
     groups = [IDS[cuts[i] : cuts[i + 1]] for i in range(6)]
     budget = _budget().model_copy(update={"min_compression": 1.0})
     plan = _plan(
         {"title": "S", "episodes": [_episode(group) for group in groups]},
         minutes=3,
-        requested=4,
         count=4,
         budget=budget,
     )
-    assert len(plan.episodes) == 4
+    assert len(plan.episodes) == 6
     assert plan.budget.requested_episodes == 4
     assert plan.budget.verdict == "ok"
     assert sorted(block_id for episode in plan.episodes for block_id in episode.block_ids) == IDS
 
 
-def test_fewer_episodes_than_asked_fail_before_they_can_be_stored() -> None:
-    with pytest.raises(NodeError):
-        _plan(
-            {"title": "S", "episodes": [_episode(IDS[:10]), _episode(IDS[10:])]},
-            count=4,
-        )
+def test_fewer_episodes_than_asked_are_kept() -> None:
+    plan = _plan(
+        {"title": "S", "episodes": [_episode(IDS[:10]), _episode(IDS[10:])]},
+        count=4,
+    )
+    assert len(plan.episodes) == 2
+    assert plan.budget.requested_episodes == 4
 
 
 def test_an_episode_that_cannot_carry_its_length_is_shortened() -> None:
@@ -221,3 +220,67 @@ def test_a_document_too_thin_for_two_episodes_is_refused(tmp_path: Path) -> None
             _context(tmp_path, StubProvider()),
         )
     assert raised.value.verdict == "insufficient"
+
+
+class _ScriptedPlan:
+    """Returns a fixed number of viable episodes on each call, ignoring the prompt."""
+
+    def __init__(self, counts: list[int]) -> None:
+        self.counts = counts
+        self.calls: list[CompletionRequest] = []
+
+    def complete(self, request: CompletionRequest) -> Completion:
+        self.calls.append(request)
+        count = self.counts[len(self.calls) - 1]
+        size = len(IDS) // count
+        groups = [IDS[index * size : (index + 1) * size] for index in range(count - 1)]
+        groups.append(IDS[(count - 1) * size :])
+        payload = {
+            "title": "S",
+            "through_line": "Bogen",
+            "episodes": [_episode(group) for group in groups],
+        }
+        return Completion(
+            text=json.dumps(payload),
+            model_id=request.model,
+            usage=Usage(input_tokens=1, output_tokens=1),
+            latency_ms=1,
+        )
+
+
+def _viable_budget() -> ContentBudget:
+    return _budget(24).model_copy(update={"min_compression": 1.0})
+
+
+def _ask(tmp_path: Path, counts: list[int]) -> tuple[Any, _ScriptedPlan]:
+    provider = _ScriptedPlan(counts)
+    plan = SeriesPlanNode().run(
+        SeriesPlanInput(
+            parsed=DOC,
+            budget=_viable_budget(),
+            format_spec=FORMAT,
+            audience_spec=AUDIENCE,
+            series_request=SeriesRequest(episodes=4, minutes_per_episode=3),
+        ),
+        _context(tmp_path, provider),  # type: ignore[arg-type]
+    )
+    return plan, provider
+
+
+def test_a_wrong_count_is_retried_once_naming_the_asked_count(tmp_path: Path) -> None:
+    plan, provider = _ask(tmp_path, [6, 4])
+    assert len(provider.calls) == 2
+    first = provider.calls[0].messages[0].content
+    second = provider.calls[1].messages[0].content
+    assert "Plan exactly 4 episodes." not in first
+    assert "Plan exactly 4 episodes." in second
+    assert len(plan.episodes) == 4
+    assert plan.budget.requested_episodes == 4
+
+
+def test_a_count_that_still_differs_is_accepted(tmp_path: Path) -> None:
+    plan, provider = _ask(tmp_path, [2, 2])
+    assert len(provider.calls) == 2
+    assert len(plan.episodes) == 2
+    assert plan.budget.requested_episodes == 4
+    assert sorted(block_id for episode in plan.episodes for block_id in episode.block_ids) == IDS

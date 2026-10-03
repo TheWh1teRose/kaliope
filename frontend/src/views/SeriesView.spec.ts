@@ -141,6 +141,50 @@ describe('series view', () => {
     })
   })
 
+  it('keeps the stored hint unless the reviewer clears it', async () => {
+    const planned = series('planned')
+    planned.request.hint = 'Paris extra'
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-replan-hint]').element.value).toBe('Paris extra')
+    await wrapper.get('[data-replan]').trigger('click')
+    await flushPromises()
+    expect(store.replan).toHaveBeenCalledWith('s1', {
+      episodes: 3,
+      minutes_per_episode: 15,
+      hint: 'Paris extra',
+    })
+
+    await wrapper.get('[data-replan-hint]').setValue('')
+    await wrapper.get('[data-replan]').trigger('click')
+    await flushPromises()
+    expect(store.replan).toHaveBeenLastCalledWith('s1', {
+      episodes: 3,
+      minutes_per_episode: 15,
+      hint: '',
+    })
+  })
+
+  it('warns when the plan has a different episode count than was asked', async () => {
+    const planned = series('planned')
+    planned.plan!.budget.requested_episodes = 4
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-count-warning]').text()).toBe('angefragt: 4, geplant: 3')
+  })
+
+  it('shows the planner error while the previous plan is still waiting', async () => {
+    const planned = series('planned')
+    planned.error = 'der Planer ist gescheitert'
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-panel="plan"]').text()).toContain('Vom Mechanismus zum Handeln.')
+    expect(wrapper.get('[data-series-error]').text()).toBe('der Planer ist gescheitert')
+  })
+
   it('subscribes again when a terminal event leaves the series moving', async () => {
     store.get.mockResolvedValueOnce(series('writing'))
     mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })

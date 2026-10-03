@@ -364,3 +364,73 @@ def test_approve_replan_and_resume_drop_the_previous_terminal_event(
     resumed = client.post(f"/api/series/{series_id}/resume")
     assert resumed.status_code == 200, resumed.text
     assert "series.failed" not in _channel_types(series_id)
+
+
+def test_a_failed_replan_keeps_the_previous_plan(
+    client: TestClient, document_id: str, provider: SeriesStub
+) -> None:
+    created = client.post(
+        "/api/series",
+        json={"document_id": document_id, "minutes_per_episode": 3, "episodes": 2},
+    )
+    series_id = created.json()["id"]
+    held = _wait(client, series_id, {"planned", "failed"})
+    assert held["status"] == "planned", held["error"]
+    title = held["plan"]["title"]
+    episode_count = len(held["plan"]["episodes"])
+
+    provider.fail_with = RuntimeError("planner broke")
+    try:
+        replanned = client.post(
+            f"/api/series/{series_id}/replan",
+            json={"episodes": 3, "minutes_per_episode": 4},
+        )
+        assert replanned.status_code == 200, replanned.text
+        done = _wait(client, series_id, {"planned", "failed"})
+    finally:
+        provider.fail_with = None
+
+    assert done["status"] == "planned", done
+    assert "planner broke" in (done["error"] or "")
+    assert done["plan"]["title"] == title
+    assert len(done["plan"]["episodes"]) == episode_count
+
+    approved = client.post(f"/api/series/{series_id}/approve")
+    assert approved.status_code == 200, approved.text
+    written = _wait(client, series_id, {"completed", "failed"})
+    assert written["status"] == "completed", written["error"]
+    assert len(written["episodes"]) == episode_count
+
+
+def test_an_outlined_episode_graph_keeps_series_context(
+    client: TestClient, document_id: str
+) -> None:
+    with session_scope() as session:
+        outlined = Run(
+            document_id=document_id,
+            flow_id="baseline_v0",
+            flow_version="1.0",
+            status="running",
+            config_json={"episode_brief_artifact": "brief-hash", "target_minutes": 3},
+            episode_index=1,
+        )
+        single = Run(
+            document_id=document_id,
+            flow_id="baseline_v0",
+            flow_version="1.0",
+            status="running",
+            config_json={"target_minutes": 3},
+        )
+        session.add_all([outlined, single])
+        session.flush()
+        outlined_id, single_id = outlined.id, single.id
+
+    outlined_graph = client.get(f"/api/runs/{outlined_id}/graph")
+    assert outlined_graph.status_code == 200, outlined_graph.text
+    script = next(node for node in outlined_graph.json()["nodes"] if node["name"] == "script")
+    assert "series_context" in {port["key"] for port in script["consumes"]}
+
+    single_graph = client.get(f"/api/runs/{single_id}/graph")
+    assert single_graph.status_code == 200, single_graph.text
+    single_script = next(node for node in single_graph.json()["nodes"] if node["name"] == "script")
+    assert "series_context" not in {port["key"] for port in single_script["consumes"]}

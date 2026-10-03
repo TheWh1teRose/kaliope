@@ -5,9 +5,9 @@ and gives the series a title, a through-line and its key terms. Everything
 arithmetic is done here afterwards, never trusted to the model: unknown ids are
 dropped, every narratable block gets at most one home, blocks the model did not
 mention join the episode around them, each episode's supportable length is
-measured from its own passages, extra episodes are folded into a neighbour until
-the asked-for count remains, and an episode that cannot carry three minutes is
-merged into its neighbour — the only reason a plan ends with fewer.
+measured from its own passages, and an episode that cannot carry three minutes
+is merged into its neighbour. If that plan does not have the asked-for number of
+episodes, the model is asked once more; a count that still differs is kept.
 
 The planner writes no facts. Titles, summaries and goals describe the material;
 the episodes' scripts still take every fact from their own passages.
@@ -242,31 +242,43 @@ class SeriesPlanNode:
         if not candidates:
             raise NodeError("no narratable blocks are available to split")
 
-        data = ctx.llm.complete(
-            CompletionRequest(
-                model=ctx.model("claude-opus-5"),
-                system=str(ctx.get("system_prompt") or _SYSTEM),
-                messages=[
-                    Message(
-                        role="user",
-                        content=_user_message(inp, candidates, count, minutes),
-                    )
-                ],
-                max_tokens=int(ctx.get("max_tokens", 16000)),
-                temperature=ctx.get("temperature"),
-                json_schema=_SCHEMA,
-                cache_system=True,
-            )
-        ).json_payload()
+        def ask(note: str | None) -> dict[str, Any]:
+            message = _user_message(inp, candidates, count, minutes)
+            if note:
+                message = f"{note}\n\n{message}"
+            return ctx.llm.complete(
+                CompletionRequest(
+                    model=ctx.model("claude-opus-5"),
+                    system=str(ctx.get("system_prompt") or _SYSTEM),
+                    messages=[Message(role="user", content=message)],
+                    max_tokens=int(ctx.get("max_tokens", 16000)),
+                    temperature=ctx.get("temperature"),
+                    json_schema=_SCHEMA,
+                    cache_system=True,
+                )
+            ).json_payload()
 
+        data = ask(None)
         plan = build_plan(
             data,
             parsed=inp.parsed,
             budget=inp.budget,
             minutes=minutes,
-            requested=request.episodes,
             count=count,
         )
+        if len(plan.episodes) != count:
+            answered = len(plan.episodes)
+            data = ask(
+                f"Your previous answer planned {answered} episodes. "
+                f"Plan exactly {count} episodes."
+            )
+            plan = build_plan(
+                data,
+                parsed=inp.parsed,
+                budget=inp.budget,
+                minutes=minutes,
+                count=count,
+            )
         if len(plan.episodes) < count:
             ctx.progress(f"planned {len(plan.episodes)} of {count} episodes")
         return plan
@@ -330,15 +342,13 @@ def build_plan(
     parsed: ParsedDocument,
     budget: ContentBudget,
     minutes: int,
-    requested: int | None,
     count: int,
 ) -> SeriesPlan:
-    """Turn the model's answer into a plan of ``count`` episodes.
+    """Turn the model's answer into a plan.
 
-    Fewer episodes that contain passages than ``count`` fail the node. More are
-    folded into a neighbour until ``count`` remain. Only an episode under three
-    minutes may still be merged after that, which is the only way the plan ends
-    shorter than ``count``.
+    ``count`` is how many episodes were asked for; it is recorded and nothing is
+    dropped or invented to match it. An episode under three minutes is merged
+    into a neighbour, which is the only change to the model's split.
     """
     candidates = parsed.narratable_blocks()
     known = {b.id: b for b in candidates}
@@ -392,10 +402,6 @@ def build_plan(
     drafts = [d for d in drafts if d["ids"]]
     if not drafts:
         raise NodeError("the series plan returned no episode with passages that exist")
-    if len(drafts) < count:
-        raise NodeError(
-            f"the series plan returned {len(drafts)} episodes with passages, but {count} were needed"
-        )
     for draft in drafts:
         draft["ids"].sort(key=lambda block_id: order[block_id])
 
@@ -410,8 +416,7 @@ def build_plan(
     while len(drafts) > 1:
         sizes = [supportable(d["ids"]) for d in drafts]
         weakest = min(range(len(drafts)), key=lambda i: sizes[i])
-        extra = len(drafts) > count
-        if sizes[weakest] >= MIN_VIABLE_MINUTES and not extra:
+        if sizes[weakest] >= MIN_VIABLE_MINUTES:
             break
         if weakest == 0:
             neighbour = 1
@@ -424,8 +429,7 @@ def build_plan(
             drafts[keep]["ids"] + drafts[drop]["ids"], key=lambda block_id: order[block_id]
         )
         del drafts[drop]
-        if not extra:
-            merged = True
+        merged = True
 
     objectives = parsed.objectives
     source = "document" if objectives else "generated"
@@ -515,7 +519,7 @@ def build_plan(
         budget=SeriesBudget(
             max_supportable_minutes=round(float(budget.max_supportable_minutes), 2),
             minutes_per_episode=minutes,
-            requested_episodes=requested,
+            requested_episodes=count,
             verdict=verdict,  # type: ignore[arg-type]
             explanation=explanation,
         ),
