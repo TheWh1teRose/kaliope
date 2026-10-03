@@ -8,10 +8,10 @@ mention join a neighbour only while that episode stays within its source budget,
 and an episode the model filled past that budget keeps the passages and is
 named in a warning. Each episode's supportable length is measured from its own
 passages, and an episode that cannot carry three minutes is merged into its
-neighbour. Episodes
-keep the requested length, so a higher count spreads the source instead of
-shortening every episode. If that plan does not have the asked-for number of
-episodes, the model is asked once more; a count that still differs is kept.
+neighbour. Episodes keep the requested length, so a higher count spreads the
+source instead of shortening every episode. If that plan does not have the
+asked-for number of episodes, the model is asked once more; a count that still
+differs is kept.
 
 The planner writes no facts. Titles, summaries and goals describe the material;
 the episodes' scripts still take every fact from their own passages.

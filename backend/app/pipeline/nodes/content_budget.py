@@ -81,8 +81,9 @@ class ContentBudgetNode:
             "episode_brief": "Only in a series: the episode's share of the plan. Then only "
             "the episode's own passages count towards the budget.",
         },
-        output="A ContentBudget: the effective target in minutes and words, the compression "
-        "ratio, the verdict, and a sentence explaining how it was reached.",
+        output="A ContentBudget: dialogue expansion, the effective target in minutes and "
+        "words, the compression ratio, the verdict, and a sentence explaining how it "
+        "was reached.",
         failure_modes=[
             "verdict 'insufficient' — the document supports under three minutes. Typical for "
             "slide decks, scans without OCR, and worksheets that are mostly answer space.",

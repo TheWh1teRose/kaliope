@@ -381,8 +381,8 @@ ingest → content_budget → select → outline → script → gates
 ### 6.1 `content_budget`
 
 Input: `ParsedDocument`, requested target minutes.
-Output: `ContentBudget{narratable_words, max_supportable_minutes, target_minutes,
-compression_ratio, verdict, explanation}`
+Output: `ContentBudget{narratable_words, dialogue_expansion, max_supportable_minutes,
+target_minutes, compression_ratio, verdict, explanation}`
 
 - Speaking rate is a per-language constant in `lang/resources.py` (German: 135
   wpm). Never hardcoded in the node.

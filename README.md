@@ -128,8 +128,9 @@ Deliberately simple: no best-of-N, no revision loops, no critique passes. It is
 the control condition every later flow is compared against.
 
 `content_budget` is what makes a thin or image-dominant document fail honestly
-instead of producing invented filler. It computes what the narratable word count
-can actually support and refuses below three minutes, citing the numbers.
+instead of producing invented filler. A plain read-through of the narratable
+words is stretched so the episode has room for dialogue, and the run refuses
+below three minutes, citing the numbers.
 
 `script` writes one beat at a time. Each call sees the running order and the
 text of every earlier beat, so the episode stays one conversation; facts still
@@ -141,8 +142,8 @@ verifies the result.
 
 ### Series of episodes
 
-A run can also produce a **series**: several episodes that together cover the
-whole document. Start one with "Serie" on the start screen.
+A run can also produce a **series**: several episodes from one document, each
+sized so dialogue has room. Start one with "Serie" on the start screen.
 
 ```
 series_plan_v0:  ingest → content_budget → series_plan     (once; then it waits)
@@ -156,7 +157,11 @@ asked for is what the content budget carries at the chosen length (two to eight)
 unless the reviewer sets it. If the plan comes back with a different count, the
 planner is asked once more; a count that still differs is kept and shown on the
 plan screen. An episode that cannot carry three minutes is merged into its
-neighbour, and the model's split of passages is checked rather than trusted.
+neighbour. Passages the model left out join an episode only while it stays
+inside its source-word budget; the rest stay unassigned. An assignment past
+that budget is kept and named in a warning on the plan. Episodes keep the
+length that was asked for. The model's split of passages is checked rather
+than trusted.
 The series always stops after the plan until someone approves it, and can be
 planned again with another count, length or hint while it waits.
 
