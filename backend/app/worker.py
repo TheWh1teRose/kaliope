@@ -258,10 +258,14 @@ class Worker:
                 run.error = "the document this run refers to no longer exists"
                 return
             run.status = "running"
+            run.error = None
+            run.finished_at = None
             if run.started_at is None:
                 run.started_at = datetime.now(UTC)
             flow_id = run.flow_id
             config = dict(run.config_json or {})
+            config.pop("verdict", None)
+            run.config_json = config
             resume = resume_outputs(run.manifest_json)
             previous_manifest = dict(run.manifest_json or {})
             format_spec = FormatSpec.model_validate(run.format_spec_json)
@@ -602,7 +606,7 @@ class Worker:
                     self._fail_series(series_id, "the planner run produced no series plan")
                     return
                 series.plan_artifact_hash = row.artifact_hash
-                if request.get("review_plan", True) and not request.get("approved"):
+                if not request.get("approved"):
                     series.status = "planned"
                     held = True
                 else:

@@ -79,9 +79,9 @@ describe('start screen', () => {
         plan_flow_id: 'series_plan_v0',
         episodes: 4,
         minutes_per_episode: 15,
-        review_plan: true,
       }),
     )
+    expect(createSeries.mock.calls[0][0]).not.toHaveProperty('review_plan')
     expect(createRun).not.toHaveBeenCalled()
   })
 

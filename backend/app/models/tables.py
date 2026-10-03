@@ -202,7 +202,7 @@ class Series(Base):
     flow_version: Mapped[str] = mapped_column(String(20))
     #: The planner flow, such as ``series_plan_v0``.
     plan_flow_id: Mapped[str] = mapped_column(String(100))
-    #: ``SeriesRequest`` plus the run options: ``review_plan``, ``language``, ``force``.
+    #: The series request plus ``approved``, ``language`` and ``force``.
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     format_spec_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     audience_spec_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

@@ -1075,7 +1075,6 @@ export interface SeriesRequestOut {
   episodes: number | null
   minutes_per_episode: number
   hint: string | null
-  review_plan: boolean
   approved: boolean
 }
 
@@ -1125,7 +1124,6 @@ export interface CreateSeriesPayload {
   episodes: number | null
   minutes_per_episode: number
   hint?: string
-  review_plan: boolean
   audience_spec?: AudienceSpec
 }
 

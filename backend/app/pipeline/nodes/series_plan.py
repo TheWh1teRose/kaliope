@@ -5,8 +5,9 @@ and gives the series a title, a through-line and its key terms. Everything
 arithmetic is done here afterwards, never trusted to the model: unknown ids are
 dropped, every narratable block gets at most one home, blocks the model did not
 mention join the episode around them, each episode's supportable length is
-measured from its own passages, and an episode that cannot carry three minutes
-is merged into its neighbour.
+measured from its own passages, extra episodes are folded into a neighbour until
+the asked-for count remains, and an episode that cannot carry three minutes is
+merged into its neighbour — the only reason a plan ends with fewer.
 
 The planner writes no facts. Titles, summaries and goals describe the material;
 the episodes' scripts still take every fact from their own passages.
@@ -264,6 +265,7 @@ class SeriesPlanNode:
             budget=inp.budget,
             minutes=minutes,
             requested=request.episodes,
+            count=count,
         )
         if len(plan.episodes) < count:
             ctx.progress(f"planned {len(plan.episodes)} of {count} episodes")
@@ -329,8 +331,15 @@ def build_plan(
     budget: ContentBudget,
     minutes: int,
     requested: int | None,
+    count: int,
 ) -> SeriesPlan:
-    """Turn the model's answer into a plan whose arithmetic holds."""
+    """Turn the model's answer into a plan of ``count`` episodes.
+
+    Fewer episodes that contain passages than ``count`` fail the node. More are
+    folded into a neighbour until ``count`` remain. Only an episode under three
+    minutes may still be merged after that, which is the only way the plan ends
+    shorter than ``count``.
+    """
     candidates = parsed.narratable_blocks()
     known = {b.id: b for b in candidates}
     order = {b.id: index for index, b in enumerate(candidates)}
@@ -383,6 +392,10 @@ def build_plan(
     drafts = [d for d in drafts if d["ids"]]
     if not drafts:
         raise NodeError("the series plan returned no episode with passages that exist")
+    if len(drafts) < count:
+        raise NodeError(
+            f"the series plan returned {len(drafts)} episodes with passages, but {count} were needed"
+        )
     for draft in drafts:
         draft["ids"].sort(key=lambda block_id: order[block_id])
 
@@ -397,7 +410,8 @@ def build_plan(
     while len(drafts) > 1:
         sizes = [supportable(d["ids"]) for d in drafts]
         weakest = min(range(len(drafts)), key=lambda i: sizes[i])
-        if sizes[weakest] >= MIN_VIABLE_MINUTES:
+        extra = len(drafts) > count
+        if sizes[weakest] >= MIN_VIABLE_MINUTES and not extra:
             break
         if weakest == 0:
             neighbour = 1
@@ -410,7 +424,8 @@ def build_plan(
             drafts[keep]["ids"] + drafts[drop]["ids"], key=lambda block_id: order[block_id]
         )
         del drafts[drop]
-        merged = True
+        if not extra:
+            merged = True
 
     objectives = parsed.objectives
     source = "document" if objectives else "generated"

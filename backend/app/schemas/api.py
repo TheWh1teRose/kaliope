@@ -437,8 +437,6 @@ class CreateSeriesRequest(BaseModel):
     episodes: int | None = None
     minutes_per_episode: int | None = None
     hint: str | None = None
-    #: Stop after the plan until someone approves it.
-    review_plan: bool = True
     audience_spec: AudienceSpec | None = None
     language: str | None = None
     force: bool = False

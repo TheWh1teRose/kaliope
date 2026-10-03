@@ -41,8 +41,23 @@ def _budget(minutes: float = 8.3) -> ContentBudget:
     )
 
 
-def _plan(data: dict[str, Any], minutes: int = 4, requested: int | None = None) -> Any:
-    return build_plan(data, parsed=DOC, budget=_budget(), minutes=minutes, requested=requested)
+def _plan(
+    data: dict[str, Any],
+    minutes: int = 4,
+    requested: int | None = None,
+    count: int | None = None,
+    budget: Any = None,
+) -> Any:
+    if count is None:
+        count = len([e for e in data.get("episodes", []) if isinstance(e, dict)])
+    return build_plan(
+        data,
+        parsed=DOC,
+        budget=budget or _budget(),
+        minutes=minutes,
+        requested=requested,
+        count=count,
+    )
 
 
 def _episode(ids: list[str], **extra: Any) -> dict[str, Any]:
@@ -97,6 +112,31 @@ def test_an_episode_below_three_minutes_merges_into_its_neighbour() -> None:
     assert len(plan.episodes) == 2
     assert plan.episodes[1].block_ids == IDS[9:]
     assert plan.budget.verdict == "reduced"
+
+
+def test_extra_viable_episodes_fold_down_to_the_asked_count() -> None:
+    cuts = [0, 4, 8, 11, 14, 17, 20]
+    groups = [IDS[cuts[i] : cuts[i + 1]] for i in range(6)]
+    budget = _budget().model_copy(update={"min_compression": 1.0})
+    plan = _plan(
+        {"title": "S", "episodes": [_episode(group) for group in groups]},
+        minutes=3,
+        requested=4,
+        count=4,
+        budget=budget,
+    )
+    assert len(plan.episodes) == 4
+    assert plan.budget.requested_episodes == 4
+    assert plan.budget.verdict == "ok"
+    assert sorted(block_id for episode in plan.episodes for block_id in episode.block_ids) == IDS
+
+
+def test_fewer_episodes_than_asked_fail_before_they_can_be_stored() -> None:
+    with pytest.raises(NodeError):
+        _plan(
+            {"title": "S", "episodes": [_episode(IDS[:10]), _episode(IDS[10:])]},
+            count=4,
+        )
 
 
 def test_an_episode_that_cannot_carry_its_length_is_shortened() -> None:

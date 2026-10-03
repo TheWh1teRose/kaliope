@@ -29,6 +29,7 @@ const ioLoading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const replanCount = ref<number | null>(null)
+const replanMinutes = ref<number | null>(null)
 const replanHint = ref('')
 
 const IDLE = new Set(['planned', 'completed', 'failed'])
@@ -86,6 +87,9 @@ async function reload(): Promise<void> {
   if (replanCount.value === null && series.value.plan) {
     replanCount.value = series.value.plan.episodes.length
   }
+  if (replanMinutes.value === null) {
+    replanMinutes.value = series.value.request.minutes_per_episode
+  }
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -109,8 +113,9 @@ function follow(): void {
   if (!moving.value) return
   seriesStore.watch(props.id, {
     onEvent,
-    onTerminal: () => {
-      reload()
+    onTerminal: async () => {
+      await reload()
+      follow()
     },
     onReconnect: () => {
       reload()
@@ -144,6 +149,7 @@ function replan(): Promise<void> {
   return act(() =>
     seriesStore.replan(props.id, {
       episodes: replanCount.value,
+      minutes_per_episode: replanMinutes.value ?? series.value?.request.minutes_per_episode,
       hint: replanHint.value,
     }),
   )
@@ -412,6 +418,18 @@ onUnmounted(() => {
               +
             </button>
           </span>
+          <label class="meta" for="replan-minutes">{{ t.series.minutesPerEpisode }}</label>
+          <input
+            id="replan-minutes"
+            v-model.number="replanMinutes"
+            class="input minutes-range"
+            type="range"
+            min="3"
+            max="60"
+            step="1"
+            data-replan-minutes
+          />
+          <output class="num" data-replan-minutes-out>{{ replanMinutes }}</output>
           <input v-model="replanHint" class="input hint-input" :placeholder="t.series.hintPlaceholder" />
           <button class="btn btn--sm" type="button" :disabled="busy" data-replan @click="replan">
             {{ t.series.replan }}
@@ -737,6 +755,10 @@ onUnmounted(() => {
 
 .hint-input {
   max-width: 320px;
+}
+
+.minutes-range {
+  width: 140px;
 }
 
 .got {

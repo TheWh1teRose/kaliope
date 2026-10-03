@@ -18,7 +18,7 @@ from app.events import bus
 from app.llm import registry
 from app.llm.base import CompletionRequest
 from app.main import create_app
-from app.models import Document, Run, RunNode, User
+from app.models import Document, Run, RunNode, Series, User
 from app.security import hash_password
 from app.series import series_channel
 from app.worker import worker
@@ -243,23 +243,38 @@ def test_a_failed_episode_resumes_where_it_stopped(
                 "document_id": document_id,
                 "minutes_per_episode": 3,
                 "episodes": 2,
-                "review_plan": False,
                 "hint": "zweiter Lauf",
             },
         )
         series_id = created.json()["id"]
+        held = _wait(client, series_id, {"planned", "failed"})
+        assert held["status"] == "planned", held["error"]
+        approved = client.post(f"/api/series/{series_id}/approve")
+        assert approved.status_code == 200, approved.text
         failed = _wait(client, series_id, {"completed", "failed"})
     finally:
         provider.fail_episode = None
     assert failed["status"] == "failed"
     assert failed["error"].startswith("Folge 2:")
     assert [e["status"] for e in failed["episodes"]] == ["completed", "failed"]
+    failed_run_id = failed["episodes"][1]["run_id"]
+    with session_scope() as session:
+        run = session.get(Run, failed_run_id)
+        assert run is not None and run.error
+        config = dict(run.config_json or {})
+        config["verdict"] = "insufficient"
+        run.config_json = config
 
     calls_before = len(provider.calls)
     resumed = client.post(f"/api/series/{series_id}/resume")
     assert resumed.status_code == 200, resumed.text
     done = _wait(client, series_id, {"completed", "failed"})
     assert done["status"] == "completed", done["error"]
+    assert done["episodes"][1]["error"] is None
+    recovered = client.get(f"/api/runs/{failed_run_id}").json()
+    assert recovered["status"] == "completed"
+    assert recovered["error"] is None
+    assert recovered["verdict"] is None
     systems = [c.system or "" for c in provider.calls[calls_before:]]
     assert systems and all("You write one beat" in s for s in systems), (
         "only episode 2's script runs again"
@@ -276,13 +291,76 @@ def test_a_forced_series_outlines_each_episode_once(
             "document_id": document_id,
             "minutes_per_episode": 3,
             "episodes": 2,
-            "review_plan": False,
             "force": True,
         },
     )
-    done = _wait(client, created.json()["id"], {"completed", "failed"})
+    series_id = created.json()["id"]
+    held = _wait(client, series_id, {"planned", "failed"})
+    assert held["status"] == "planned", held["error"]
+    approved = client.post(f"/api/series/{series_id}/approve")
+    assert approved.status_code == 200, approved.text
+    done = _wait(client, series_id, {"completed", "failed"})
     assert done["status"] == "completed", done["error"]
     outlines = [
         c for c in provider.calls[calls_before:] if "You plan the running order" in (c.system or "")
     ]
     assert len(outlines) == 2, "the script stage reuses the outline its context was built from"
+
+
+def _channel_types(series_id: str) -> list[str]:
+    channel = series_channel(series_id)
+    subscriber, replay = bus.subscribe(channel)
+    bus.unsubscribe(channel, subscriber)
+    return [event.type for event in replay]
+
+
+def test_approve_replan_and_resume_drop_the_previous_terminal_event(
+    client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new live stream must not replay the terminal event of the run it replaces."""
+    monkeypatch.setattr(worker, "submit_series", lambda _series_id: None)
+    with session_scope() as session:
+        row = Series(
+            document_id=document_id,
+            flow_id="baseline_v0",
+            flow_version="1.0",
+            plan_flow_id="series_plan_v0",
+            request_json={
+                "episodes": 2,
+                "minutes_per_episode": 3,
+                "hint": None,
+                "approved": False,
+            },
+            status="planned",
+        )
+        session.add(row)
+        session.flush()
+        series_id = row.id
+    bus.publish(series_channel(series_id), "series.planned", {"run_id": "old"})
+    assert "series.planned" in _channel_types(series_id)
+
+    replanned = client.post(
+        f"/api/series/{series_id}/replan",
+        json={"episodes": 3, "minutes_per_episode": 4, "hint": "kürzer"},
+    )
+    assert replanned.status_code == 200, replanned.text
+    assert replanned.json()["request"]["minutes_per_episode"] == 4
+    assert "series.planned" not in _channel_types(series_id)
+
+    bus.publish(series_channel(series_id), "series.planned", {"run_id": "old"})
+    with session_scope() as session:
+        row = session.get(Series, series_id)
+        assert row is not None
+        row.status = "planned"
+    approved = client.post(f"/api/series/{series_id}/approve")
+    assert approved.status_code == 200, approved.text
+    assert "series.planned" not in _channel_types(series_id)
+
+    bus.publish(series_channel(series_id), "series.failed", {"error": "old"})
+    with session_scope() as session:
+        row = session.get(Series, series_id)
+        assert row is not None
+        row.status = "failed"
+    resumed = client.post(f"/api/series/{series_id}/resume")
+    assert resumed.status_code == 200, resumed.text
+    assert "series.failed" not in _channel_types(series_id)

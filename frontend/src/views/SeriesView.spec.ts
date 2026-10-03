@@ -20,7 +20,7 @@ function series(status: SeriesOut['status']): SeriesOut {
     created_at: '2026-10-03T10:00:00Z',
     started_at: null,
     finished_at: null,
-    request: { episodes: null, minutes_per_episode: 15, hint: null, review_plan: true, approved: false },
+    request: { episodes: null, minutes_per_episode: 15, hint: null, approved: false },
     plan: {
       title: 'Klimawandel verstehen',
       through_line: 'Vom Mechanismus zum Handeln.',
@@ -120,7 +120,47 @@ describe('series view', () => {
     expect(wrapper.get('[data-replan-count]').text()).toBe('4')
     await wrapper.get('[data-replan]').trigger('click')
     await flushPromises()
-    expect(store.replan).toHaveBeenCalledWith('s1', { episodes: 4, hint: '' })
+    expect(store.replan).toHaveBeenCalledWith('s1', {
+      episodes: 4,
+      minutes_per_episode: 15,
+      hint: '',
+    })
+  })
+
+  it('plans again with another length', async () => {
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-replan-minutes-out]').text()).toBe('15')
+    await wrapper.get('[data-replan-minutes]').setValue(20)
+    await wrapper.get('[data-replan]').trigger('click')
+    await flushPromises()
+    expect(store.replan).toHaveBeenCalledWith('s1', {
+      episodes: 3,
+      minutes_per_episode: 20,
+      hint: '',
+    })
+  })
+
+  it('subscribes again when a terminal event leaves the series moving', async () => {
+    store.get.mockResolvedValueOnce(series('writing'))
+    mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    const onTerminal = store.watch.mock.calls[0][1].onTerminal as () => Promise<void>
+    store.watch.mockClear()
+    store.get.mockResolvedValueOnce(series('outlining'))
+    await onTerminal()
+    expect(store.watch).toHaveBeenCalledOnce()
+  })
+
+  it('does not subscribe again when a terminal event leaves the series idle', async () => {
+    store.get.mockResolvedValueOnce(series('writing'))
+    mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    const onTerminal = store.watch.mock.calls[0][1].onTerminal as () => Promise<void>
+    store.watch.mockClear()
+    store.get.mockResolvedValueOnce(series('planned'))
+    await onTerminal()
+    expect(store.watch).not.toHaveBeenCalled()
   })
 
   it('follows a moving series and switches to an episode from its lane', async () => {

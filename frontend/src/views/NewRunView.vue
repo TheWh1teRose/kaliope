@@ -31,7 +31,6 @@ const targetMinutes = ref(15)
 /** `null` follows the suggestion; a number is the reviewer's own count. */
 const ownCount = ref<number | null>(null)
 const hint = ref('')
-const reviewPlan = ref(true)
 const audience = ref<AudienceSpec>({
   description: '',
   prior_knowledge: '',
@@ -123,7 +122,6 @@ async function submit(): Promise<void> {
         episodes: ownCount.value,
         minutes_per_episode: targetMinutes.value,
         hint: hint.value.trim() || undefined,
-        review_plan: reviewPlan.value,
         audience_spec: audienceSpec,
       })
       await router.push({ name: 'series', params: { id: created.id } })
@@ -353,13 +351,6 @@ onMounted(async () => {
           <label for="hint">{{ t.series.hint }}</label>
           <input id="hint" v-model="hint" class="input" :placeholder="t.series.hintPlaceholder" />
         </div>
-        <label class="check">
-          <input v-model="reviewPlan" type="checkbox" />
-          <span>
-            <b>{{ t.series.reviewPlan }}</b>
-            <span class="hint block">{{ t.series.reviewPlanHint }}</span>
-          </span>
-        </label>
       </template>
 
       <fieldset class="audience">
@@ -547,18 +538,6 @@ onMounted(async () => {
 
 .cover i.rest {
   background: var(--rule-strong);
-}
-
-.check {
-  display: flex;
-  gap: var(--s2);
-  align-items: flex-start;
-  font-size: var(--t-sm);
-}
-
-.check input {
-  margin-top: 3px;
-  accent-color: var(--mark);
 }
 
 .audience {

@@ -386,8 +386,6 @@ export default {
     minutesPerEpisode: 'Minuten je Folge',
     hint: 'Hinweis zur Aufteilung (optional)',
     hintPlaceholder: 'z. B. Pariser Abkommen in eine eigene Folge',
-    reviewPlan: 'Plan vor dem Schreiben prüfen',
-    reviewPlanHint: 'Der Lauf hält nach dem Plan an. Bis dahin kostet er nur den Planer.',
     start: 'Serie planen',
     supports: 'Das Dokument trägt ≈ {minutes} min',
     suggestion: 'Vorschlag',

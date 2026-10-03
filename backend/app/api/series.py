@@ -138,7 +138,6 @@ def create_series(
             "episodes": payload.episodes,
             "minutes_per_episode": minutes,
             "hint": (payload.hint or "").strip() or None,
-            "review_plan": payload.review_plan,
             "approved": False,
             "language": payload.language,
             "force": payload.force,
@@ -189,6 +188,7 @@ def approve_plan(
     series.request_json = request
     series.status = "queued"
     db.commit()
+    bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
     return _series_out(db, series)
 
@@ -228,6 +228,7 @@ def replan(
     series.finished_at = None
     _add_plan_run(db, series, _flow(db, series.plan_flow_id))
     db.commit()
+    bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
     return _series_out(db, series)
 
@@ -246,6 +247,7 @@ def resume_series(
     series.error = None
     series.finished_at = None
     db.commit()
+    bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
     return _series_out(db, series)
 
