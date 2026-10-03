@@ -750,6 +750,16 @@ class Worker:
             failed = plan_run(session, series_id)
             if failed is not None and failed.status != "completed":
                 session.delete(failed)
+                session.flush()
+            previous = plan_run(session, series_id)
+            request = dict(series.request_json or {})
+            seed = (previous.config_json or {}).get("series_request") if previous is not None else None
+            if isinstance(seed, dict):
+                request["episodes"] = seed.get("episodes")
+                request["minutes_per_episode"] = seed.get("minutes_per_episode")
+                request["hint"] = seed.get("hint")
+            request["approved"] = False
+            series.request_json = request
             series.status = "planned"
             series.error = error
             series.finished_at = None

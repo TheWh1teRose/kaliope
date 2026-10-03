@@ -378,12 +378,14 @@ def test_a_failed_replan_keeps_the_previous_plan(
     assert held["status"] == "planned", held["error"]
     title = held["plan"]["title"]
     episode_count = len(held["plan"]["episodes"])
+    previous_minutes = held["request"]["minutes_per_episode"]
+    lengths = [episode["target_minutes"] for episode in held["plan"]["episodes"]]
 
     provider.fail_with = RuntimeError("planner broke")
     try:
         replanned = client.post(
             f"/api/series/{series_id}/replan",
-            json={"episodes": 3, "minutes_per_episode": 4},
+            json={"episodes": 3, "minutes_per_episode": 4, "hint": "kürzer"},
         )
         assert replanned.status_code == 200, replanned.text
         done = _wait(client, series_id, {"planned", "failed"})
@@ -394,12 +396,18 @@ def test_a_failed_replan_keeps_the_previous_plan(
     assert "planner broke" in (done["error"] or "")
     assert done["plan"]["title"] == title
     assert len(done["plan"]["episodes"]) == episode_count
+    assert done["request"]["minutes_per_episode"] == previous_minutes
+    assert done["request"]["episodes"] == held["request"]["episodes"]
+    assert done["request"].get("hint") == held["request"].get("hint")
 
     approved = client.post(f"/api/series/{series_id}/approve")
     assert approved.status_code == 200, approved.text
     written = _wait(client, series_id, {"completed", "failed"})
     assert written["status"] == "completed", written["error"]
     assert len(written["episodes"]) == episode_count
+    for episode, length in zip(written["episodes"], lengths, strict=True):
+        run = client.get(f"/api/runs/{episode['run_id']}").json()
+        assert run["target_minutes"] == int(length)
 
 
 def test_an_outlined_episode_graph_keeps_series_context(
