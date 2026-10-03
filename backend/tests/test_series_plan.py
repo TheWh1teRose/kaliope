@@ -12,7 +12,11 @@ import pytest
 from app.llm.base import Completion, CompletionRequest, LLMClient, Usage
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import NodeContext, NodeError
+from app.pipeline.framework.spec import node_params
 from app.pipeline.nodes.content_budget import source_word_budget, supportable_minutes
+from app.pipeline.nodes.objectives import _SCHEMA as OBJECTIVES_SCHEMA
+from app.pipeline.nodes.objectives import ObjectivesNode
+from app.pipeline.nodes.series_plan import _SCHEMA as SERIES_SCHEMA
 from app.pipeline.nodes.series_plan import (
     LEFT_OUT_FOR_DIALOGUE,
     MAX_EPISODES,
@@ -21,7 +25,17 @@ from app.pipeline.nodes.series_plan import (
     build_plan,
     episode_count,
 )
-from app.schemas.pipeline import DEFAULT_DIALOGUE_EXPANSION, ContentBudget, SeriesRequest
+from app.pipeline.objective_rule import (
+    OBJECTIVE_FORMULATION_RULE,
+    desired_outcome_source,
+    time_budget_constraint,
+)
+from app.schemas.pipeline import (
+    DEFAULT_DIALOGUE_EXPANSION,
+    ContentBudget,
+    LearningGoal,
+    SeriesRequest,
+)
 from tests.series_support import AUDIENCE, FORMAT, learning_document
 from tests.support import StubProvider
 
@@ -62,7 +76,12 @@ def _plan(
 
 
 def _episode(ids: list[str], **extra: Any) -> dict[str, Any]:
-    return {"title": "T", "block_ids": ids, "goals": ["Ziel"], **extra}
+    return {
+        "title": "T",
+        "block_ids": ids,
+        "goals": [{"text": "Ziel", "bloom_level": "understand"}],
+        **extra,
+    }
 
 
 def test_sample_word_counts_expand_a_read_through_and_suggest_episodes() -> None:
@@ -98,6 +117,64 @@ def test_raising_the_episode_count_lowers_the_source_budget(tmp_path: Path) -> N
     five = message(5)
     assert "about 810 words of source material" in two
     assert "about 560 words of source material" in five
+
+
+def test_episode_goals_use_the_objectives_rule(tmp_path: Path) -> None:
+    audience = AUDIENCE.model_copy(update={"desired_outcome": "Die Kipppunkte erklären können"})
+    provider = StubProvider()
+    SeriesPlanNode().run(
+        SeriesPlanInput(
+            parsed=DOC,
+            budget=_budget(51.85),
+            format_spec=FORMAT,
+            audience_spec=audience,
+            series_request=SeriesRequest(episodes=2, minutes_per_episode=15),
+        ),
+        _context(tmp_path, provider),
+    )
+    sent = provider.calls[0]
+    assert sent.system is not None
+    assert OBJECTIVE_FORMULATION_RULE in sent.system
+    objectives_prompt = next(p for p in node_params(ObjectivesNode()) if p.key == "system_prompt")
+    assert OBJECTIVE_FORMULATION_RULE in str(objectives_prompt.default)
+    user = sent.messages[0].content
+    assert desired_outcome_source("Die Kipppunkte erklären können") in user
+    assert f"{time_budget_constraint(15)} per episode." in user
+
+    goal_item = SERIES_SCHEMA["properties"]["episodes"]["items"]["properties"]["goals"]["items"]
+    objective_item = OBJECTIVES_SCHEMA["properties"]["objectives"]["items"]
+    assert goal_item["properties"]["bloom_level"] == objective_item["properties"]["bloom_level"]
+    assert goal_item["required"] == objective_item["required"] == ["text", "bloom_level"]
+    assert "derivation" in goal_item["properties"]
+
+    plan = _plan(
+        {
+            "title": "S",
+            "episodes": [
+                _episode(
+                    IDS[:10],
+                    goals=[
+                        {
+                            "text": "Die Kipppunkte erklären",
+                            "bloom_level": "analyze",
+                            "derivation": "Aus dem Wunsch, Mechanismen zu erklären",
+                        },
+                        {"text": "  ", "bloom_level": "remember"},
+                        {"text": "Nur ein Thema", "bloom_level": "not-a-level"},
+                        "nur ein Satz",
+                    ],
+                )
+            ],
+        }
+    )
+    goal = plan.episodes[0].goals[0]
+    assert [item.id for item in plan.episodes[0].goals] == ["ep01-g0"]
+    assert goal.text == "Die Kipppunkte erklären"
+    assert goal.bloom_level == "analyse"
+    assert goal.derivation == "Aus dem Wunsch, Mechanismen zu erklären"
+    assert goal.model_dump()["bloom_level"] == "analyse"
+    plain = LearningGoal(id="g0", text="Ziel", source="generated")
+    assert "bloom_level" not in plain.model_dump()
 
 
 def test_count_follows_the_budget_unless_the_run_asked_for_one() -> None:
@@ -239,6 +316,7 @@ def test_recap_ids_must_come_from_earlier_episodes_and_goals_get_ids() -> None:
     assert second.recap_block_ids == IDS[:3]
     assert second.recap == "Zurück" and second.preview is None, "the last episode has no preview"
     assert [g.id for g in first.goals] == ["ep01-g0"]
+    assert first.goals[0].bloom_level == "understand"
     assert plan.terms[0].first_episode == 2
 
 

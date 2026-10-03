@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import warnings
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from app.schemas.document import Anchor
 
@@ -126,6 +126,20 @@ class LearningGoal(BaseModel):
     id: str
     text: str
     source: Literal["document", "generated"]
+    #: Set when the goal was formulated by the objectives rule. Selection goals leave it empty.
+    bloom_level: BloomLevel | None = None
+    #: How the goal was derived from the audience's desired outcome.
+    derivation: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_formulation(self, handler: Any) -> Any:
+        # Absent Bloom fields must not change the selection artifact, or every
+        # single-episode cache key moves. A wrap serializer applies when a
+        # selection or plan dumps this goal, not only on a direct model_dump.
+        dumped = handler(self)
+        if not isinstance(dumped, dict):
+            return dumped
+        return {key: value for key, value in dumped.items() if value is not None}
 
 
 class SelectedBlock(BaseModel):

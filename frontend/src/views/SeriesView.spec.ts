@@ -33,7 +33,15 @@ function series(status: SeriesOut['status']): SeriesOut {
         summary: null,
         block_ids: ['b1', 'b2'],
         recap_block_ids: [],
-        goals: [{ id: `g${index}`, text: `Ziel ${index}`, source: 'generated' }],
+        goals: [
+          {
+            id: `g${index}`,
+            text: `Ziel ${index}`,
+            source: 'generated',
+            bloom_level: 'understand',
+            derivation: 'Aus dem gewünschten Ergebnis',
+          },
+        ],
         objective_refs: [],
         target_minutes: 15,
         supportable_minutes: 16,
@@ -107,6 +115,7 @@ describe('series view', () => {
     expect(wrapper.find('h1').text()).toBe('Klimawandel verstehen')
     expect(wrapper.findAll('[data-node]').length).toBeGreaterThan(10)
     expect(wrapper.text()).toContain('Vom Mechanismus zum Handeln.')
+    expect(wrapper.text()).toContain('Ziel 1 (understand)')
     expect(store.watch).not.toHaveBeenCalled()
 
     await wrapper.get('[data-approve]').trigger('click')

@@ -1001,6 +1001,8 @@ export interface LearningGoal {
   id: string
   text: string
   source: 'document' | 'generated'
+  bloom_level?: 'remember' | 'understand' | 'apply' | 'analyse' | 'evaluate' | 'create' | null
+  derivation?: string | null
 }
 
 export interface SeriesTerm {

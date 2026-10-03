@@ -377,7 +377,9 @@ onUnmounted(() => {
             </span>
             <p v-if="episode.summary" class="muted small">{{ episode.summary }}</p>
             <ul class="goals">
-              <li v-for="goal in episode.goals" :key="goal.id">{{ goal.text }}</li>
+              <li v-for="goal in episode.goals" :key="goal.id">
+                {{ goal.text }}<template v-if="goal.bloom_level"> ({{ goal.bloom_level }})</template>
+              </li>
             </ul>
             <p v-if="episode.recap" class="line">{{ t.series.recap }}: {{ episode.recap }}</p>
             <p v-if="episode.preview" class="line">{{ t.series.preview }}: {{ episode.preview }}</p>
@@ -482,7 +484,9 @@ onUnmounted(() => {
           </div>
         </div>
         <ul v-if="currentPlanEpisode" class="goals">
-          <li v-for="goal in currentPlanEpisode.goals" :key="goal.id">{{ goal.text }}</li>
+          <li v-for="goal in currentPlanEpisode.goals" :key="goal.id">
+            {{ goal.text }}<template v-if="goal.bloom_level"> ({{ goal.bloom_level }})</template>
+          </li>
         </ul>
         <div v-if="currentEpisode.run_id" class="row wrap">
           <RouterLink class="btn" :to="{ name: 'run', params: { id: currentEpisode.run_id } }">

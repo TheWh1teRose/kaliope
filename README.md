@@ -176,7 +176,10 @@ each episode:    content_budget → select → outline          (all episodes fi
 ```
 
 `series_plan` decides which passages and learning goals belong to which
-episode, with a title, a through-line and the key terms. The number of episodes
+episode, with a title, a through-line and the key terms. Each episode's goals
+are formulated by the same rule as the objectives node: a checkable change
+derived from the desired outcome, limited to that episode's time, at the
+lowest honest Bloom level. The number of episodes
 asked for is what the content budget carries at the chosen length (two to eight)
 unless the reviewer sets it. If the plan comes back with a different count, the
 planner is asked once more; a count that still differs is kept and shown on the
