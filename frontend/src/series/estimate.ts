@@ -17,7 +17,7 @@ export interface SeriesEstimate {
   episodes: number
   /** What the budget suggests at this length. */
   suggested: number
-  /** Minutes each episode keeps. A higher count spreads the source and does not shorten this. */
+  /** Requested minutes, or the even share when the document is too thin for three minutes each. */
   perEpisode: number
   /** Minutes of the document the series uses. */
   used: number
@@ -53,13 +53,14 @@ export function estimateSeries(
   const floor = Math.floor(supportable / Math.max(minutes, 1))
   const suggested = suggestedCount(supportable, minutes)
   const episodes = chosen === null ? suggested : clampCount(chosen)
-  const perEpisode = minutes
+  let perEpisode = minutes
   let tone: EstimateTone = 'ok'
   let reason: SeriesEstimate['reason'] = 'fits'
 
   if (supportable / episodes < MIN_VIABLE_MINUTES) {
     tone = 'fail'
     reason = 'tooThin'
+    perEpisode = supportable / episodes
   } else if (episodes * minutes > supportable) {
     tone = 'warn'
     reason = chosen === null && floor < MIN_EPISODES ? 'tooFew' : 'more'

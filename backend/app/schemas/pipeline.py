@@ -293,6 +293,9 @@ class SeriesPlan(BaseModel):
     episodes: list[EpisodePlan]
     unassigned: list[UnassignedBlock] = Field(default_factory=list)
     budget: SeriesBudget
+    #: Episodes that carry more source words than the dialogue budget allows.
+    #: The passages stay; the text asks for more episodes.
+    warnings: list[str] = Field(default_factory=list)
 
     def episode(self, index: int) -> EpisodePlan:
         for episode in self.episodes:

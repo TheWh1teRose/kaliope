@@ -123,6 +123,36 @@ def test_unknown_ids_are_dropped_and_each_block_keeps_its_first_home() -> None:
     assert [e.index for e in plan.episodes] == [1, 2]
 
 
+def test_an_over_budget_assignment_is_kept_and_named() -> None:
+    # 15 minutes at 135 wpm and 2.5× is 810 words. Six blocks are 840, five are 700.
+    plan = _plan(
+        {
+            "title": "S",
+            "episodes": [_episode(IDS[:6]), _episode(IDS[6:11])],
+        },
+        minutes=15,
+        budget=_budget(51.85),
+    )
+    assert [episode.block_ids for episode in plan.episodes] == [IDS[:6], IDS[6:11]]
+    left_out = [item.block_id for item in plan.unassigned]
+    assert left_out == IDS[11:]
+    assert all(item.reason == LEFT_OUT_FOR_DIALOGUE for item in plan.unassigned)
+    warning = "Folge 1 übersteigt das Quellbudget um 30 Wörter, mehr Folgen wählen"
+    assert plan.warnings == [warning]
+    # The series endpoint returns this dump as the plan in the API response.
+    assert plan.model_dump(mode="json")["warnings"] == [warning]
+
+
+@pytest.mark.parametrize("expansion", [0, -1])
+def test_a_non_positive_dialogue_expansion_is_rejected(expansion: float) -> None:
+    budget = _budget().model_copy(update={"dialogue_expansion": expansion})
+    with pytest.raises(ValueError, match="greater than zero"):
+        _plan(
+            {"title": "S", "episodes": [_episode(IDS[:2]), _episode(IDS[2:4])]},
+            budget=budget,
+        )
+
+
 def test_forgotten_passages_join_only_while_the_episode_has_source_room() -> None:
     # Six minutes × 135 wpm / 2.5 = 324 source words: two blocks fit, a third does not.
     plan = _plan(

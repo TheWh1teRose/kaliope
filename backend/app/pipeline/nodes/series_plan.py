@@ -5,8 +5,10 @@ and gives the series a title, a through-line and its key terms. Everything
 arithmetic is done here afterwards, never trusted to the model: unknown ids are
 dropped, every narratable block gets at most one home, blocks the model did not
 mention join a neighbour only while that episode stays within its source budget,
-each episode's supportable length is measured from its own passages, and an
-episode that cannot carry three minutes is merged into its neighbour. Episodes
+and an episode the model filled past that budget keeps the passages and is
+named in a warning. Each episode's supportable length is measured from its own
+passages, and an episode that cannot carry three minutes is merged into its
+neighbour. Episodes
 keep the requested length, so a higher count spreads the source instead of
 shortening every episode. If that plan does not have the asked-for number of
 episodes, the model is asked once more; a count that still differs is kept.
@@ -175,8 +177,9 @@ class SeriesPlanNode:
             "named twice keeps its first episode, and passages the model did not mention "
             "join a neighbour only while that episode stays within its source-word budget. "
             "The rest stay unassigned, so an episode cannot be filled past the point where "
-            "dialogue still fits. An episode below three supportable minutes is merged into "
-            "its smaller neighbour. Episodes keep the requested length.",
+            "dialogue still fits. An episode the model filled past that budget keeps its "
+            "passages and is named in a warning. An episode below three supportable minutes "
+            "is merged into its smaller neighbour. Episodes keep the requested length.",
             "The planner writes no facts. Each episode later selects, outlines and writes "
             "from its own passages through the normal nodes.",
         ],
@@ -189,7 +192,8 @@ class SeriesPlanNode:
             "optional hint on how to split.",
         },
         output="A SeriesPlan: title, through-line, terms, the episodes with their passages "
-        "and goals, the passages left out on purpose, and the budget verdict.",
+        "and goals, the passages left out on purpose, the budget verdict, and a warning "
+        "for each episode that carries more source words than its budget.",
         failure_modes=[
             "The document supports fewer than two episodes of three minutes — verdict "
             "'insufficient'; a single episode fits better.",
@@ -372,7 +376,8 @@ def build_plan(
     ``count`` is how many episodes were asked for; it is recorded and nothing is
     dropped or invented to match it. An episode under three minutes is merged
     into a neighbour. Forgotten passages join a neighbour only while it stays
-    within the source-word budget for ``minutes``.
+    within the source-word budget for ``minutes``. An episode that still holds
+    more source words than that budget keeps them and records a warning.
     """
     candidates = parsed.narratable_blocks()
     known = {b.id: b for b in candidates}
@@ -403,9 +408,10 @@ def build_plan(
 
     # Passages nobody mentioned join a neighbour only while that episode stays
     # inside its source budget. Anything more would turn the episode into a
-    # read-through. The model's own assignments are kept even when they run over.
+    # read-through. The model's own assignments are kept even when they run over;
+    # each such episode is named in the plan's warnings.
     wpm = words_per_minute(parsed.language)
-    expansion = budget.dialogue_expansion if budget.dialogue_expansion > 0 else 1.0
+    expansion = budget.dialogue_expansion
     cap = source_word_budget(minutes, wpm, expansion)
 
     def _words(ids: list[str]) -> int:
@@ -537,6 +543,15 @@ def build_plan(
             )
         )
 
+    warnings: list[str] = []
+    for episode in episodes:
+        words = _words(episode.block_ids)
+        if words > cap:
+            warnings.append(
+                f"Folge {episode.index} übersteigt das Quellbudget um {words - cap} Wörter, "
+                "mehr Folgen wählen"
+            )
+
     verdict = "reduced" if merged else "ok"
     explanation = (
         f"The document supports about {budget.max_supportable_minutes:.1f} minutes "
@@ -552,6 +567,7 @@ def build_plan(
         terms=terms,
         episodes=episodes,
         unassigned=unassigned,
+        warnings=warnings,
         budget=SeriesBudget(
             max_supportable_minutes=round(float(budget.max_supportable_minutes), 2),
             minutes_per_episode=minutes,

@@ -41,6 +41,7 @@ function series(status: SeriesOut['status']): SeriesOut {
         preview: null,
       })),
       unassigned: [],
+      warnings: [],
       budget: {
         max_supportable_minutes: 46.2,
         minutes_per_episode: 15,
@@ -171,6 +172,16 @@ describe('series view', () => {
       minutes_per_episode: 15,
       hint: '',
     })
+  })
+
+  it('shows a source-budget warning and keeps it on the plan', async () => {
+    const planned = series('planned')
+    const warning = 'Folge 1 übersteigt das Quellbudget um 30 Wörter, mehr Folgen wählen'
+    planned.plan!.warnings = [warning]
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-budget-warning]').text()).toBe(warning)
   })
 
   it('warns when the plan has a different episode count than was asked', async () => {
