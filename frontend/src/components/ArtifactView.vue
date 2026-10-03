@@ -19,6 +19,7 @@ import {
   readOutline,
   readScript,
   readSelection,
+  readSeriesPlan,
   setArtifactMode,
   tagParts,
   type ArtifactMode,
@@ -26,6 +27,7 @@ import {
   type BeatView,
   type SegmentView,
   type SelectionView,
+  type SeriesPlanView,
 } from './artifactView'
 
 const props = defineProps<{
@@ -86,12 +88,18 @@ const audioSummary = computed(() => {
   })
 })
 
+const seriesPlan = computed<SeriesPlanView | null>(() => {
+  if (props.truncated || kind.value !== 'series' || parsed.value === undefined) return null
+  return readSeriesPlan(parsed.value)
+})
+
 const rendered = computed(
   () =>
     beats.value !== null ||
     segments.value !== null ||
     selection.value !== null ||
-    audioLines.value !== null,
+    audioLines.value !== null ||
+    seriesPlan.value !== null,
 )
 const showText = computed(() => viewMode.value === 'text' && rendered.value)
 const mismatch = computed(() => {
@@ -246,6 +254,27 @@ async function copyJson(): Promise<void> {
         <span class="meta">{{ t.artifact.noGoal }}</span>
         <span v-for="id in selection.unassigned" :key="id" class="chip">{{ id }}</span>
       </div>
+    </div>
+
+    <div v-else-if="showText && seriesPlan" class="beats">
+      <p v-if="seriesPlan.title" class="beat__title">{{ seriesPlan.title }}</p>
+      <p v-if="seriesPlan.throughLine" class="beat__sum prose">{{ seriesPlan.throughLine }}</p>
+      <article v-for="(episode, index) in seriesPlan.episodes" :key="index" class="beat">
+        <div class="beat__head">
+          <span class="beat__n num">{{ index + 1 }}</span>
+          <span class="beat__title">{{ episode.title }}</span>
+          <span v-if="episode.role" class="meta">{{ episode.role }}</span>
+        </div>
+        <ul v-if="episode.goals.length" class="beat__sum">
+          <li v-for="(goal, goalIndex) in episode.goals" :key="goalIndex">
+            {{ goal.text }}<span v-if="goal.bloom"> ({{ goal.bloom }})</span>
+          </li>
+        </ul>
+        <div class="chips">
+          <span class="meta">{{ t.artifact.passages }}</span>
+          <span v-for="id in episode.block_ids" :key="id" class="chip">{{ id }}</span>
+        </div>
+      </article>
     </div>
 
     <div v-else class="jsonpane">

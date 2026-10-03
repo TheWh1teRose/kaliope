@@ -7,7 +7,7 @@
  */
 import { ref } from 'vue'
 
-export type RendererName = 'outline' | 'beat' | 'script' | 'selection' | 'audio'
+export type RendererName = 'outline' | 'beat' | 'script' | 'selection' | 'audio' | 'series'
 
 export interface BeatView {
   id: string
@@ -30,6 +30,24 @@ export interface SelectionView {
   /** Chosen passages that serve no known goal. */
   unassigned: string[]
   rationale: string
+}
+
+export interface SeriesGoalView {
+  text: string
+  bloom: string | null
+}
+
+export interface SeriesEpisodeView {
+  title: string
+  role: string
+  goals: SeriesGoalView[]
+  block_ids: string[]
+}
+
+export interface SeriesPlanView {
+  title: string
+  throughLine: string
+  episodes: SeriesEpisodeView[]
 }
 
 export interface AnchorView {
@@ -76,6 +94,7 @@ const RENDERERS: Record<string, RendererName> = {
   Beat: 'beat',
   Script: 'script',
   Selection: 'selection',
+  SeriesPlan: 'series',
 }
 
 const STORAGE_KEY = 'kalliope-artifact-view'
@@ -165,6 +184,38 @@ export function readScript(value: unknown): SegmentView[] | null {
     })
   }
   return segments
+}
+
+/** `null` when the payload is not a series plan: episodes with a title and passage ids. */
+export function readSeriesPlan(value: unknown): SeriesPlanView | null {
+  if (!isRecord(value) || !Array.isArray(value.episodes)) return null
+  const episodes: SeriesEpisodeView[] = []
+  for (const item of value.episodes) {
+    if (!isRecord(item) || typeof item.title !== 'string' || !item.title) return null
+    if (!Array.isArray(item.block_ids) || item.block_ids.some((id) => typeof id !== 'string')) {
+      return null
+    }
+    const goals: SeriesGoalView[] = []
+    if (item.goals != null && !Array.isArray(item.goals)) return null
+    for (const goal of (item.goals as unknown[] | undefined) ?? []) {
+      if (!isRecord(goal) || typeof goal.text !== 'string' || !goal.text) return null
+      goals.push({
+        text: goal.text,
+        bloom: typeof goal.bloom_level === 'string' ? goal.bloom_level : null,
+      })
+    }
+    episodes.push({
+      title: item.title,
+      role: typeof item.role === 'string' ? item.role : '',
+      goals,
+      block_ids: item.block_ids as string[],
+    })
+  }
+  return {
+    title: typeof value.title === 'string' ? value.title : '',
+    throughLine: typeof value.through_line === 'string' ? value.through_line : '',
+    episodes,
+  }
 }
 
 /** `null` when the payload is not a selection: learning goals and the chosen block ids. */

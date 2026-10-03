@@ -884,6 +884,8 @@ export interface ExperimentSourceMeta {
   outline?: unknown
   /** The run's selection, for experiments that load the selection step's input. */
   selection?: unknown
+  /** The run's series plan, when the run planned a series. */
+  plan?: unknown
 }
 
 export interface ExperimentSource {
