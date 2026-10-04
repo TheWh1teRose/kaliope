@@ -535,9 +535,10 @@ Adding a flow MUST require only a new YAML file when its nodes already exist.
 
 Bounded `ThreadPoolExecutor` (default 2 concurrent runs) started in the FastAPI
 lifespan. States: `queued → running → (completed | failed) → in_review →
-reviewed`. Progress is pushed over SSE at `GET /api/runs/{id}/events`. A node
-failure fails the run, preserves completed artifacts and stores the traceback.
-Re-runs resume via cache.
+reviewed`. For stop behavior and reuse, see
+[Stopping generation](../README.md#stopping-generation). Progress is pushed over SSE
+at `GET /api/runs/{id}/events`. A node failure fails the run, preserves
+completed artifacts and stores the traceback. Re-runs resume via cache.
 
 ---
 
@@ -683,6 +684,7 @@ GET    /api/flows  ·  GET /api/formats
 POST   /api/runs        {document_id, flow_id, format_id, target_minutes,
                          audience_spec, language?, force?}
 GET    /api/runs  ·  GET /api/runs/{id}
+POST   /api/runs/{id}/stop                   stop a queued or running run
 GET    /api/runs/{id}/events                 SSE progress
 GET    /api/runs/{id}/artifacts/{node_name}
 GET    /api/runs/{id}/script  ·  /gates  ·  /export

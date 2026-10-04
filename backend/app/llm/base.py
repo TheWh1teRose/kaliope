@@ -229,10 +229,12 @@ class LLMClient:
         resolve: Callable[[str], Provider],
         cost_of: Callable[[str, Usage], float],
         recorder: UsageRecorder | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self._resolve = resolve
         self._cost_of = cost_of
         self._recorder = recorder
+        self._should_stop = should_stop or (lambda: False)
         self.node_name: str | None = None
         self.total_cost_usd: float = 0.0
         self.total_usage = Usage()
@@ -244,7 +246,10 @@ class LLMClient:
     def complete(self, request: CompletionRequest) -> Completion:
         # Local import: registry imports this module.
         from app.llm.registry import adapt_parameters
+        from app.pipeline.framework.cancel import RunStopped
 
+        if self._should_stop():
+            raise RunStopped()
         adapted = adapt_parameters(request)
         provider = self._resolve(request.model)
         started = time.perf_counter()
@@ -288,6 +293,10 @@ class LLMClient:
                 latency_ms=completion.latency_ms,
                 node_name=self.node_name,
             )
+        # The call was already paid for. A stop that arrived while it ran
+        # discards the text so the caller does not cache it or continue.
+        if self._should_stop():
+            raise RunStopped()
         return completion
 
     def complete_json(self, request: CompletionRequest) -> Any:

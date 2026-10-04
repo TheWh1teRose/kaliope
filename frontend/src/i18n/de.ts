@@ -315,9 +315,20 @@ export default {
       outlined: 'Ablauf steht',
       completed: 'Fertig',
       failed: 'Fehlgeschlagen',
+      stopped: 'Gestoppt',
       in_review: 'In Prüfung',
       reviewed: 'Geprüft',
     },
+    stop: 'Stoppen',
+    stopTitle: 'Lauf stoppen?',
+    stopLead:
+      'Der laufende Schritt wird noch zu Ende geführt. Danach startet nichts Neues. Was schon erzeugt wurde, bleibt erhalten.',
+    stopConfirm: 'Ja, stoppen',
+    stoppedNotice:
+      'Gestoppt. Bereits erzeugte Schritte bleiben erhalten und werden beim nächsten Lauf wiederverwendet.',
+    stoppedNoticeBy:
+      'Gestoppt von {who}. Bereits erzeugte Schritte bleiben erhalten und werden beim nächsten Lauf wiederverwendet.',
+    again: 'Erneut starten',
     scope: 'Umfang',
     scopeOne: 'Eine Folge',
     scopeSeries: 'Serie',
@@ -422,7 +433,15 @@ export default {
       writing: 'Schreibt',
       completed: 'Fertig',
       failed: 'Fehlgeschlagen',
+      stopped: 'Gestoppt',
     },
+    stop: 'Serie stoppen',
+    stopTitle: 'Serie stoppen?',
+    stopLead:
+      'Die Folge, die gerade läuft, wird beendet. Weitere Folgen starten nicht. Der Plan und fertige Folgen bleiben.',
+    stoppedNotice: 'Gestoppt. Der Plan und die fertigen Folgen bleiben. „Fortsetzen“ nimmt die Serie wieder auf.',
+    stoppedNoticeBy:
+      'Gestoppt von {who}. Der Plan und die fertigen Folgen bleiben. „Fortsetzen“ nimmt die Serie wieder auf.',
     progressPlan: 'Plan',
     progressPlanDone: 'freigegeben',
     progressPlanHeld: 'wartet auf deine Freigabe',
@@ -1061,6 +1080,15 @@ export default {
     script: 'Audio-Skript der Probe',
     done: 'Fertig',
     failed: 'Fehlgeschlagen',
+    stopped: 'Gestoppt',
+    stoppedHint: 'Gestoppt. Bereits erzeugte Stücke bleiben gespeichert und werden nicht noch einmal berechnet.',
+    stoppedHintBy:
+      'Gestoppt von {who}. Bereits erzeugte Stücke bleiben gespeichert und werden nicht noch einmal berechnet.',
+    stop: 'Stoppen',
+    stopTitle: 'Audio stoppen?',
+    stopLead:
+      'Es wird nichts Weiteres erzeugt. Stücke, die schon fertig sind, bleiben gespeichert.',
+    stopConfirm: 'Ja, stoppen',
     chunk: 'Stück {n}',
     facts: '{seconds} s · {characters} Zeichen · {cost}',
     voicesUnavailable: 'Stimmenliste nicht verfügbar; Voice-IDs direkt eintragen.',

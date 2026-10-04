@@ -84,6 +84,30 @@ from app.speech.registry import speech_provider
 
 logger = logging.getLogger(__name__)
 
+#: Run states a stop can still change. Anything else has already finished.
+_RUN_STOPPABLE = frozenset({"queued", "running"})
+#: Series states in which a worker is driving, or is about to.
+_SERIES_STOPPABLE = frozenset({"queued", "planning", "outlining", "writing"})
+#: Take states a stop can still change. ``paused`` is the approval hold:
+#: stopping there spends nothing further.
+_TAKE_STOPPABLE = frozenset({"queued", "running", "paused"})
+
+
+class StopFlag:
+    """Set from the request thread, read by the worker thread. The first caller wins."""
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self.user_id: str | None = None
+
+    def request(self, user_id: str) -> None:
+        if self.user_id is None:
+            self.user_id = user_id
+        self._event.set()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
 
 class Worker:
     def __init__(self, max_workers: int | None = None) -> None:
@@ -95,7 +119,15 @@ class Worker:
         self._series_tags: dict[str, tuple[str, int]] = {}
         #: Series with a job running in this process.
         self._active_series: set[str] = set()
+        #: ``job_id`` → future, so a queued job can be removed before it starts.
+        self._futures: dict[str, Future[Any]] = {}
+        #: ``job_id`` → stop flag. Shared by the request thread and the worker.
+        self._stops: dict[str, StopFlag] = {}
+        #: Series id → the run its worker thread is inside right now.
+        self._current_run: dict[str, str] = {}
         self._lock = threading.Lock()
+        #: Serialises "mark stopped" with "mark running", so one cannot overwrite the other.
+        self._gate = threading.RLock()
 
     # ------------------------------------------------------------ lifecycle
 
@@ -181,7 +213,8 @@ class Worker:
     # ------------------------------------------------------------------ runs
 
     def submit_run(self, run_id: str) -> Future[Any]:
-        return self.submit(self.execute_run, run_id)
+        self._arm(run_id)
+        return self._track(run_id, self.submit(self.execute_run, run_id))
 
     def submit_bench(self, bench_id: str) -> Future[Any]:
         return self.submit(self.execute_bench, bench_id)
@@ -244,12 +277,29 @@ class Worker:
             row.tokens_out = llm.total_usage.output_tokens
             row.finished_at = datetime.now(UTC)
 
-    def execute_run(self, run_id: str) -> None:
+    def execute_run(self, run_id: str) -> bool:
+        """Run one attempt. False means the row was already stopped, so nothing started."""
+        try:
+            return self._execute_run(run_id) is not False
+        finally:
+            self._discard_run_flag(run_id)
+            with session_scope() as session:
+                run = session.get(Run, run_id)
+                stopped = run is not None and run.status == "stopped"
+            if stopped:
+                self._emit(run_id, "run.stopped", {"run_id": run_id})
+
+    def _execute_run(self, run_id: str) -> bool | None:
         settings = get_settings()
         store = ArtifactStore(settings.artifacts_dir)
         with session_scope() as session:
             tagged = session.get(Run, run_id)
-            if tagged is not None and tagged.series_id and tagged.episode_index is not None:
+            if tagged is None:
+                logger.warning("execution requested for unknown run %s", run_id)
+                return None
+            if tagged.status == "stopped":
+                return False
+            if tagged.series_id and tagged.episode_index is not None:
                 with self._lock:
                     self._series_tags[run_id] = (tagged.series_id, tagged.episode_index)
         # A run executes again after a pause; the previous execution's events,
@@ -257,50 +307,67 @@ class Worker:
         bus.clear(run_id)
         self._emit(run_id, "run.queued", {"run_id": run_id})
 
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             run = session.get(Run, run_id)
             if run is None:
                 logger.warning("execution requested for unknown run %s", run_id)
-                return
-            document = session.get(Document, run.document_id)
-            if document is None:
+                return None
+            halted = False
+            if run.status == "stopped":
+                return False
+            self._arm(run_id)
+            if self._flag_says_stop(run_id) and run.status in _RUN_STOPPABLE:
+                self._apply_run_stopped(session, run, self._stop_user(run_id), None)
+                halted = True
+            document = None if halted else session.get(Document, run.document_id)
+            if not halted and document is None:
                 run.status = "failed"
                 run.error = "the document this run refers to no longer exists"
-                return
-            run.status = "running"
-            run.error = None
-            run.finished_at = None
-            if run.started_at is None:
-                run.started_at = datetime.now(UTC)
-            flow_id = run.flow_id
-            config = dict(run.config_json or {})
-            config.pop("verdict", None)
-            run.config_json = config
-            resume = resume_outputs(run.manifest_json)
-            previous_manifest = dict(run.manifest_json or {})
-            format_spec = FormatSpec.model_validate(run.format_spec_json)
-            audience_spec = AudienceSpec.model_validate(run.audience_spec_json)
-            document_ref = DocumentRef(
-                document_id=document.id,
-                parse_version=document.parse_version,
-                sha256=document.sha256,
-                parsed_artifact_hash=document.parsed_artifact_hash,
-                language_override=config.get("language"),
-            )
-            pdf_path = settings.uploads_dir / f"{document.sha256}.pdf"
+                return None
+            if not halted:
+                assert document is not None
+                run.status = "running"
+                run.error = None
+                run.finished_at = None
+                if run.started_at is None:
+                    run.started_at = datetime.now(UTC)
+                flow_id = run.flow_id
+                config = dict(run.config_json or {})
+                config.pop("verdict", None)
+                config.pop("stopped_by", None)
+                run.config_json = config
+                resume = resume_outputs(run.manifest_json)
+                previous_manifest = dict(run.manifest_json or {})
+                format_spec = FormatSpec.model_validate(run.format_spec_json)
+                audience_spec = AudienceSpec.model_validate(run.audience_spec_json)
+                document_ref = DocumentRef(
+                    document_id=document.id,
+                    parse_version=document.parse_version,
+                    sha256=document.sha256,
+                    parsed_artifact_hash=document.parsed_artifact_hash,
+                    language_override=config.get("language"),
+                )
+                pdf_path = settings.uploads_dir / f"{document.sha256}.pdf"
+
+        if halted:
+            self._emit(run_id, "run.stopped", {"run_id": run_id})
+            return None
 
         self._emit(run_id, "run.started", {"run_id": run_id, "flow": flow_id})
 
         flow = self._load_flow(flow_id)
         if flow is None:
             self._fail_run(run_id, f"flow '{flow_id}' is not available", None)
-            return
+            return None
         stop_after = config.get("stop_after")
         if stop_after:
             # The first stage of a series episode: up to its outline, no script yet.
             flow = truncate_flow(flow, str(stop_after))
 
-        llm = self._build_llm(run_id=run_id)
+        def should_stop() -> bool:
+            return self._run_should_stop(run_id)
+
+        llm = self._build_llm(run_id=run_id, should_stop=should_stop)
         runner = FlowRunner(
             artifacts=store,
             llm=llm,
@@ -309,6 +376,7 @@ class Worker:
             progress=lambda event, data: self._emit(run_id, event, data),
             document_path=pdf_path,
             force=bool(config.get("force")),
+            should_stop=should_stop,
         )
 
         seeds: dict[str, Any] = {
@@ -331,36 +399,41 @@ class Worker:
         with session_scope() as session:
             run = session.get(Run, run_id)
             if run is None:  # pragma: no cover - deleted mid-run
-                return
+                return None
             run.manifest_json = result.manifest.model_dump(mode="json")
             run.total_cost_usd = _run_cost(session, run_id, result.manifest.total_cost_usd)
             for record in result.manifest.nodes:
                 if record.artifact_hash:
                     _record_artifact(session, record.artifact_hash, record.name, 0)
 
+        if result.status == "stopped" or self._run_should_stop(run_id):
+            self._commit_run_stopped(run_id, self._stop_user(run_id), result)
+            return None
+
         if result.status == "failed":
             self._fail_run(
                 run_id, result.error or "the run failed", result.traceback, result.verdict
             )
-            return
+            return None
 
         if result.status == "paused":
             self._pause_run(run_id, result, previous=previous_manifest)
-            return
+            return None
 
         if stop_after:
             self._stop_run(run_id, "outlined", "run.outlined")
-            return
+            return None
         if "script" not in result.bag:
             # A planner run: its output is the plan, there is no script to check.
             self._stop_run(run_id, "completed", "run.completed")
-            return
+            return None
 
         try:
             self._finish_run(run_id, result.bag, flow, store)
         except Exception as exc:  # noqa: BLE001
             logger.exception("post-processing run %s failed", run_id)
             self._fail_run(run_id, f"{type(exc).__name__}: {exc}", traceback_module.format_exc())
+        return None
 
     def execute_bench(self, bench_id: str) -> None:
         """Run a bench chain. No gates, no segments, no review rows."""
@@ -479,9 +552,11 @@ class Worker:
         suite = run_gates(gate_context, flow.gates or None)
         stored = store.put_raw("gate_reports", suite.model_dump(mode="json"))
 
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             run = session.get(Run, run_id)
             if run is None:  # pragma: no cover
+                return
+            if run.status == "stopped":
                 return
             for report in suite.reports:
                 session.add(
@@ -523,9 +598,9 @@ class Worker:
 
     def _stop_run(self, run_id: str, status: str, event: str) -> None:
         """End an execution that has no script to check: a planner run or an outline stage."""
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             run = session.get(Run, run_id)
-            if run is None:  # pragma: no cover
+            if run is None or run.status == "stopped":  # pragma: no cover
                 return
             run.status = status
             run.error = None
@@ -547,7 +622,15 @@ class Worker:
     # ---------------------------------------------------------------- series
 
     def submit_series(self, series_id: str) -> Future[Any]:
-        return self.submit(self.execute_series, series_id)
+        self._arm(series_id)
+        return self._track(series_id, self.submit(self.execute_series, series_id))
+
+    def job_active(self, job_id: str) -> bool:
+        with self._lock:
+            future = self._futures.get(job_id)
+            return (
+                future is not None and not future.done()
+            ) or job_id in self._current_run.values()
 
     def series_active(self, series_id: str) -> bool:
         with self._lock:
@@ -571,6 +654,11 @@ class Worker:
         finally:
             with self._lock:
                 self._active_series.discard(series_id)
+            with session_scope() as session:
+                series = session.get(Series, series_id)
+                stopped = series is not None and series.status == "stopped"
+            if stopped:
+                bus.publish(series_channel(series_id), "series.stopped", {"series_id": series_id})
 
     def _drive_series(self, series_id: str) -> None:
         store = ArtifactStore(get_settings().artifacts_dir)
@@ -578,10 +666,12 @@ class Worker:
         bus.clear(channel)
 
         # -- 1. plan
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             series = session.get(Series, series_id)
             if series is None:
                 logger.warning("series %s does not exist", series_id)
+                return
+            if series.status == "stopped":
                 return
             planner = plan_run(session, series_id)
             if planner is None:
@@ -595,12 +685,27 @@ class Worker:
                     series.started_at = datetime.now(UTC)
             series.error = None
         if not planned:
+            if self._series_should_stop(series_id):
+                return
             bus.publish(channel, "series.planning", {"run_id": planner_id})
-            self.execute_run(planner_id)
+            self._run_for_series(series_id, planner_id)
+            if self._series_should_stop(series_id):
+                return
             with session_scope() as session:
+                planner = session.get(Run, planner_id)
+                if planner is not None and planner.status == "stopped":
+                    planner_stopped = True
+                else:
+                    planner_stopped = False
+            if planner_stopped:
+                self._commit_series_stopped(series_id, self._stop_user(series_id, planner_id))
+                return
+            with self._gate, session_scope() as session:
                 series = session.get(Series, series_id)
                 planner = session.get(Run, planner_id)
                 if series is None or planner is None:  # pragma: no cover
+                    return
+                if series.status == "stopped":
                     return
                 if planner.status != "completed":
                     error = (planner.error or "the planner failed").split("\n\n")[0]
@@ -626,9 +731,11 @@ class Worker:
                 return
 
         # -- 2. every episode up to its outline
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             series = session.get(Series, series_id)
             assert series is not None
+            if series.status == "stopped":
+                return
             plan = load_plan(store, series)
             if plan is None:
                 raise RuntimeError("the series plan artifact is missing")
@@ -661,7 +768,7 @@ class Worker:
                     session.add(run)
                     session.flush()
                     _record_artifact(session, brief.hash, "episode_brief", brief.size_bytes)
-                if run.status in SCRIPT_DONE or run.status == "outlined":
+                if run.status in SCRIPT_DONE or run.status == "outlined" or run.status == "stopped":
                     continue
                 flow = catalogue.flows(session).get(run.flow_id)
                 if flow is not None and last_row_for_key(
@@ -673,22 +780,34 @@ class Worker:
                 config.pop("series_context_artifact", None)
                 run.config_json = config
                 todo.append(run.id)
+        if self._series_should_stop(series_id):
+            return
         bus.publish(channel, "series.outlining", {"episodes": len(plan.episodes)})
         for run_id in todo:
-            self.execute_run(run_id)
+            if self._series_should_stop(series_id):
+                return
+            if not self._run_for_series(series_id, run_id):
+                continue
             if not self._episode_reached(series_id, run_id, {"outlined", *SCRIPT_DONE}):
                 return
 
         # -- 3. scripts, one after another
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             series = session.get(Series, series_id)
             assert series is not None
+            if series.status == "stopped":
+                return
             series.status = "writing"
+        if self._series_should_stop(series_id):
+            return
         bus.publish(channel, "series.writing", {"episodes": len(plan.episodes)})
         for episode in plan.episodes:
-            with session_scope() as session:
+            with self._gate, session_scope() as session:
+                series = session.get(Series, series_id)
+                if series is None or series.status == "stopped":
+                    return
                 run = episode_runs(session, series_id)[episode.index]
-                if run.status in SCRIPT_DONE:
+                if run.status in SCRIPT_DONE or run.status == "stopped":
                     continue
                 context = series_context_for(session, store, series_id, plan, episode.index)
                 stored = store.put("series_context", context)
@@ -704,12 +823,17 @@ class Worker:
                 run.context_hash = context_hash(context)
                 run.status = "queued"
                 run_id = run.id
+            if self._series_should_stop(series_id):
+                return
             bus.publish(channel, "episode.writing", {"episode": episode.index, "run_id": run_id})
-            self.execute_run(run_id)
+            if not self._run_for_series(series_id, run_id):
+                continue
             if not self._episode_reached(series_id, run_id, set(SCRIPT_DONE)):
                 return
 
         # -- 4. series checks
+        if self._series_should_stop(series_id):
+            return
         with session_scope() as session:
             series = session.get(Series, series_id)
             assert series is not None
@@ -724,7 +848,12 @@ class Worker:
             checks = dict(series.checks_json or {})
             if parsed is not None:
                 checks["S1"] = coverage_check(parsed, plan, scripts)
+        with self._gate, session_scope() as session:
+            series = session.get(Series, series_id)
+            assert series is not None
             series.checks_json = checks
+            if series.status == "stopped":
+                return
             series.status = "completed"
             series.finished_at = datetime.now(UTC)
         bus.publish(channel, "series.completed", {"episodes": len(plan.episodes)})
@@ -733,10 +862,19 @@ class Worker:
         """Whether the episode run ended in one of ``states``; fails the series otherwise."""
         with session_scope() as session:
             run = session.get(Run, run_id)
-            if run is not None and run.status in states:
+            if run is not None and run.status == "stopped":
+                stopped_by = (run.config_json or {}).get("stopped_by")
+                halt = True
+            elif run is not None and run.status in states:
                 return True
-            index = run.episode_index if run is not None else "?"
-            error = ((run.error if run is not None else None) or "the run failed").split("\n\n")[0]
+            else:
+                halt = False
+                index = run.episode_index if run is not None else "?"
+                message = (run.error if run is not None else None) or "the run failed"
+                error = message.split("\n\n")[0]
+        if halt:
+            self._commit_series_stopped(series_id, stopped_by or self._stop_user(series_id, run_id))
+            return False
         self._fail_series(series_id, f"Folge {index}: {error}")
         return False
 
@@ -753,8 +891,10 @@ class Worker:
         return ParsedDocument.model_validate(store.get_raw(row.artifact_hash))
 
     def _hold_previous_plan(self, series_id: str, error: str) -> None:
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             series = session.get(Series, series_id)
+            if series is not None and series.status == "stopped":
+                return
             if series is None or not series.plan_artifact_hash:
                 self._fail_series(series_id, error)
                 return
@@ -779,9 +919,9 @@ class Worker:
         bus.publish(series_channel(series_id), "series.planned", {"error": error})
 
     def _fail_series(self, series_id: str, error: str) -> None:
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             series = session.get(Series, series_id)
-            if series is None:
+            if series is None or series.status == "stopped":
                 return
             series.status = "failed"
             series.error = error
@@ -791,9 +931,9 @@ class Worker:
     def _pause_run(
         self, run_id: str, result: Any, *, previous: dict[str, Any] | None = None
     ) -> None:
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             run = session.get(Run, run_id)
-            if run is None:
+            if run is None or run.status == "stopped":
                 return
             manifest = write_pause(
                 result.manifest.model_dump(mode="json"),
@@ -840,9 +980,9 @@ class Worker:
     def _fail_run(
         self, run_id: str, error: str, traceback: str | None, verdict: str | None = None
     ) -> None:
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             run = session.get(Run, run_id)
-            if run is None:  # pragma: no cover
+            if run is None or run.status == "stopped":  # pragma: no cover
                 return
             run.status = "failed"
             run.finished_at = datetime.now(UTC)
@@ -867,7 +1007,209 @@ class Worker:
                 row.verdict = verdict
         bus.publish(bench_id, "run.failed", {"error": error, "verdict": verdict})
 
-    def _build_llm(self, run_id: str | None) -> LLMClient:
+    # ------------------------------------------------------------------ stop
+
+    def _arm(self, job_id: str) -> None:
+        """A fresh flag for a new job. A job that is already running keeps its flag."""
+        with self._lock:
+            future = self._futures.get(job_id)
+            if future is not None and not future.done():
+                return
+            self._stops[job_id] = StopFlag()
+
+    def _track(self, job_id: str, future: Future[Any]) -> Future[Any]:
+        with self._lock:
+            self._futures[job_id] = future
+            self._stops.setdefault(job_id, StopFlag())
+
+        def _done(finished: Future[Any]) -> None:
+            with self._lock:
+                if self._futures.get(job_id) is finished:
+                    self._futures.pop(job_id, None)
+
+        future.add_done_callback(_done)
+        return future
+
+    def _flag(self, job_id: str) -> StopFlag:
+        with self._lock:
+            flag = self._stops.get(job_id)
+            if flag is None:
+                flag = StopFlag()
+                self._stops[job_id] = flag
+            return flag
+
+    def _is_stopped(self, job_id: str) -> bool:
+        with self._lock:
+            flag = self._stops.get(job_id)
+            return flag is not None and flag.is_set()
+
+    def _flag_says_stop(self, run_id: str) -> bool:
+        if self._is_stopped(run_id):
+            return True
+        with self._lock:
+            tag = self._series_tags.get(run_id)
+        return tag is not None and self._is_stopped(tag[0])
+
+    def _run_should_stop(self, run_id: str) -> bool:
+        if self._flag_says_stop(run_id):
+            return True
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            return run is not None and run.status == "stopped"
+
+    def _discard_run_flag(self, run_id: str) -> None:
+        with self._lock:
+            self._stops.pop(run_id, None)
+
+    def _stop_user(self, *job_ids: str) -> str | None:
+        with self._lock:
+            for job_id in job_ids:
+                flag = self._stops.get(job_id)
+                if flag is not None and flag.user_id:
+                    return flag.user_id
+        return None
+
+    def _run_for_series(self, series_id: str, run_id: str) -> bool:
+        with self._lock:
+            self._current_run[series_id] = run_id
+        try:
+            return self.execute_run(run_id)
+        finally:
+            with self._lock:
+                if self._current_run.get(series_id) == run_id:
+                    self._current_run.pop(series_id, None)
+
+    def _series_should_stop(self, series_id: str) -> bool:
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            return series is not None and series.status == "stopped"
+
+    def stop_run(self, run_id: str, user_id: str) -> tuple[str, str]:
+        """Stop a queued or running run. Returns ``(status, outcome)``."""
+        with self._gate:
+            with session_scope() as session:
+                run = session.get(Run, run_id)
+                if run is None:
+                    return "missing", "finished"
+                if run.status == "stopped":
+                    return "stopped", "already_stopped"
+                if run.status not in _RUN_STOPPABLE:
+                    return run.status, "finished"
+                self._flag(run_id).request(user_id)
+                with self._lock:
+                    future = self._futures.get(run_id)
+                cancelled = bool(future is not None and future.cancel())
+                busy = future is not None and not future.done() and not cancelled
+                self._apply_run_stopped(session, run, user_id, None)
+            self._emit(run_id, "run.stopped", {"run_id": run_id})
+            return "stopped", "stopping" if busy else "stopped"
+
+    def stop_series(self, series_id: str, user_id: str) -> tuple[str, str]:
+        """Stop the episode in progress and every stage that has not started."""
+        with self._gate:
+            with session_scope() as session:
+                series = session.get(Series, series_id)
+                if series is None:
+                    return "missing", "finished"
+                if series.status == "stopped":
+                    return "stopped", "already_stopped"
+                if series.status not in _SERIES_STOPPABLE:
+                    return series.status, "finished"
+                self._flag(series_id).request(user_id)
+                with self._lock:
+                    future = self._futures.get(series_id)
+                    current = self._current_run.get(series_id)
+                cancelled = bool(future is not None and future.cancel())
+                busy = future is not None and not future.done() and not cancelled
+                self._apply_series_stopped(session, series, user_id)
+                run = session.get(Run, current) if current else None
+                if run is not None and run.status in _RUN_STOPPABLE:
+                    self._flag(run.id).request(user_id)
+                    self._apply_run_stopped(session, run, user_id, None)
+            if run is not None and run.status == "stopped":
+                self._emit(run.id, "run.stopped", {"run_id": run.id})
+            bus.publish(series_channel(series_id), "series.stopped", {"series_id": series_id})
+            return "stopped", "stopping" if busy else "stopped"
+
+    def stop_take(self, take_id: str, user_id: str) -> tuple[str, str]:
+        """Stop a take that is queued, speaking, or waiting at the approval."""
+        with self._gate:
+            with session_scope() as session:
+                take = session.get(AudioTake, take_id)
+                if take is None:
+                    return "missing", "finished"
+                if take.status == "stopped":
+                    return "stopped", "already_stopped"
+                if take.status not in _TAKE_STOPPABLE:
+                    return take.status, "finished"
+                self._flag(take_id).request(user_id)
+                with self._lock:
+                    future = self._futures.get(take_id)
+                cancelled = bool(future is not None and future.cancel())
+                busy = (
+                    take.status != "paused"
+                    and future is not None
+                    and not future.done()
+                    and not cancelled
+                )
+                self._apply_take_stopped(session, take, user_id)
+            bus.publish(take_id, "run.stopped", {"take_id": take_id})
+            return "stopped", "stopping" if busy else "stopped"
+
+    def _commit_run_stopped(self, run_id: str, user_id: str | None, result: Any | None) -> None:
+        with self._gate:
+            with session_scope() as session:
+                run = session.get(Run, run_id)
+                if run is None or run.status not in _RUN_STOPPABLE:
+                    return
+                self._apply_run_stopped(session, run, user_id, result)
+            self._emit(run_id, "run.stopped", {"run_id": run_id})
+
+    def _commit_series_stopped(self, series_id: str, user_id: str | None) -> None:
+        with self._gate:
+            with session_scope() as session:
+                series = session.get(Series, series_id)
+                if series is None or series.status not in _SERIES_STOPPABLE:
+                    return
+                self._apply_series_stopped(session, series, user_id)
+            bus.publish(series_channel(series_id), "series.stopped", {"series_id": series_id})
+
+    def _apply_run_stopped(
+        self, session: Session, run: Run, user_id: str | None, result: Any | None
+    ) -> None:
+        if result is not None:
+            run.manifest_json = result.manifest.model_dump(mode="json")
+            run.total_cost_usd = _run_cost(session, run.id, result.manifest.total_cost_usd)
+            for record in result.manifest.nodes:
+                if record.artifact_hash:
+                    _record_artifact(session, record.artifact_hash, record.name, 0)
+        config = dict(run.config_json or {})
+        if user_id and not config.get("stopped_by"):
+            config["stopped_by"] = user_id
+            run.config_json = config
+        run.status = "stopped"
+        run.error = None
+        run.finished_at = datetime.now(UTC)
+
+    def _apply_series_stopped(self, session: Session, series: Series, user_id: str | None) -> None:
+        request = dict(series.request_json or {})
+        if user_id and not request.get("stopped_by"):
+            request["stopped_by"] = user_id
+            series.request_json = request
+        series.status = "stopped"
+        series.error = None
+        series.finished_at = datetime.now(UTC)
+
+    def _apply_take_stopped(self, session: Session, take: AudioTake, user_id: str | None) -> None:
+        manifest = dict(take.manifest_json or {})
+        if user_id and not manifest.get("stopped_by"):
+            manifest["stopped_by"] = user_id
+            take.manifest_json = manifest
+        take.status = "stopped"
+        take.error = None
+        take.finished_at = datetime.now(UTC)
+
+    def _build_llm(self, run_id: str | None, should_stop: Any | None = None) -> LLMClient:
         def record(
             *,
             model_id: str,
@@ -893,12 +1235,14 @@ class Worker:
             resolve=llm_registry.resolve_provider,
             cost_of=llm_registry.cost_usd,
             recorder=record,
+            should_stop=should_stop,
         )
 
     # ---------------------------------------------------------------- audio
 
     def submit_take(self, take_id: str) -> Future[Any]:
-        return self.submit(self.execute_take, take_id)
+        self._arm(take_id)
+        return self._track(take_id, self.submit(self.execute_take, take_id))
 
     def execute_take(self, take_id: str) -> None:
         """Run an audio pipeline over a finished run's script: one take.
@@ -910,10 +1254,17 @@ class Worker:
         """
         settings = get_settings()
         store = ArtifactStore(settings.artifacts_dir)
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             take = session.get(AudioTake, take_id)
             if take is None:
                 logger.warning("audio take requested for unknown id %s", take_id)
+                return
+            if take.status == "stopped" or (
+                self._is_stopped(take_id) and take.status in _TAKE_STOPPABLE
+            ):
+                if take.status in _TAKE_STOPPABLE:
+                    self._apply_take_stopped(session, take, self._stop_user(take_id))
+                    bus.publish(take_id, "run.stopped", {"take_id": take_id})
                 return
             run = session.get(Run, take.run_id)
             if run is None:  # pragma: no cover - the take cascades with its run
@@ -942,14 +1293,18 @@ class Worker:
             self._end_take(take_id, "failed", error=f"audio pipeline '{flow_id}' is not available")
             return
 
-        llm = self._build_llm(run_id=None)
+        def should_stop() -> bool:
+            return self._is_stopped(take_id)
+
+        llm = self._build_llm(run_id=None, should_stop=should_stop)
         provider = speech_provider()
-        speech = SpeechClient(provider) if provider is not None else None
+        speech = SpeechClient(provider, should_stop=should_stop) if provider is not None else None
         runner = FlowRunner(
             artifacts=store,
             llm=llm,
             progress=lambda event, data: bus.publish(take_id, event, data),
             speech=speech,
+            should_stop=should_stop,
         )
         try:
             seeds: dict[str, Any] = {
@@ -979,7 +1334,9 @@ class Worker:
                 previous=previous,
             )
         spent = result.manifest.total_cost_usd
-        if result.status == "failed":
+        if result.status == "stopped" or self._is_stopped(take_id):
+            self._end_take(take_id, "stopped", error=None, manifest=manifest, spent=spent)
+        elif result.status == "failed":
             # Keep the approval: resuming continues at the first chunk without audio
             # and never asks, or pays, again for what is done.
             approved = pause_from_manifest(previous)
@@ -999,19 +1356,32 @@ class Worker:
         manifest: dict[str, Any] | None = None,
         spent: float = 0.0,
     ) -> None:
-        with session_scope() as session:
+        with self._gate, session_scope() as session:
             take = session.get(AudioTake, take_id)
             if take is None:  # pragma: no cover - deleted mid-take
                 return
+            if take.status == "stopped":
+                status = "stopped"
             take.status = status
-            take.error = error
+            take.error = None if status == "stopped" else error
             if manifest is not None:
+                manifest = dict(manifest)
+                if status == "stopped":
+                    manifest["stopped_by"] = (
+                        (take.manifest_json or {}).get("stopped_by")
+                        or manifest.get("stopped_by")
+                        or self._stop_user(take_id)
+                    )
                 take.manifest_json = manifest
             # Each execution pays only for what it did; the take adds them up.
             take.total_cost_usd = round((take.total_cost_usd or 0.0) + spent, 8)
-            if status in {"completed", "failed"}:
+            if status in {"completed", "failed", "stopped"}:
                 take.finished_at = datetime.now(UTC)
-        event = {"completed": "run.completed", "failed": "run.failed"}.get(status, "run.paused")
+        event = {
+            "completed": "run.completed",
+            "failed": "run.failed",
+            "stopped": "run.stopped",
+        }.get(status, "run.paused")
         bus.publish(take_id, event, {"take_id": take_id, "error": error})
 
     def _load_flow(self, flow_id: str) -> Flow | None:
@@ -1052,6 +1422,15 @@ def _persist_node(run_id: str, record: NodeRecord) -> None:
         existing = session.scalars(
             sa_select(RunNode).where(RunNode.run_id == run_id, RunNode.node_name == record.name)
         ).first()
+        if (
+            existing is not None
+            and record.artifact_hash is None
+            and not record.error
+            and existing.artifact_hash
+        ):
+            # Stopping mid-node discards the in-flight result. The artifact this
+            # run already stored for the node stays, so a later run still hits it.
+            record.artifact_hash = existing.artifact_hash
         if (
             existing is not None
             and record.cache_hit

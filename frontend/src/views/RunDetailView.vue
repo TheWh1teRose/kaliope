@@ -11,7 +11,7 @@ import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
 import StatusPill from '@/components/StatusPill.vue'
-import { t } from '@/i18n'
+import { fill, t } from '@/i18n'
 import { type ProgressLine, useRunsStore } from '@/stores/runs'
 import { runTitle } from '@/titles'
 
@@ -39,6 +39,15 @@ const reviewable = computed(
   () => run.value && ['completed', 'in_review', 'reviewed'].includes(run.value.status),
 )
 const awaitingNotes = computed(() => run.value?.status === 'paused')
+const stoppable = computed(() => ['queued', 'running'].includes(run.value?.status ?? ''))
+const stopped = computed(() => run.value?.status === 'stopped')
+const stoppedNotice = computed(() => {
+  const who = run.value?.stopped_by
+  return who ? fill(t.run.stoppedNoticeBy, { who }) : t.run.stoppedNotice
+})
+const confirmStop = ref(false)
+const stopping = ref(false)
+const stopError = ref('')
 
 function duration(node: { started_at: string | null; finished_at: string | null }): string {
   if (!node.started_at || !node.finished_at) return t.common.none
@@ -56,8 +65,15 @@ async function reload(): Promise<void> {
     feedback.value = null
     notesOpen.value = false
   }
+  if (drainTimer) clearTimeout(drainTimer)
+  drainTimer = null
+  if (!disposed && run.value.status === 'stopped' && run.value.active) {
+    drainTimer = setTimeout(() => void reload(), 1500)
+  }
 }
 
+let disposed = false
+let drainTimer: ReturnType<typeof setTimeout> | null = null
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
@@ -77,6 +93,7 @@ function onLiveEvent(line: ProgressLine): void {
 
 function follow(): void {
   if (live.value) runs.watch(props.id, reload, onLiveEvent)
+  else runs.stopWatching()
 }
 
 async function loadFeedback(): Promise<void> {
@@ -124,6 +141,22 @@ async function submitNotes(): Promise<void> {
   }
 }
 
+async function stopRun(): Promise<void> {
+  if (!run.value || stopping.value) return
+  stopping.value = true
+  stopError.value = ''
+  try {
+    await runs.stop(props.id)
+    confirmStop.value = false
+    await reload()
+    follow()
+  } catch (exc) {
+    stopError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
+  } finally {
+    stopping.value = false
+  }
+}
+
 async function inspect(node: string): Promise<void> {
   inspected.value = node
   io.value = null
@@ -146,7 +179,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   runs.stopWatching()
+  if (drainTimer) clearTimeout(drainTimer)
   if (refreshTimer) clearTimeout(refreshTimer)
 })
 </script>
@@ -165,6 +200,24 @@ onUnmounted(() => {
       </div>
       <div class="row wrap">
         <StatusPill :status="run.status" />
+        <button
+          v-if="stoppable"
+          class="btn btn--sm"
+          type="button"
+          data-stop
+          :disabled="stopping"
+          @click="stopError = ''; confirmStop = true"
+        >
+          {{ t.run.stop }}
+        </button>
+        <RouterLink
+          v-if="stopped"
+          class="btn btn--sm"
+          data-again
+          :to="{ name: 'new-run', params: { id: run.document_id } }"
+        >
+          {{ t.run.again }}
+        </RouterLink>
         <span class="badge badge--idle num">${{ run.total_cost_usd.toFixed(4) }}</span>
         <span class="badge badge--idle num">{{ totalTokens.toLocaleString('de-DE') }} tok</span>
         <button v-if="awaitingNotes" class="btn btn--mark" @click="openNotes">
@@ -179,6 +232,7 @@ onUnmounted(() => {
     <p v-if="run.verdict === 'insufficient'" class="notice notice--fail">
       {{ t.run.verdictInsufficient }}
     </p>
+    <p v-if="stopped" class="notice" data-stopped>{{ stoppedNotice }}</p>
 
     <section v-if="graph" class="sheet">
       <div class="spread">
@@ -329,6 +383,29 @@ onUnmounted(() => {
           {{ t.run.viewArtifact }}
         </a>
         <button class="btn btn--mark" @click="closeInspector">{{ t.common.close }}</button>
+      </template>
+    </ModalDialog>
+
+    <ModalDialog
+      :open="confirmStop"
+      :title="t.run.stopTitle"
+      :lead="t.run.stopLead"
+      @close="confirmStop = false"
+    >
+      <p v-if="stopError" class="notice notice--fail" role="alert">{{ stopError }}</p>
+      <template #actions>
+        <button class="btn btn--ghost" type="button" @click="confirmStop = false">
+          {{ t.common.cancel }}
+        </button>
+        <button
+          class="btn btn--mark"
+          type="button"
+          data-action="confirm-stop"
+          :disabled="stopping"
+          @click="stopRun"
+        >
+          {{ t.run.stopConfirm }}
+        </button>
       </template>
     </ModalDialog>
   </div>

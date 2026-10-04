@@ -209,7 +209,7 @@ class Series(Base):
     format_spec_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     audience_spec_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     #: ``queued`` → ``planning`` → ``planned`` (waits for approval) → ``outlining``
-    #: → ``writing`` → ``completed``; or ``failed``.
+    #: → ``writing`` → ``completed``; or ``failed`` or ``stopped``.
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
     plan_artifact_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: Results of the series-level checks (S1 …), keyed by check id.
@@ -527,7 +527,8 @@ class AudioTake(Base):
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     flow_id: Mapped[str] = mapped_column(String(100))
     flow_version: Mapped[str] = mapped_column(String(20))
-    #: ``queued`` → ``running`` → ``paused`` (approval) → ``completed`` | ``failed``.
+    #: ``queued`` → ``running`` → ``paused`` (approval) → ``completed`` | ``failed``
+    #: | ``stopped``.
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
     #: ``AudioRequest``: sample or whole script.
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

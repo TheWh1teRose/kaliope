@@ -14,7 +14,7 @@ import { loadSource } from '@/experiments/api'
 import { t } from '@/i18n'
 import { runTitle, sourceTitle } from '@/titles'
 
-const FINISHED_RUN = new Set(['completed', 'in_review', 'reviewed', 'failed', 'paused'])
+const FINISHED_RUN = new Set(['completed', 'in_review', 'reviewed', 'failed', 'stopped', 'paused'])
 
 const props = defineProps<{
   experimentKey: string

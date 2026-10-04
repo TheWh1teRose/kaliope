@@ -20,6 +20,7 @@ from app.pipeline.audio_chunks import (
     plan_requests,
     select_lines,
 )
+from app.pipeline.framework.cancel import RunStopped
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
@@ -117,12 +118,18 @@ class AudioRenderNode:
         for plan in planned:
             chunk = cached_chunk(ctx.artifacts, plan.key)
             if chunk is None:
+                if ctx.stopped():
+                    raise RunStopped()
                 ctx.progress(f"speaking chunk {plan.index + 1} of {len(planned)}")
                 chunk = self._speak(
                     ctx, cast, plan.inputs, plan.lines, plan.index, output_format, request_ids
                 )
                 # Stored before the next request: a take that fails later resumes here.
                 ctx.artifacts.put_step(plan.key, ctx.artifacts.put("audio_chunk", chunk).hash)
+                if ctx.stopped():
+                    # This chunk is already paid for and cached. Do not speak another.
+                    rendered.append(chunk)
+                    raise RunStopped()
             else:
                 ctx.progress(f"chunk {plan.index + 1} of {len(planned)} reused")
                 chunk = _placed(chunk, plan.index, plan.lines)

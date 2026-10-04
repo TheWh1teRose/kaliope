@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.review import edited_texts
+from app.api.runs import _person, _stop_out
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
@@ -30,6 +31,7 @@ from app.pipeline.catalogue import CatalogueError
 from app.pipeline.feedback import last_row_for_key, pause_from_manifest
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.registry import flow_purpose
+from app.schemas.api import StopOut
 from app.schemas.audio import (
     Audio,
     AudioApproval,
@@ -139,6 +141,7 @@ class MixOut(BaseModel):
 
 
 class TakeOut(BaseModel):
+    active: bool = False
     id: str
     run_id: str
     flow_id: str
@@ -160,6 +163,7 @@ class TakeOut(BaseModel):
     mix: MixOut | None = None
     #: A failed take that kept its approval continues where it stopped.
     resumable: bool = False
+    stopped_by: str | None = None
 
 
 class RunAudioOut(BaseModel):
@@ -251,7 +255,7 @@ def run_audio(
     return RunAudioOut(
         configured=configured,
         message=None if configured else SETUP_MESSAGE,
-        takes=[_take_out(take, run) for take in takes],
+        takes=[_take_out(db, take, run) for take in takes],
     )
 
 
@@ -265,7 +269,29 @@ def start_take(
     run = _require_run(db, run_id)
     flow = _audio_flow(db, payload.flow_id)
     take = _start(db, run, flow, payload.scope, payload.voice_cast, user.id)
-    return _take_out(take, run)
+    return _take_out(db, take, run)
+
+
+@router.post("/audio/takes/{take_id}/stop", response_model=StopOut)
+def stop_take(
+    take_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)
+) -> StopOut:
+    """Stop a take that is queued, generating, or waiting for approval.
+
+    Chunks already generated stay cached. A finished take is left as it is.
+    """
+    take = db.get(AudioTake, take_id)
+    if take is None:
+        raise problem(404, "No such take", f"Audio take '{take_id}' does not exist.")
+    status, outcome = worker.stop_take(take.id, user.id)
+    db.refresh(take)
+    who = (take.manifest_json or {}).get("stopped_by")
+    return _stop_out(
+        take.id,
+        take.status if outcome != "finished" else status,
+        outcome,
+        _person(db, who),
+    )
 
 
 @router.post("/audio/takes/{take_id}/approve", response_model=TakeOut)
@@ -280,7 +306,7 @@ def approve_take(
         raise problem(404, "No such take", f"Audio take '{take_id}' does not exist.")
     run = _require_run(db, take.run_id)
     _approve(db, take, payload.voice_cast, user.id)
-    return _take_out(take, run)
+    return _take_out(db, take, run)
 
 
 # ------------------------------------------------------------------- series
@@ -396,7 +422,7 @@ def resume_take(
     db.commit()
     bus.clear(take_id)
     worker.submit_take(take_id)
-    return _take_out(take, run)
+    return _take_out(db, take, run)
 
 
 @router.get("/audio/takes/{take_id}/mix")
@@ -554,7 +580,7 @@ def _series_audio(db: Session, series_id: str) -> SeriesAudioOut:
                 name=run.name,
                 run_id=run.id,
                 run_status=run.status,
-                take=_take_out(take, run) if take is not None else None,
+                take=_take_out(db, take, run) if take is not None else None,
             )
         )
     waiting = [e.take.approval for e in episodes if e.take and e.take.approval]
@@ -708,7 +734,10 @@ def _approval_out(take: AudioTake) -> ApprovalOut | None:
     )
 
 
-def _take_out(take: AudioTake, run: Run) -> TakeOut:
+def _take_out(db: Session, take: AudioTake, run: Run) -> TakeOut:
+    active = worker.job_active(take.id)
+    if take.status == "stopped" and not active:
+        db.refresh(take)
     store = _store()
     bag = _bag(take)
     script_digest = bag.get("audio_script")
@@ -722,6 +751,7 @@ def _take_out(take: AudioTake, run: Run) -> TakeOut:
     mixed = _mix(take, store)
     speakers = FormatSpec.model_validate(run.format_spec_json).speaker_names()
     return TakeOut(
+        active=active,
         id=take.id,
         run_id=take.run_id,
         flow_id=take.flow_id,
@@ -759,4 +789,5 @@ def _take_out(take: AudioTake, run: Run) -> TakeOut:
         if mixed is not None
         else None,
         resumable=_resumable(take),
+        stopped_by=_person(db, (take.manifest_json or {}).get("stopped_by")),
     )

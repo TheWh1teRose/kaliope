@@ -23,7 +23,14 @@ from sqlalchemy.orm import Session
 
 from app.api.documents import load_parsed_document
 from app.api.review import edited_texts
-from app.api.runs import _load_run_output, _to_markdown, _topology, build_run_graph
+from app.api.runs import (
+    _load_run_output,
+    _person,
+    _stop_out,
+    _to_markdown,
+    _topology,
+    build_run_graph,
+)
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
@@ -49,6 +56,7 @@ from app.schemas.api import (
     SeriesGraphEpisodeOut,
     SeriesGraphOut,
     SeriesOut,
+    StopOut,
 )
 from app.schemas.pipeline import DEFAULT_DIALOGUE_EXPANSION
 from app.security import current_user
@@ -69,7 +77,9 @@ router = APIRouter(prefix="/api", tags=["series"])
 
 _HEARTBEAT_SECONDS = 15.0
 #: Series events after which the stream closes itself.
-_TERMINAL_EVENTS = frozenset({"series.completed", "series.failed", "series.planned"})
+_TERMINAL_EVENTS = frozenset(
+    {"series.completed", "series.failed", "series.planned", "series.stopped"}
+)
 
 
 def _store() -> ArtifactStore:
@@ -260,7 +270,7 @@ def replan(
 def resume_series(
     series_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> SeriesOut:
-    """Continue a series that failed or was cut off; finished steps are not repeated."""
+    """Continue a series that failed or was stopped; finished steps are not repeated."""
     series = _require_series(db, series_id)
     if series.status in {"completed", "planned"}:
         raise problem(409, "Nothing to resume", f"The series is '{series.status}'.")
@@ -269,10 +279,35 @@ def resume_series(
     series.status = "queued"
     series.error = None
     series.finished_at = None
+    for run in db.scalars(select(Run).where(Run.series_id == series.id, Run.status == "stopped")):
+        run.status = "queued"
+        run.error = None
+        run.finished_at = None
     db.commit()
     bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
     return _series_out(db, series)
+
+
+@router.post("/series/{series_id}/stop", response_model=StopOut)
+def stop_series(
+    series_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)
+) -> StopOut:
+    """Stop the episode in progress and the stages that have not started.
+
+    The plan and episodes that already finished stay. Stopping again, or
+    stopping a series that has already ended, changes nothing.
+    """
+    series = _require_series(db, series_id)
+    status, outcome = worker.stop_series(series.id, user.id)
+    db.refresh(series)
+    who = (series.request_json or {}).get("stopped_by")
+    return _stop_out(
+        series.id,
+        series.status if outcome != "finished" else status,
+        outcome,
+        _person(db, who),
+    )
 
 
 @router.get("/series/{series_id}/graph", response_model=SeriesGraphOut)
@@ -453,6 +488,9 @@ def _pending_graph(flow: Flow) -> RunGraphOut:
 
 
 def _series_out(db: Session, series: Series) -> SeriesOut:
+    active = worker.series_active(series.id)
+    if series.status == "stopped" and not active:
+        db.refresh(series)
     store = _store()
     plan = load_plan(store, series)
     planner = plan_run(db, series.id)
@@ -502,7 +540,8 @@ def _series_out(db: Session, series: Series) -> SeriesOut:
         total_cost_usd=round(sum(r.total_cost_usd for r in all_runs), 8),
         episodes=episodes,
         progress=stage_progress(db, series),
-        active=worker.series_active(series.id),
+        active=active,
+        stopped_by=_person(db, (series.request_json or {}).get("stopped_by")),
     )
 
 

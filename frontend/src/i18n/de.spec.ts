@@ -71,6 +71,7 @@ describe('German UI strings', () => {
       'paused',
       'completed',
       'failed',
+      'stopped',
       'in_review',
       'reviewed',
     ]) {

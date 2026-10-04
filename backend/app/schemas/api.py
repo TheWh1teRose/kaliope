@@ -203,6 +203,7 @@ class PauseOut(BaseModel):
 
 
 class RunOut(BaseModel):
+    active: bool = False
     id: str
     document_id: str
     document_title: str | None = None
@@ -227,6 +228,22 @@ class RunOut(BaseModel):
     #: Set for a run of a series: 0 is the planner run, 1… the episodes.
     series_id: str | None = None
     episode_index: int | None = None
+    #: Recorded stopper label; queued series episodes may retain it until execution starts.
+    stopped_by: str | None = None
+
+
+class StopOut(BaseModel):
+    """What a stop request did to a run, series or audio take.
+
+    ``stopping`` acknowledges a durable stopped status while the worker drains;
+    ``stopped`` means no worker was busy. ``already_stopped`` and ``finished``
+    leave the item unchanged; ``finished`` includes idle approval/review states.
+    """
+
+    id: str
+    status: str
+    outcome: Literal["stopped", "stopping", "already_stopped", "finished"]
+    stopped_by: str | None = None
 
 
 class AnchorOut(BaseModel):
@@ -505,6 +522,8 @@ class SeriesOut(BaseModel):
     progress: dict[str, int] = Field(default_factory=dict)
     #: Whether a worker job is driving the series right now.
     active: bool = False
+    #: Who stopped the series, when it was stopped.
+    stopped_by: str | None = None
 
 
 class SeriesGraphEpisodeOut(BaseModel):

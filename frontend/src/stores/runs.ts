@@ -13,6 +13,7 @@ import type {
   RunGraphOut,
   RunOut,
   ScriptOut,
+  StopOut,
 } from '@/api/types'
 
 export interface ProgressLine {
@@ -24,8 +25,8 @@ export interface ProgressLine {
   cost_usd?: number
 }
 
-/** Terminal event types; the stream closes itself after either of them. */
-export const TERMINAL = new Set(['run.completed', 'run.failed', 'run.paused'])
+/** Terminal event types; the stream closes itself after any of them. */
+export const TERMINAL = new Set(['run.completed', 'run.failed', 'run.paused', 'run.stopped'])
 
 const RUN_EVENTS = [
   'run.queued',
@@ -40,6 +41,7 @@ const RUN_EVENTS = [
   'run.completed',
   'run.failed',
   'run.paused',
+  'run.stopped',
 ]
 
 export const useRunsStore = defineStore('runs', () => {
@@ -57,6 +59,10 @@ export const useRunsStore = defineStore('runs', () => {
   async function get(id: string): Promise<RunOut> {
     current.value = await api.get<RunOut>(`/api/runs/${id}`)
     return current.value
+  }
+
+  async function stop(id: string): Promise<StopOut> {
+    return api.post<StopOut>(`/api/runs/${id}/stop`)
   }
 
   async function create(payload: {
@@ -149,6 +155,7 @@ export const useRunsStore = defineStore('runs', () => {
     reconnecting,
     load,
     get,
+    stop,
     create,
     watch,
     stopWatching,

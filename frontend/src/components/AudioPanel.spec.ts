@@ -24,6 +24,12 @@ vi.mock('@/api/audio', () => ({
     start: vi.fn(async () => ({})),
     resume: vi.fn(async () => ({})),
     approve: vi.fn(async () => ({})),
+    stop: vi.fn(async () => ({
+      id: 'take-1',
+      status: 'stopped',
+      outcome: 'stopped',
+      stopped_by: null,
+    })),
   },
   takeActive: (status: string) => status === 'queued' || status === 'running',
   lineAt: (lines: { segment_id: string; start_s: number; end_s: number }[], time: number) =>
@@ -209,6 +215,82 @@ describe('AudioPanel', () => {
     expect(audio.attributes('src')).toBe('/api/audio/takes/take-1/chunks/0')
     expect(wrapper.text()).toContain('58.4 s · 1.040 Zeichen · $0.08')
     expect(wrapper.findAll('.script-seg')).toHaveLength(2)
+  })
+
+  it('asks in the page before stopping a take that is waiting for approval', async () => {
+    vi.mocked(audioApi.takes)
+      .mockResolvedValueOnce(answer(true, [take({})]))
+      .mockResolvedValueOnce(
+        answer(true, [
+          take({
+            status: 'stopped',
+            error: null,
+            approval: null,
+            stopped_by: 'reviewer@kalliope.test',
+          }),
+        ]),
+      )
+    const wrapper = mount(AudioPanel, {
+      props: { runId: 'run-1', formatId: 'two_host_dialogue' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await flushPromises()
+    await wrapper.get('[data-stop]').trigger('click')
+    expect(audioApi.stop).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Audio stoppen?')
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
+    await flushPromises()
+    expect(audioApi.stop).toHaveBeenCalledWith('take-1')
+    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt von reviewer@kalliope.test')
+    expect(wrapper.find('.notice--fail').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('polls a stopped take until its paid chunk state is final', async () => {
+    vi.useFakeTimers()
+    let drained = false
+    vi.mocked(audioApi.takes).mockImplementation(async () => answer(true, [take({
+      status: 'stopped', active: !drained, approval: null,
+      total_cost_usd: drained ? 0.42 : 0.01,
+    })]))
+    const wrapper = await mountPanel()
+    try {
+      const reads = vi.mocked(audioApi.takes).mock.calls.length
+      expect(wrapper.find('[data-stop]').exists()).toBe(false)
+      await vi.advanceTimersByTimeAsync(1499)
+      expect(audioApi.takes).toHaveBeenCalledTimes(reads)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(audioApi.takes).toHaveBeenCalledTimes(reads + 1)
+      drained = true
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(wrapper.text()).toContain('$0.42')
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(audioApi.takes).toHaveBeenCalledTimes(reads + 2)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a stopped take without treating it as a failure', async () => {
+    vi.mocked(audioApi.takes).mockResolvedValue(
+      answer(true, [
+        take({
+          status: 'stopped',
+          error: null,
+          approval: null,
+          stopped_by: 'reviewer@kalliope.test',
+        }),
+      ]),
+    )
+    const wrapper = await mountPanel()
+    expect(wrapper.get('[data-stopped] .badge').text()).toBe('Gestoppt')
+    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt von reviewer@kalliope.test')
+    expect(wrapper.get('[data-stopped] .badge').classes()).toContain('badge--idle')
+    expect(wrapper.find('.notice--fail').exists()).toBe(false)
+    expect(wrapper.find('[data-stop]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Neue Probe')
   })
 
   it('offers the whole episode as well as the sample', async () => {

@@ -59,6 +59,7 @@ from app.schemas.api import (
     ScriptOut,
     SegmentCommentOut,
     SegmentOut,
+    StopOut,
 )
 from app.schemas.document import ParsedDocument
 from app.schemas.gates import GateDetail, GateReport, GateSpec
@@ -77,7 +78,7 @@ _SAMPLE_CHARS = 240
 #: Seconds between SSE heartbeats when nothing is happening.
 _HEARTBEAT_SECONDS = 15.0
 #: Events after which the stream closes itself.
-_TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.paused"})
+_TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.paused", "run.stopped"})
 
 
 def _store() -> ArtifactStore:
@@ -192,6 +193,22 @@ def create_run(
     return _run_out(db, run)
 
 
+@router.post("/runs/{run_id}/stop", response_model=StopOut)
+def stop_run(
+    run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)
+) -> StopOut:
+    """Stop a queued or running run. A finished run is left as it is."""
+    run = _require_run(db, run_id)
+    status, outcome = worker.stop_run(run.id, user.id)
+    db.refresh(run)
+    return _stop_out(
+        run.id,
+        run.status if outcome != "finished" else status,
+        outcome,
+        _person(db, (run.config_json or {}).get("stopped_by")),
+    )
+
+
 @router.get("/runs", response_model=list[RunOut])
 def list_runs(
     document_id: str | None = None,
@@ -237,7 +254,7 @@ def run_events(
     run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> StreamingResponse:
     run = _require_run(db, run_id)
-    terminal = run.status in {"completed", "failed", "reviewed", "paused"}
+    terminal = run.status in {"completed", "failed", "reviewed", "paused", "stopped"}
     subscriber, replay = bus.subscribe(run_id)
 
     def stream() -> Iterator[str]:
@@ -771,10 +788,12 @@ def _topology(
 def _node_status(row: RunNode | None, *, reached: bool, run_status: str) -> NodeRunStatus:
     """What happened to one node, from its row and the run around it."""
     if row is None:
-        if reached or run_status == "failed":
+        if reached or run_status in {"failed", "stopped"}:
             return "blocked"
         # A node gets its row when it starts, so one without a row is still waiting.
         return "pending"
+    if row.artifact_hash is None and run_status == "stopped":
+        return "blocked"
     if row.error:
         return "failed"
     if row.finished_at is None:
@@ -1014,6 +1033,9 @@ def _gate_reports(db: Session, run_id: str) -> list[GateReport]:
 
 
 def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
+    active = worker.job_active(run.id)
+    if run.status == "stopped" and not active:
+        db.refresh(run)
     document = db.get(Document, run.document_id)
     config = run.config_json or {}
     nodes: list[RunNodeOut] = []
@@ -1041,6 +1063,7 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         gates = _gate_reports(db, run.id)
 
     return RunOut(
+        active=active,
         id=run.id,
         document_id=run.document_id,
         document_title=(document.title or document.filename) if document else None,
@@ -1063,6 +1086,7 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         pause=pause_out(run.manifest_json),
         series_id=run.series_id,
         episode_index=run.episode_index,
+        stopped_by=_person(db, config.get("stopped_by")),
     )
 
 
@@ -1075,3 +1099,16 @@ def _require_run(db: Session, run_id: str) -> Run:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
+
+
+def _person(db: Session, user_id: str | None) -> str | None:
+    """The label of the person who stopped a run, when one was recorded."""
+    if not user_id:
+        return None
+    return author_labels(db).get(user_id, user_id)
+
+
+def _stop_out(target_id: str, status: str, outcome: str, stopped_by: str | None) -> StopOut:
+    if outcome not in {"stopped", "stopping", "already_stopped", "finished"}:
+        outcome = "finished"
+    return StopOut(id=target_id, status=status, outcome=outcome, stopped_by=stopped_by)  # type: ignore[arg-type]

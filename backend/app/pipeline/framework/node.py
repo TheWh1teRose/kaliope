@@ -66,6 +66,9 @@ class NodeContext:
     force: bool = False
     #: Speech synthesis, when a provider is set up. Only audio nodes use it.
     speech: SpeechClient | None = None
+    #: True once someone has asked this run to stop. Nodes check it between
+    #: steps so a beat or a chunk that is not started is not paid for.
+    stopped: Callable[[], bool] = field(default=lambda: False)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)

@@ -16,6 +16,7 @@ import { audioApi, lineAt, takeActive, type AudioScope } from '@/api/audio'
 import { ApiError } from '@/api/client'
 import type { AudioStatus, AudioTakeOut, RunAudioOut, SpeechVoice, VoiceCast } from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
+import ModalDialog from '@/components/ModalDialog.vue'
 import { tagParts } from '@/components/artifactView'
 import { fill, t } from '@/i18n'
 
@@ -31,6 +32,7 @@ const draft = ref<VoiceCast | null>(null)
 const saveDefault = ref(true)
 const busy = ref(false)
 const error = ref('')
+const confirmStop = ref(false)
 const player = ref<HTMLAudioElement | null>(null)
 const now = ref(0)
 let timer: number | undefined
@@ -43,6 +45,10 @@ interface SpokenLine {
 }
 
 const take = computed<AudioTakeOut | null>(() => data.value?.takes[0] ?? null)
+const stoppedHint = computed(() => {
+  const who = take.value?.stopped_by
+  return who ? fill(t.audio.stoppedHintBy, { who }) : t.audio.stoppedHint
+})
 const active = computed(() => (take.value ? takeActive(take.value.status) : false))
 const configured = computed(() => data.value?.configured ?? false)
 const missing = computed(() => {
@@ -167,6 +173,22 @@ async function start(scope: AudioScope): Promise<void> {
   }
 }
 
+async function stopTake(): Promise<void> {
+  const current = take.value
+  if (!current || busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await audioApi.stop(current.id)
+    confirmStop.value = false
+    await reload()
+  } catch (exc) {
+    fail(exc)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function approve(): Promise<void> {
   const current = take.value
   if (!current || !draft.value || !canApprove.value) return
@@ -202,7 +224,7 @@ async function resume(): Promise<void> {
 
 function schedule(): void {
   window.clearTimeout(timer)
-  if (active.value) timer = window.setTimeout(() => void reload(), POLL_MS)
+  if (active.value || take.value?.active) timer = window.setTimeout(() => void reload(), POLL_MS)
 }
 
 watch(data, schedule)
@@ -257,6 +279,16 @@ onUnmounted(() => window.clearTimeout(timer))
       <p v-if="active" class="running">
         <span class="spinner" />{{ take.audio_script ? t.audio.speaking : t.audio.tagging }}
       </p>
+      <div v-if="active || take.status === 'paused'" class="row wrap">
+        <button class="btn btn--sm" type="button" data-stop @click="confirmStop = true">
+          {{ t.audio.stop }}
+        </button>
+      </div>
+
+      <div v-if="take.status === 'stopped'" class="notice" data-stopped>
+        <span class="badge badge--idle">{{ t.audio.stopped }}</span>
+        <p>{{ stoppedHint }}</p>
+      </div>
 
       <div v-else-if="take.status === 'paused' && take.approval" class="approval">
         <div class="row wrap">
@@ -453,7 +485,10 @@ onUnmounted(() => window.clearTimeout(timer))
         <ArtifactView model="AudioScript" :payload="sampleScript" mode="text" />
       </details>
 
-      <div v-if="take.status === 'completed' || take.status === 'failed'" class="row wrap">
+      <div
+        v-if="take.status === 'completed' || take.status === 'failed' || take.status === 'stopped'"
+        class="row wrap"
+      >
         <button class="btn btn--sm" :disabled="busy" @click="start('sample')">
           {{ t.audio.again }}
         </button>
@@ -463,6 +498,22 @@ onUnmounted(() => window.clearTimeout(timer))
         <span class="meta num">{{ money(take.total_cost_usd) }}</span>
       </div>
     </template>
+
+    <ModalDialog
+      :open="confirmStop"
+      :title="t.audio.stopTitle"
+      :lead="t.audio.stopLead"
+      @close="confirmStop = false"
+    >
+      <template #actions>
+        <button class="btn btn--ghost" type="button" @click="confirmStop = false">
+          {{ t.common.cancel }}
+        </button>
+        <button class="btn btn--mark" type="button" data-action="confirm-stop" :disabled="busy" @click="stopTake">
+          {{ t.audio.stopConfirm }}
+        </button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 

@@ -162,7 +162,7 @@ script's line and compares word by word; case and punctuation do not count. A
 refused line is asked for once more and otherwise spoken untagged, marked
 `fallback`, so a tag never fails a run. Beats are cached one by one.
 
-`audio_approval` stops the take with the price: lines, characters, requests and
+`audio_approval` pauses the take with the price: lines, characters, requests and
 dollars at the model's rate. Nothing is spent until someone approves in the run
 view, where the voices per speaker are chosen (saved per format, never inside
 the format spec, so a voice change leaves the script cache alone).
@@ -236,7 +236,7 @@ are all unusable is kept as well, with the warning that it needs a new plan;
 selection does not invent goals for it. Episodes keep the
 length that was asked for. The model's split of passages is checked rather
 than trusted.
-The series always stops after the plan until someone approves it, and can be
+The series always waits after the plan until someone approves it, and can be
 planned again with another count, length or hint while it waits.
 
 Each episode is an ordinary run (`runs.series_id`, `episode_index`), so review,
@@ -248,7 +248,14 @@ still come only from its own passages). Two inputs keep the cache precise:
 `episode_brief` (this episode's share of the plan) feeds the early nodes and
 `series_context` feeds only the script. A flow without the planner never has
 either, so its prompts and cache keys are unchanged (pinned by
-`tests/test_series_golden.py`). Series that fail resume where they stopped.
+`tests/test_series_golden.py`). Series that fail or were stopped resume where
+they left off.
+
+Known stop/resume limits: after resuming a series, its stopper label (and that of
+queued episodes) can still name the previous stopper; resumed run-node accounting
+can replace previously paid totals even though cached artifacts remain reusable.
+Stopping the planner as an individual run can stop the series without copying the
+planner's stopper label onto the series. These are accepted limits for PR #40.
 
 The series view shows the whole pipeline on one pannable canvas — the planner as
 a column, one lane per episode — compact (state, cost, tokens, duration) or with
@@ -258,6 +265,29 @@ check reports how much of the document the series covers.
 The experiment **Folgen planen** starts from the planner's system prompt and
 the same user message production sends. Both stay editable, along with the
 model settings, and a run can be saved and collected.
+
+### Stopping generation
+
+Choose **Stoppen** in the runs list or run detail, on a running series, or in
+the run's audio panel, then confirm. Runs can be stopped while queued or running;
+series while queued, planning, outlining or writing; audio takes while queued,
+running or waiting for voice approval. A series waiting for plan approval is
+already idle. Stopping a series leaves its plan and finished episodes intact
+and prevents later stages from starting; audio takes are stopped separately.
+
+An accepted stop marks the item **stopped** immediately. A provider request
+already in progress can still finish and incur a charge; no subsequent paid
+request is started. Its cost is recorded, its returned LLM text is discarded,
+and a returned speech chunk is cached for reuse. Completed artifacts stay.
+The open views refresh while the worker drains so final costs can appear after
+the stopped status. Repeating a stop, or stopping an item that has already
+ended, changes nothing.
+
+Use **Erneut starten** for a standalone run or **Fortsetzen** for a stopped
+series. A stopped audio take cannot be resumed directly: prepare a new take
+with the same text, voices and settings to reuse its cached chunks. The accepted
+series attribution and run accounting limits are described under
+[Series of episodes](#series-of-episodes).
 
 ### Gates
 
@@ -390,7 +420,7 @@ GET /api/flows/{id}/graph               # the flow's nodes, ports and wiring
 GET /api/runs/{id}/graph                # the same, as it actually ran
 GET /api/runs/{id}/nodes/{node}/io      # one node's real inputs and output
 GET /api/documents/{id}/budget          # how many minutes a document supports
-POST /api/series                        # start a series; approve, replan, resume below it
+POST /api/series                        # start a series; approve, replan, stop and resume below it
 GET /api/series/{id}/graph              # the planner run and every episode run
 GET /api/series/{id}/events             # one live stream for the whole series
 GET /api/folders                        # the folder tree, with rolled-up counts
@@ -444,10 +474,10 @@ thresholds are aggregate over the corpus, never per document.
 
 ## Not in this build
 
-Text-to-speech and audio handling; the fact-check repair loop; AI persona
-feedback; pairwise evaluation, judges or rubrics; vision-based extraction of
-diagram content; multi-tenancy or customer-facing upload; OCR of scanned pages.
-None of these are partially implemented.
+The fact-check repair loop; AI persona feedback; pairwise evaluation, judges or
+rubrics; vision-based extraction of diagram content; multi-tenancy or
+customer-facing upload; OCR of scanned pages. None of these are partially
+implemented.
 # kaliope
 
 ## Deploy

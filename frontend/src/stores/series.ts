@@ -8,11 +8,17 @@ import type {
   SeriesEvent,
   SeriesGraphOut,
   SeriesOut,
+  StopOut,
 } from '@/api/types'
 import { openStream, type StreamHandle } from '@/stores/stream'
 
 /** Series events after which the server closes the stream. */
-export const SERIES_TERMINAL = new Set(['series.completed', 'series.failed', 'series.planned'])
+export const SERIES_TERMINAL = new Set([
+  'series.completed',
+  'series.failed',
+  'series.planned',
+  'series.stopped',
+])
 
 const SERIES_EVENTS = [
   'series.planning',
@@ -21,12 +27,14 @@ const SERIES_EVENTS = [
   'series.writing',
   'series.completed',
   'series.failed',
+  'series.stopped',
   'episode.writing',
   'run.queued',
   'run.started',
   'run.outlined',
   'run.completed',
   'run.failed',
+  'run.stopped',
   'node.started',
   'node.progress',
   'node.finished',
@@ -74,6 +82,10 @@ export const useSeriesStore = defineStore('series', () => {
 
   async function resume(id: string): Promise<SeriesOut> {
     return api.post<SeriesOut>(`/api/series/${id}/resume`)
+  }
+
+  async function stop(id: string): Promise<StopOut> {
+    return api.post<StopOut>(`/api/series/${id}/stop`)
   }
 
   /**
@@ -126,6 +138,7 @@ export const useSeriesStore = defineStore('series', () => {
     approve,
     replan,
     resume,
+    stop,
     watch,
     stopWatching,
   }

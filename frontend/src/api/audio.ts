@@ -8,6 +8,7 @@ import type {
   RunAudioOut,
   SeriesAudioOut,
   SpeechVoice,
+  StopOut,
   VoiceCast,
 } from '@/api/types'
 
@@ -23,6 +24,7 @@ export const audioApi = {
     api.post<AudioTakeOut>(`/api/runs/${runId}/audio`, { scope }),
   approve: (takeId: string, cast: VoiceCast) =>
     api.post<AudioTakeOut>(`/api/audio/takes/${takeId}/approve`, { voice_cast: cast }),
+  stop: (takeId: string) => api.post<StopOut>(`/api/audio/takes/${takeId}/stop`),
   resume: (takeId: string) => api.post<AudioTakeOut>(`/api/audio/takes/${takeId}/resume`),
   series: (seriesId: string) => api.get<SeriesAudioOut>(`/api/series/${seriesId}/audio`),
   startSeries: (seriesId: string, scope: AudioScope = 'full') =>

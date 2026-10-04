@@ -75,6 +75,7 @@ function series(status: SeriesOut['status']): SeriesOut {
     })),
     progress: { outlined: 0, written: 0, episodes: 0 },
     active: false,
+    stopped_by: status === 'stopped' ? 'reviewer@kalliope.test' : null,
   }
 }
 
@@ -84,6 +85,7 @@ const store = {
   approve: vi.fn(async () => series('queued')),
   replan: vi.fn(async () => series('queued')),
   resume: vi.fn(async () => series('queued')),
+  stop: vi.fn(async () => ({ id: 's1', status: 'stopped', outcome: 'stopped', stopped_by: null })),
   watch: vi.fn(),
   stopWatching: vi.fn(),
   reconnecting: false,
@@ -106,7 +108,8 @@ function router() {
 
 describe('series view', () => {
   beforeEach(() => {
-    for (const fn of [store.get, store.approve, store.replan, store.watch]) fn.mockClear()
+    for (const fn of [store.get, store.approve, store.replan, store.watch, store.stop]) fn.mockClear()
+    store.get.mockImplementation(async () => series('planned'))
   })
 
   it('holds at the plan and releases it on approval', async () => {
@@ -246,6 +249,48 @@ describe('series view', () => {
     expect(store.watch).not.toHaveBeenCalled()
   })
 
+  it.each(['mount', 'terminal', 'stop'])('polls a stopped worker without reopening SSE after %s', async (entry) => {
+    vi.useFakeTimers()
+    let drained = false
+    const stopped = () => ({ ...series('stopped'), active: !drained, total_cost_usd: drained ? 0.42 : 0.14 })
+    store.get.mockImplementation(async () => stopped())
+    if (entry !== 'mount') store.get.mockResolvedValueOnce(series('writing'))
+    const wrapper = mount(SeriesView, {
+      props: { id: 's1' },
+      attachTo: document.body,
+      global: { plugins: [router()] },
+    })
+    try {
+      await flushPromises()
+      if (entry === 'terminal') {
+        await store.watch.mock.calls[0][1].onTerminal()
+      } else if (entry === 'stop') {
+        await wrapper.get('[data-stop]').trigger('click')
+        document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
+        await flushPromises()
+      }
+      const reads = store.get.mock.calls.length
+      const streams = store.watch.mock.calls.length
+      expect(streams).toBe(entry === 'mount' ? 0 : 1)
+      expect(wrapper.find('[data-stop]').exists()).toBe(false)
+      await vi.advanceTimersByTimeAsync(1499)
+      expect(store.get).toHaveBeenCalledTimes(reads)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(store.get).toHaveBeenCalledTimes(reads + 1)
+      expect(store.watch).toHaveBeenCalledTimes(streams)
+      drained = true
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(wrapper.text()).toContain('$0.4200')
+      expect(store.watch).toHaveBeenCalledTimes(streams)
+      const finalReads = store.get.mock.calls.length
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(store.get).toHaveBeenCalledTimes(finalReads)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('follows a moving series and switches to an episode from its lane', async () => {
     store.get.mockResolvedValueOnce(series('writing'))
     const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
@@ -253,5 +298,49 @@ describe('series view', () => {
     expect(store.watch).toHaveBeenCalled()
     await wrapper.get('[data-lane="2"]').trigger('click')
     expect(wrapper.find('[data-panel="2"]').exists()).toBe(true)
+  })
+
+  it('asks in the page before stopping a series that is still writing', async () => {
+    store.get.mockResolvedValueOnce(series('writing'))
+    const wrapper = mount(SeriesView, {
+      props: { id: 's1' },
+      attachTo: document.body,
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    await wrapper.get('[data-stop]').trigger('click')
+    expect(store.stop).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Serie stoppen?')
+
+    const stopped = series('stopped')
+    stopped.episodes[0].status = 'completed'
+    stopped.episodes[0].run_id = 'r1'
+    stopped.episodes[1] = { ...stopped.episodes[1], status: 'stopped', run_id: 'r2', error: null }
+    store.get.mockResolvedValue(stopped)
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
+    await flushPromises()
+    expect(store.stop).toHaveBeenCalledWith('s1')
+    expect(wrapper.get('[data-series-status]').text()).toContain('Gestoppt')
+    expect(wrapper.get('[data-series-status]').classes()).toContain('badge--idle')
+    expect(wrapper.get('[data-series-status]').find('.pulse').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows a stopped series as Gestoppt, keeps the canvas, and offers resume', async () => {
+    const stopped = series('stopped')
+    stopped.error = null
+    stopped.episodes[0] = { ...stopped.episodes[0], status: 'completed', run_id: 'r1' }
+    stopped.episodes[1] = { ...stopped.episodes[1], status: 'stopped', run_id: 'r2', error: null }
+    store.get.mockResolvedValueOnce(stopped)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-series-status]').text()).toContain('Gestoppt')
+    expect(wrapper.get('[data-series-status]').classes()).toContain('badge--idle')
+    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt von reviewer@kalliope.test')
+    expect(wrapper.find('[data-series-error]').exists()).toBe(false)
+    expect(wrapper.find('[data-stop]').exists()).toBe(false)
+    expect(wrapper.find('[data-resume]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-node]').length).toBeGreaterThan(0)
+    expect(wrapper.text()).toContain('Gestoppt')
   })
 })
