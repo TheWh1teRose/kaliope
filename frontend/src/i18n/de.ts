@@ -67,6 +67,11 @@ export default {
     tabFormats: 'Formate',
     tabNodes: 'Knoten',
     tabGates: 'Qualitätsprüfungen',
+    groups: {
+      episode: 'Normal',
+      series_plan: 'Serie',
+      audio: 'Audio',
+    },
     empty: 'Noch keine Pipelines.',
     new: 'Neue Pipeline',
     newTitle: 'Pipeline anlegen',
@@ -887,6 +892,17 @@ export default {
       reference: 'Ablaufplan dieses Laufs',
       beats: 'Abschnitte',
     },
+    series_plan: {
+      systemPromptHint: 'Startet mit dem Prompt des Serienplaners, wie er in der Produktion läuft.',
+      shapeHint:
+        'Andere JSON-Form ausprobieren: im Tab Modell die strukturierte Ausgabe ausschalten und die Form im System-Prompt beschreiben. Passt die Antwort nicht zum Folgenplan, erscheint sie als Rohtext mit Hinweis.',
+      structuredHint:
+        'Das Modell antwortet im JSON-Schema des Serienplaners. Aus: freier Text; JSON in der Antwort wird trotzdem gelesen.',
+      sourceSample: 'Beispiel-Eingabe (kein Lauf geladen)',
+      loadFromRunLead:
+        'Ein fertiger Lauf liefert Dokument, Inhaltsbudget, Format und Zielgruppe sowie Folgenzahl und Minuten. Ein Folgenplan des Laufs wird als Referenz gezeigt.',
+      reference: 'Folgenplan dieses Laufs',
+    },
     selection: {
       systemPromptHint: 'Startet mit dem Prompt des Knotens select, wie er in der Produktion läuft.',
       shapeHint:
@@ -1070,6 +1086,30 @@ export default {
     chunk: 'Stück {n}',
     facts: '{seconds} s · {characters} Zeichen · {cost}',
     voicesUnavailable: 'Stimmenliste nicht verfügbar; Voice-IDs direkt eintragen.',
+    prepareFull: 'Ganze Folge vorbereiten',
+    scopeSample: 'Probe (≈ 1 min)',
+    scopeFull: 'Ganze Folge',
+    cached: '{n} von {total} Anfragen gibt es schon aus einer früheren Aufnahme; sie kosten nichts.',
+    resume: 'Fortsetzen',
+    resumeHint: 'Schon erzeugte Stücke werden übernommen und nicht noch einmal bezahlt.',
+    plan: 'Stücke',
+    chunkStatus: {
+      done: 'fertig',
+      cached: 'aus Cache',
+      running: 'läuft',
+      waiting: 'wartet',
+      failed: 'fehlgeschlagen',
+    },
+    download: 'Herunterladen (MP3)',
+    jumpHint: 'Klick auf eine Zeile springt im Audio dorthin.',
+    episodeLength: '{duration} · {lines} Zeilen · {cost}',
+    seriesTitle: 'Audio der Serie',
+    seriesLead: 'Jede Folge bekommt ihre eigene Aufnahme mit den Stimmen des Formats. Vorbereiten setzt Tags und berechnet den Preis; gesprochen wird erst nach der Freigabe.',
+    prepareAll: 'Alle Folgen vorbereiten',
+    approveAll: '{n} Folgen freigeben · ≈ {price}',
+    noAudio: 'noch kein Audio',
+    openEpisode: 'In der Folge öffnen',
+    episodeName: 'Folge {n}',
   },
   artifact: {
     view: 'Ansicht',

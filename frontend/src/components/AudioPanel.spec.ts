@@ -22,6 +22,7 @@ vi.mock('@/api/audio', () => ({
     saveFormatVoices: vi.fn(async () => ({})),
     takes: vi.fn(),
     start: vi.fn(async () => ({})),
+    resume: vi.fn(async () => ({})),
     approve: vi.fn(async () => ({})),
     stop: vi.fn(async () => ({
       id: 'take-1',
@@ -31,6 +32,8 @@ vi.mock('@/api/audio', () => ({
     })),
   },
   takeActive: (status: string) => status === 'queued' || status === 'running',
+  lineAt: (lines: { segment_id: string; start_s: number; end_s: number }[], time: number) =>
+    lines.find((line) => time >= line.start_s && time < line.end_s)?.segment_id ?? null,
 }))
 
 const SETUP = 'ElevenLabs ist nicht eingerichtet: ELEVENLABS_API_KEY fehlt.'
@@ -99,10 +102,15 @@ function take(overrides: Partial<AudioTakeOut>): AudioTakeOut {
       estimate_usd: 0.0832,
       model_id: 'eleven_v4',
       missing_voices: ['Expertin', 'Moderator'],
+      cached_requests: 0,
+      cached_characters: 0,
     },
     audio_script: script,
     audio: null,
     chunks: [],
+    plan: [],
+    mix: null,
+    resumable: false,
     ...overrides,
   }
 }
@@ -130,7 +138,7 @@ describe('AudioPanel', () => {
 
     await wrapper.find('.btn--mark').trigger('click')
     await flushPromises()
-    expect(audioApi.start).toHaveBeenCalledWith('run-1')
+    expect(audioApi.start).toHaveBeenCalledWith('run-1', 'sample')
   })
 
   it('shows the price and the sample lines and approves only with every voice set', async () => {
@@ -240,5 +248,86 @@ describe('AudioPanel', () => {
     expect(wrapper.find('.notice--fail').exists()).toBe(false)
     expect(wrapper.find('[data-stop]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Neue Probe')
+  })
+
+  it('offers the whole episode as well as the sample', async () => {
+    vi.mocked(audioApi.takes).mockResolvedValue(answer(true, []))
+    const wrapper = await mountPanel()
+    await wrapper.findAll('button').find((b) => b.text() === 'Ganze Folge vorbereiten')!.trigger('click')
+    await flushPromises()
+    expect(audioApi.start).toHaveBeenCalledWith('run-1', 'full')
+  })
+
+  it('lists every chunk with its state and resumes a failed take', async () => {
+    vi.mocked(audioApi.takes).mockResolvedValue(
+      answer(true, [
+        take({
+          status: 'failed',
+          scope: 'full',
+          approval: null,
+          error: 'ElevenLabs reports too few credits',
+          resumable: true,
+          plan: [
+            { index: 0, characters: 1700, segment_ids: ['s1'], status: 'done' },
+            { index: 1, characters: 900, segment_ids: ['s2'], status: 'failed' },
+            { index: 2, characters: 1200, segment_ids: ['s3'], status: 'waiting' },
+          ],
+        }),
+      ]),
+    )
+    const wrapper = await mountPanel()
+    const chunks = wrapper.findAll('.chunks li')
+    expect(chunks.map((chunk) => chunk.find('.badge').text())).toEqual([
+      'fertig',
+      'fehlgeschlagen',
+      'wartet',
+    ])
+    expect(wrapper.text()).toContain('too few credits')
+    await wrapper.findAll('button').find((b) => b.text() === 'Fortsetzen')!.trigger('click')
+    await flushPromises()
+    expect(audioApi.resume).toHaveBeenCalledWith('take-1')
+  })
+
+  it('plays the whole take as one file, jumps to a line and highlights the one heard', async () => {
+    vi.mocked(audioApi.takes).mockResolvedValue(
+      answer(true, [
+        take({
+          status: 'completed',
+          scope: 'full',
+          approval: null,
+          total_cost_usd: 1.18,
+          mix: {
+            url: '/api/audio/takes/take-1/mix',
+            download_url: '/api/audio/takes/take-1/mix?download=1',
+            duration_s: 125.4,
+            chunk_offsets_s: [0, 61.2],
+            lines: [
+              { segment_id: 's1', start_s: 0, end_s: 3.1 },
+              { segment_id: 's2', start_s: 3.3, end_s: 61 },
+              { segment_id: 's3', start_s: 61.2, end_s: 125 },
+            ],
+          },
+        }),
+      ]),
+    )
+    const wrapper = await mountPanel()
+    const audio = wrapper.find('audio.full')
+    expect(audio.attributes('src')).toBe('/api/audio/takes/take-1/mix')
+    expect(wrapper.find('a[download]').attributes('href')).toBe(
+      '/api/audio/takes/take-1/mix?download=1',
+    )
+    expect(wrapper.text()).toContain('2:05 · 3 Zeilen · $1.18')
+    const lines = wrapper.findAll('.lines li')
+    expect(lines.map((line) => line.find('.line__time').text())).toEqual(['0:00', '0:03', '1:01'])
+    expect(lines[0].find('.line__tag').text()).toBe('[curious]')
+
+    await lines[2].find('button').trigger('click')
+    const element = audio.element as HTMLAudioElement
+    expect(element.currentTime).toBe(61.2)
+    expect(wrapper.find('.lines li.current').text()).toContain('Nicht in der Probe.')
+
+    element.currentTime = 10
+    await audio.trigger('timeupdate')
+    expect(wrapper.find('.lines li.current').text()).toContain('Guten Tag.')
   })
 })

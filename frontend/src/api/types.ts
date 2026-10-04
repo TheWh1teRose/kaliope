@@ -639,6 +639,8 @@ export interface PipelineSummary {
   updated_by_email: string | null
   run_count: number
   valid: boolean
+  /** `episode`, `series_plan`, or `audio`, derived from the nodes. */
+  purpose: string
 }
 
 export interface PipelineDetail extends PipelineSummary {
@@ -801,6 +803,8 @@ export interface ProviderInfo {
 export interface ModelCatalogue {
   models: ModelInfo[]
   providers: ProviderInfo[]
+  /** Server `DEFAULT_MODEL`, used when a node's model field is empty. */
+  default_model?: string
 }
 
 /** The model parameters an experiment sends with each call. Null = not sent. */
@@ -894,6 +898,8 @@ export interface ExperimentSourceMeta {
   outline?: unknown
   /** The run's selection, for experiments that load the selection step's input. */
   selection?: unknown
+  /** The run's series plan, when the run planned a series. */
+  plan?: unknown
 }
 
 export interface ExperimentSource {
@@ -1011,6 +1017,8 @@ export interface LearningGoal {
   id: string
   text: string
   source: 'document' | 'generated'
+  bloom_level?: 'remember' | 'understand' | 'apply' | 'analyse' | 'evaluate' | 'create' | null
+  derivation?: string | null
 }
 
 export interface SeriesTerm {
@@ -1041,7 +1049,7 @@ export interface SeriesPlan {
   terms: SeriesTerm[]
   episodes: EpisodePlan[]
   unassigned: { block_id: string; reason: string }[]
-  /** Episodes that carry more source words than the dialogue budget allows. */
+  /** An episode over its source-word budget, or one with no usable learning goal. */
   warnings: string[]
   budget: {
     max_supportable_minutes: number
@@ -1210,6 +1218,9 @@ export interface AudioApprovalOut {
   estimate_usd: number
   model_id: string
   missing_voices: string[]
+  /** Requests an earlier take already spoke; reused, not paid again. */
+  cached_requests: number
+  cached_characters: number
 }
 
 export interface AudioChunkOut {
@@ -1219,6 +1230,29 @@ export interface AudioChunkOut {
   duration_s: number
   cost_usd: number
   segment_ids: string[]
+}
+
+export type ChunkStatus = 'done' | 'cached' | 'running' | 'waiting' | 'failed'
+
+export interface ChunkStatusOut {
+  index: number
+  characters: number
+  segment_ids: string[]
+  status: ChunkStatus
+}
+
+export interface LineTime {
+  segment_id: string
+  start_s: number
+  end_s: number
+}
+
+export interface AudioMixOut {
+  url: string
+  download_url: string
+  duration_s: number
+  chunk_offsets_s: number[]
+  lines: LineTime[]
 }
 
 export type TakeStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped'
@@ -1240,6 +1274,10 @@ export interface AudioTakeOut {
   audio_script: Record<string, unknown> | null
   audio: Record<string, unknown> | null
   chunks: AudioChunkOut[]
+  plan: ChunkStatusOut[]
+  mix: AudioMixOut | null
+  /** A failed take that kept its approval continues where it stopped. */
+  resumable: boolean
   stopped_by?: string | null
 }
 
@@ -1247,4 +1285,22 @@ export interface RunAudioOut {
   configured: boolean
   message: string | null
   takes: AudioTakeOut[]
+}
+
+export interface EpisodeAudioOut {
+  index: number
+  name: string | null
+  run_id: string
+  run_status: string
+  take: AudioTakeOut | null
+}
+
+export interface SeriesAudioOut {
+  series_id: string
+  configured: boolean
+  message: string | null
+  format_id: string | null
+  episodes: EpisodeAudioOut[]
+  waiting: number
+  estimate_usd: number
 }

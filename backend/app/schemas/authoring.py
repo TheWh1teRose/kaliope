@@ -116,6 +116,8 @@ class PipelineSummaryOut(BaseModel):
     #: Runs recorded against this pipeline, whatever their outcome.
     run_count: int = 0
     valid: bool = True
+    #: ``episode``, ``series_plan`` or ``audio``, derived from the nodes.
+    purpose: str = "episode"
 
 
 class PipelineDetailOut(PipelineSummaryOut):

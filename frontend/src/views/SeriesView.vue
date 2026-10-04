@@ -2,11 +2,14 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import { audioApi } from '@/api/audio'
 import { ApiError } from '@/api/client'
 import type { NodeIOOut, SeriesEvent, SeriesGraphOut, SeriesOut } from '@/api/types'
+import AudioPanel from '@/components/AudioPanel.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import PipelineCanvas from '@/components/PipelineCanvas.vue'
+import SeriesAudio from '@/components/SeriesAudio.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
 import { seriesTitle } from '@/titles'
@@ -43,6 +46,7 @@ const stuck = computed(
 )
 const plan = computed(() => series.value?.plan ?? null)
 const episodeCount = computed(() => plan.value?.episodes.length ?? series.value?.request.episodes ?? 0)
+const audioFormat = ref<string | null>(null)
 const anyDone = computed(() =>
   (series.value?.episodes ?? []).some((e) => ['completed', 'in_review', 'reviewed'].includes(e.status)),
 )
@@ -213,6 +217,11 @@ function closeInspector(): void {
 onMounted(async () => {
   await reload()
   follow()
+  // The episodes share one format; its voices are the default for every episode.
+  audioApi
+    .series(props.id)
+    .then((audio) => (audioFormat.value = audio.format_id))
+    .catch(() => undefined)
 })
 
 onUnmounted(() => {
@@ -406,7 +415,9 @@ onUnmounted(() => {
             </span>
             <p v-if="episode.summary" class="muted small">{{ episode.summary }}</p>
             <ul class="goals">
-              <li v-for="goal in episode.goals" :key="goal.id">{{ goal.text }}</li>
+              <li v-for="goal in episode.goals" :key="goal.id">
+                {{ goal.text }}<template v-if="goal.bloom_level"> ({{ goal.bloom_level }})</template>
+              </li>
             </ul>
             <p v-if="episode.recap" class="line">{{ t.series.recap }}: {{ episode.recap }}</p>
             <p v-if="episode.preview" class="line">{{ t.series.preview }}: {{ episode.preview }}</p>
@@ -485,6 +496,8 @@ onUnmounted(() => {
         </div>
         <p class="muted hint">{{ t.series.replanHint }}</p>
       </div>
+
+      <SeriesAudio v-if="anyDone" :series-id="series.id" />
     </section>
 
     <section v-else-if="currentEpisode" class="stack" :data-panel="currentEpisode.index">
@@ -511,7 +524,9 @@ onUnmounted(() => {
           </div>
         </div>
         <ul v-if="currentPlanEpisode" class="goals">
-          <li v-for="goal in currentPlanEpisode.goals" :key="goal.id">{{ goal.text }}</li>
+          <li v-for="goal in currentPlanEpisode.goals" :key="goal.id">
+            {{ goal.text }}<template v-if="goal.bloom_level"> ({{ goal.bloom_level }})</template>
+          </li>
         </ul>
         <div v-if="currentEpisode.run_id" class="row wrap">
           <RouterLink class="btn" :to="{ name: 'run', params: { id: currentEpisode.run_id } }">
@@ -530,6 +545,12 @@ onUnmounted(() => {
           </template>
         </div>
       </div>
+      <AudioPanel
+        v-if="currentEpisode.run_id && ['completed', 'in_review', 'reviewed'].includes(currentEpisode.status)"
+        :key="currentEpisode.run_id"
+        :run-id="currentEpisode.run_id"
+        :format-id="audioFormat"
+      />
     </section>
 
     <ModalDialog

@@ -33,7 +33,15 @@ function series(status: SeriesOut['status']): SeriesOut {
         summary: null,
         block_ids: ['b1', 'b2'],
         recap_block_ids: [],
-        goals: [{ id: `g${index}`, text: `Ziel ${index}`, source: 'generated' }],
+        goals: [
+          {
+            id: `g${index}`,
+            text: `Ziel ${index}`,
+            source: 'generated',
+            bloom_level: 'understand',
+            derivation: 'Aus dem gewünschten Ergebnis',
+          },
+        ],
         objective_refs: [],
         target_minutes: 15,
         supportable_minutes: 16,
@@ -109,6 +117,7 @@ describe('series view', () => {
     expect(wrapper.find('h1').text()).toBe('Klimawandel verstehen')
     expect(wrapper.findAll('[data-node]').length).toBeGreaterThan(10)
     expect(wrapper.text()).toContain('Vom Mechanismus zum Handeln.')
+    expect(wrapper.text()).toContain('Ziel 1 (understand)')
     expect(store.watch).not.toHaveBeenCalled()
 
     await wrapper.get('[data-approve]').trigger('click')
@@ -184,6 +193,18 @@ describe('series view', () => {
     const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
     await flushPromises()
     expect(wrapper.get('[data-budget-warning]').text()).toBe(warning)
+  })
+
+  it('shows a warning when an episode has no usable learning goal', async () => {
+    const planned = series('planned')
+    const warning = 'Folge 1 hat keine verwertbaren Lernziele, bitte neu planen'
+    planned.plan!.warnings = [warning]
+    planned.plan!.episodes[0].goals = []
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-budget-warning]').text()).toBe(warning)
+    expect(wrapper.get('[data-panel="plan"]').text()).toContain(warning)
   })
 
   it('warns when the plan has a different episode count than was asked', async () => {

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel
 
@@ -496,6 +496,21 @@ def _spec(model_id: str) -> ModelSpec | None:
             **capabilities,
         }
     )
+
+
+def accepted_effort(model_id: str, effort: str | None) -> Effort | None:
+    """Effort to send for ``model_id``, or ``None`` for the model's own default.
+
+    An empty value, a value that is not an effort, and an effort the model does
+    not list are all ``None``. An id with no capability row is passed through
+    when the value is a real effort, matching :func:`adapt_parameters`.
+    """
+    if not effort or effort not in get_args(Effort):
+        return None
+    spec = _spec(model_id)
+    if spec is not None and effort not in spec.effort_levels:
+        return None
+    return effort  # type: ignore[return-value]
 
 
 def supports_sampling(model_id: str) -> bool:

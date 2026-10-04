@@ -1,19 +1,23 @@
 <script setup lang="ts">
 /**
- * The run's audio: a one-minute sample through an audio pipeline.
+ * The run's audio: a one-minute sample or the whole episode.
  *
- * "Probe vorbereiten" tags the script and prices the sample; the take then
- * waits here with the tagged lines, the voices per speaker and the price.
- * Credits are spent only after "Freigeben". Without an ElevenLabs key the
- * panel says how to set it up instead of failing.
+ * Preparing a take tags the script and prices it; the take then waits here
+ * with the tagged lines, the voices per speaker and the price. Credits are
+ * spent only after "Freigeben". While it is spoken the chunk list shows each
+ * request; a take that failed continues without paying again for finished
+ * chunks. The finished take plays as one file, and every line of the script
+ * can be clicked to jump there; the line being heard is highlighted. Without an
+ * ElevenLabs key the panel says how to set it up instead of failing.
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
-import { audioApi, takeActive } from '@/api/audio'
+import { audioApi, lineAt, takeActive, type AudioScope } from '@/api/audio'
 import { ApiError } from '@/api/client'
 import type { AudioStatus, AudioTakeOut, RunAudioOut, SpeechVoice, VoiceCast } from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
+import { tagParts } from '@/components/artifactView'
 import { fill, t } from '@/i18n'
 
 const props = defineProps<{ runId: string; formatId: string | null }>()
@@ -29,7 +33,16 @@ const saveDefault = ref(true)
 const busy = ref(false)
 const error = ref('')
 const confirmStop = ref(false)
+const player = ref<HTMLAudioElement | null>(null)
+const now = ref(0)
 let timer: number | undefined
+
+interface SpokenLine {
+  segment_id: string
+  speaker: string
+  tagged: string
+  start_s: number
+}
 
 const take = computed<AudioTakeOut | null>(() => data.value?.takes[0] ?? null)
 const active = computed(() => (take.value ? takeActive(take.value.status) : false))
@@ -57,6 +70,47 @@ const sampleScript = computed(() => {
   const count = current.approval?.lines ?? script.lines.length
   return { ...script, lines: script.lines.slice(0, count) }
 })
+
+/** The script's lines with where each is heard in the joined file. */
+const spokenLines = computed<SpokenLine[]>(() => {
+  const mix = take.value?.mix
+  const script = take.value?.audio_script as {
+    lines?: { segment_id: string; speaker: string; tagged: string }[]
+  } | null
+  if (!mix || !script?.lines) return []
+  const starts = new Map(mix.lines.map((line) => [line.segment_id, line.start_s] as const))
+  return script.lines
+    .filter((line) => starts.has(line.segment_id))
+    .map((line) => ({ ...line, start_s: starts.get(line.segment_id) ?? 0 }))
+    .sort((a, b) => a.start_s - b.start_s)
+})
+const currentLine = computed(() => (take.value?.mix ? lineAt(take.value.mix.lines, now.value) : null))
+
+function clock(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds))
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+}
+
+function onTime(): void {
+  now.value = player.value?.currentTime ?? 0
+}
+
+function seek(line: SpokenLine): void {
+  const audio = player.value
+  if (!audio) return
+  audio.currentTime = line.start_s
+  now.value = line.start_s
+  // Some browsers (and jsdom) return nothing from play(); only a promise can reject.
+  const playing = audio.play() as Promise<void> | undefined
+  if (playing) void playing.catch(() => undefined)
+}
+
+function badgeFor(status: string): string {
+  if (status === 'done' || status === 'cached') return 'badge--pass'
+  if (status === 'running') return 'badge--warn'
+  if (status === 'failed') return 'badge--fail'
+  return 'badge--idle'
+}
 
 function money(value: number): string {
   return `$${value.toFixed(2)}`
@@ -102,11 +156,11 @@ async function loadVoices(): Promise<void> {
   }
 }
 
-async function start(): Promise<void> {
+async function start(scope: AudioScope): Promise<void> {
   busy.value = true
   error.value = ''
   try {
-    await audioApi.start(props.runId)
+    await audioApi.start(props.runId, scope)
     await reload()
   } catch (exc) {
     fail(exc)
@@ -141,6 +195,21 @@ async function approve(): Promise<void> {
       await audioApi.saveFormatVoices(props.formatId, draft.value)
     }
     await audioApi.approve(current.id, draft.value)
+    await reload()
+  } catch (exc) {
+    fail(exc)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function resume(): Promise<void> {
+  const current = take.value
+  if (!current) return
+  busy.value = true
+  error.value = ''
+  try {
+    await audioApi.resume(current.id)
     await reload()
   } catch (exc) {
     fail(exc)
@@ -193,7 +262,12 @@ onUnmounted(() => window.clearTimeout(timer))
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
 
     <div v-if="data && !take" class="row wrap">
-      <button class="btn btn--mark" :disabled="busy" @click="start">{{ t.audio.prepare }}</button>
+      <button class="btn btn--mark" :disabled="busy" @click="start('sample')">
+        {{ t.audio.prepare }}
+      </button>
+      <button class="btn" :disabled="busy" @click="start('full')">
+        {{ t.audio.prepareFull }}
+      </button>
       <span class="meta">{{ t.audio.prepareHint }}</span>
     </div>
 
@@ -213,7 +287,12 @@ onUnmounted(() => window.clearTimeout(timer))
       </div>
 
       <div v-else-if="take.status === 'paused' && take.approval" class="approval">
-        <span class="badge badge--warn">{{ t.audio.waiting }}</span>
+        <div class="row wrap">
+          <span class="badge badge--warn">{{ t.audio.waiting }}</span>
+          <span class="badge badge--idle">
+            {{ take.scope === 'full' ? t.audio.scopeFull : t.audio.scopeSample }}
+          </span>
+        </div>
         <dl class="facts">
           <div>
             <dt>{{ t.audio.lines }}</dt>
@@ -232,6 +311,14 @@ onUnmounted(() => window.clearTimeout(timer))
             <dd class="num">≈ {{ money(take.approval.estimate_usd) }}</dd>
           </div>
         </dl>
+        <p v-if="take.approval.cached_requests" class="meta">
+          {{
+            fill(t.audio.cached, {
+              n: take.approval.cached_requests,
+              total: take.approval.requests,
+            })
+          }}
+        </p>
 
         <div v-if="draft" class="voices">
           <p class="eyebrow">{{ t.audio.voices }}</p>
@@ -292,6 +379,55 @@ onUnmounted(() => window.clearTimeout(timer))
         </div>
       </div>
 
+      <div v-else-if="take.status === 'completed' && take.mix" class="player">
+        <div class="row wrap">
+          <span class="badge badge--pass">{{ t.audio.done }}</span>
+          <span class="badge badge--idle">
+            {{ take.scope === 'full' ? t.audio.scopeFull : t.audio.scopeSample }}
+          </span>
+          <span class="meta num">
+            {{
+              fill(t.audio.episodeLength, {
+                duration: clock(take.mix.duration_s),
+                lines: spokenLines.length,
+                cost: money(take.total_cost_usd),
+              })
+            }}
+          </span>
+          <span class="grow" />
+          <a class="btn btn--sm" :href="take.mix.download_url" download>{{ t.audio.download }}</a>
+        </div>
+        <audio
+          ref="player"
+          class="full"
+          controls
+          preload="metadata"
+          :src="take.mix.url"
+          @timeupdate="onTime"
+          @seeked="onTime"
+        />
+        <p class="meta">{{ t.audio.jumpHint }}</p>
+        <ol class="lines">
+          <li
+            v-for="line in spokenLines"
+            :key="line.segment_id"
+            :class="{ current: currentLine === line.segment_id }"
+            :aria-current="currentLine === line.segment_id ? 'true' : undefined"
+          >
+            <button type="button" class="line" @click="seek(line)">
+              <span class="line__time num">{{ clock(line.start_s) }}</span>
+              <span class="line__speaker">{{ line.speaker }}</span>
+              <span class="line__text prose">
+                <template v-for="(part, index) in tagParts(line.tagged)" :key="index">
+                  <span v-if="part.tag" class="line__tag">{{ part.text }}</span>
+                  <template v-else>{{ part.text }}</template>
+                </template>
+              </span>
+            </button>
+          </li>
+        </ol>
+      </div>
+
       <div v-else-if="take.status === 'completed'" class="player">
         <span class="badge badge--pass">{{ t.audio.done }}</span>
         <div v-for="chunk in take.chunks" :key="chunk.index" class="chunk">
@@ -309,17 +445,52 @@ onUnmounted(() => window.clearTimeout(timer))
         </div>
       </div>
 
-      <div v-else-if="take.status === 'failed'" class="notice notice--fail">
-        <b>{{ t.audio.failed }}:</b> {{ take.error }}
+      <div v-else-if="take.status === 'failed'" class="failed">
+        <p class="notice notice--fail"><b>{{ t.audio.failed }}:</b> {{ take.error }}</p>
+        <div v-if="take.resumable" class="row wrap">
+          <button class="btn btn--mark" :disabled="busy || !configured" @click="resume">
+            {{ t.audio.resume }}
+          </button>
+          <span class="meta">{{ t.audio.resumeHint }}</span>
+        </div>
       </div>
 
-      <details v-if="sampleScript" class="script" :open="take.status === 'paused'">
+      <details
+        v-if="take.plan.length && !(take.status === 'completed' && take.mix)"
+        class="plan"
+        :open="take.status !== 'completed'"
+      >
+        <summary class="eyebrow">{{ t.audio.plan }} · {{ take.plan.length }}</summary>
+        <ol class="chunks">
+          <li v-for="chunk in take.plan" :key="chunk.index" :class="`chunk--${chunk.status}`">
+            <span class="num">{{ chunk.index + 1 }}</span>
+            <span class="meta num">{{ chunk.characters.toLocaleString('de-DE') }}</span>
+            <span class="badge" :class="badgeFor(chunk.status)">
+              {{ t.audio.chunkStatus[chunk.status] }}
+            </span>
+          </li>
+        </ol>
+      </details>
+
+      <details
+        v-if="sampleScript && !(take.status === 'completed' && take.mix)"
+        class="script"
+        :open="take.status === 'paused'"
+      >
         <summary class="eyebrow">{{ t.audio.script }}</summary>
         <ArtifactView model="AudioScript" :payload="sampleScript" mode="text" />
       </details>
 
-      <div v-if="take.status === 'completed' || take.status === 'failed' || take.status === 'stopped'" class="row wrap">
-        <button class="btn btn--sm" :disabled="busy" @click="start">{{ t.audio.again }}</button>
+      <div
+        v-if="take.status === 'completed' || take.status === 'failed' || take.status === 'stopped'"
+        class="row wrap"
+      >
+        <button class="btn btn--sm" :disabled="busy" @click="start('sample')">
+          {{ t.audio.again }}
+        </button>
+        <button class="btn btn--sm" :disabled="busy" @click="start('full')">
+          {{ t.audio.prepareFull }}
+        </button>
         <span class="meta num">{{ money(take.total_cost_usd) }}</span>
       </div>
     </template>
@@ -498,6 +669,111 @@ onUnmounted(() => window.clearTimeout(timer))
   min-width: 240px;
 }
 
+.full {
+  width: 100%;
+}
+
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-height: 460px;
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+.lines li + li {
+  border-top: 1px solid var(--rule);
+}
+
+.lines li.current {
+  background: var(--mark-soft);
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 44px 90px minmax(0, 1fr);
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) var(--s3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.line:hover {
+  background: var(--chrome);
+}
+
+.line__time {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  padding-top: 3px;
+}
+
+.line__speaker {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.line__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.line__tag {
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--mark-soft);
+  color: var(--mark-deep);
+  font-family: var(--mono);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .line {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .line__text {
+    grid-column: 1 / -1;
+  }
+}
+
+.failed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.chunks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s2);
+}
+
+.chunks li {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  padding: 4px var(--s2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  font-size: var(--t-sm);
+}
+
+.plan summary,
 .script summary {
   cursor: pointer;
   margin-bottom: var(--s2);

@@ -16,7 +16,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
-from app.llm.base import LLMClient
+from app.llm.base import Effort, LLMClient
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.speech.base import SpeechClient
 
@@ -83,6 +83,17 @@ class NodeContext:
         from app.config import get_settings
 
         return str(self.config.get("model") or get_settings().default_model or fallback)
+
+    def request_effort(self, model: str) -> Effort | None:
+        """Effort from this node's config, or ``None`` for the model default.
+
+        An effort ``model`` does not support is dropped, so a value left over
+        from another model is not sent.
+        """
+        from app.llm.registry import accepted_effort
+
+        raw = self.config.get("effort")
+        return accepted_effort(model, raw if isinstance(raw, str) else None)
 
 
 @runtime_checkable

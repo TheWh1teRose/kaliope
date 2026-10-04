@@ -19,6 +19,9 @@ dependencies = [
     "anthropic>=1,<2",
     "openai>=1.55",
     "google-genai>=0.3",
+    # A static ffmpeg in a wheel: joins and loudness-normalizes generated audio
+    # without a system package (+80 MB instead of apt's +466 MB).
+    "imageio-ffmpeg>=0.5",
 ]
 
 [project.optional-dependencies]
@@ -65,7 +68,7 @@ module = ["app.ingestion.*", "app.pipeline.*"]
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["pymupdf", "pymupdf.*", "anthropic.*", "openai.*", "google.*", "alembic.*"]
+module = ["pymupdf", "pymupdf.*", "anthropic.*", "openai.*", "google.*", "alembic.*", "imageio_ffmpeg.*"]
 ignore_missing_imports = true
 
 # PyMuPDF ships partial, untyped stubs. The two modules that touch it directly

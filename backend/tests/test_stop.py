@@ -397,7 +397,14 @@ def test_resuming_a_stopped_series_in_the_same_process_runs_it(
     try:
         created = client.post(
             "/api/series",
-            json={"document_id": document_id, "minutes_per_episode": 3, "episodes": 2},
+            json={
+                "document_id": document_id,
+                "minutes_per_episode": 3,
+                "episodes": 2,
+                # A hint no other test in this module uses, so the planner is not
+                # served from their cache and this stop actually meets it mid-call.
+                "hint": "resume after stop",
+            },
         )
         assert created.status_code == 201, created.text
         series_id = created.json()["id"]

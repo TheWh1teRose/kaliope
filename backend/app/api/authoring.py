@@ -30,8 +30,14 @@ from app.models import Flow as FlowRow
 from app.models import FlowVersion, FormatSpecRow, FormatVersion, Run, User
 from app.pipeline import catalogue
 from app.pipeline.catalogue import CatalogueError
-from app.pipeline.framework.registry import Flow, get_node, node_names
-from app.pipeline.framework.spec import node_doc, node_params, node_title, prune_defaults
+from app.pipeline.framework.registry import Flow, flow_purpose, get_node, node_names
+from app.pipeline.framework.spec import (
+    node_doc,
+    node_params,
+    node_title,
+    prune_defaults,
+    strip_unsupported_effort,
+)
 from app.pipeline.gates import gate_catalogue
 from app.pipeline.validation import REQUIRED_OUTPUT_KEYS, RUN_SEED_KEYS, validate_flow
 from app.schemas.authoring import (
@@ -403,8 +409,8 @@ def _clean_config(entry: FlowNodeIn) -> dict[str, Any]:
     try:
         node = get_node(entry.node)
     except KeyError:
-        return config
-    return prune_defaults(node, config)
+        return strip_unsupported_effort(config)
+    return strip_unsupported_effort(prune_defaults(node, config))
 
 
 def _draft_from_flow(flow: Flow, row: FlowRow | None) -> PipelineDraft:
@@ -437,6 +443,7 @@ def _summary(
         updated_by_email=emails.get(row.updated_by or "") if row else None,
         run_count=run_count,
         valid=validation.valid,
+        purpose=flow_purpose(flow),
     )
 
 

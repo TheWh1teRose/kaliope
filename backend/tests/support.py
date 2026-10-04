@@ -8,6 +8,7 @@ structural facts the pipeline is supposed to produce for any document.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -233,7 +234,7 @@ class StubProvider:
             chunks[min(count - 1, int(seen * count / total))].append(block_id)
             seen += int(words)
         chunks = [chunk for chunk in chunks if chunk]
-        objectives = "The document states these objectives" in text
+        objectives = "states its own objectives" in text
         episodes = []
         for index, chunk in enumerate(chunks):
             episodes.append(
@@ -243,7 +244,18 @@ class StubProvider:
                     "summary": f"Die Passagen {chunk[0]} bis {chunk[-1]}.",
                     "block_ids": chunk,
                     "recap_block_ids": [chunks[index - 1][0]] if index else [],
-                    "goals": [f"Teil {index + 1} erklären", f"Teil {index + 1} anwenden"],
+                    "goals": [
+                        {
+                            "text": f"Teil {index + 1} erklären",
+                            "bloom_level": "understand",
+                            "derivation": "Aus dem gewünschten Ergebnis.",
+                        },
+                        {
+                            "text": f"Teil {index + 1} anwenden",
+                            "bloom_level": "apply",
+                            "derivation": "Aus dem gewünschten Ergebnis.",
+                        },
+                    ],
                     "objectives": [1] if objectives else [],
                     "recap": "Was in der letzten Folge geklärt wurde." if index else "",
                     "preview": "Was als Nächstes kommt." if index < len(chunks) - 1 else "",
@@ -401,14 +413,54 @@ class StubProvider:
         }
 
 
+#: Seconds of stub speech per dialogue input.
+STUB_SECONDS = 0.5
+
+
+def tone_mp3(seconds: float, frequency: int) -> bytes:
+    """A real, short MP3 (a sine tone), so joining and measuring work as in production."""
+    import subprocess
+    import tempfile
+
+    from app.speech.mix import ffmpeg_exe
+
+    with tempfile.TemporaryDirectory() as folder:
+        out = Path(folder) / "tone.mp3"
+        subprocess.run(
+            [
+                ffmpeg_exe(),
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"sine=f={frequency}:d={seconds}",
+                "-ar",
+                "44100",
+                "-b:a",
+                "64k",
+                str(out),
+            ],
+            check=True,
+        )
+        return out.read_bytes()
+
+
 class StubSpeech:
-    """Deterministic stand-in: a short fake MP3 per request, 1.5 s per input."""
+    """Deterministic stand-in: a real MP3 tone per request, half a second per input.
+
+    The tone's pitch follows the request's text, so different chunks are
+    different files, as they would be from ElevenLabs.
+    """
 
     name = "stub"
 
     def __init__(self) -> None:
         self.requests: list[DialogueRequest] = []
         self.fail_with: SpeechError | None = None
+        #: Fail with this error once the given number of requests succeeded.
+        self.fail_after: tuple[int, SpeechError] | None = None
 
     def available(self) -> bool:
         return True
@@ -416,15 +468,21 @@ class StubSpeech:
     def dialogue(self, request: DialogueRequest) -> SpeechResult:
         if self.fail_with is not None:
             raise self.fail_with
+        if self.fail_after is not None and len(self.requests) >= self.fail_after[0]:
+            raise self.fail_after[1]
         self.requests.append(request)
-        body = json.dumps([item.text for item in request.inputs]).encode()
+        digest = hashlib.sha256(json.dumps([i.text for i in request.inputs]).encode()).digest()
+        frequency = 200 + int.from_bytes(digest[:2], "big") % 800
+        count = len(request.inputs)
         return SpeechResult(
-            audio=b"ID3" + body,
+            audio=tone_mp3(count * STUB_SECONDS, frequency),
             request_id=f"req-{len(self.requests)}",
             character_cost=request.characters(),
             segments=[
-                VoiceSegment(input_index=i, start_s=i * 1.5, end_s=i * 1.5 + 1.4)
-                for i in range(len(request.inputs))
+                VoiceSegment(
+                    input_index=i, start_s=i * STUB_SECONDS, end_s=(i + 0.9) * STUB_SECONDS
+                )
+                for i in range(count)
             ],
         )
 

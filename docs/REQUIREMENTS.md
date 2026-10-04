@@ -407,6 +407,8 @@ Output: `Selection{learning_goals, selected_blocks, rationale}`
 - If `objectives` is non-empty, learning goals MUST be derived from them and
   recorded as `source="document"`. Otherwise they are generated and recorded as
   `source="generated"`. Both paths are first-class; neither is a fallback hack.
+  A series episode keeps the plan's goals. An episode the plan left with no
+  usable goal fails here instead of inventing one.
 - Block salience from §5.6 is passed to the prompt as a weight. No zone is named
   in prose in the prompt; the model receives generic labels and weights.
 - The `Selection` artifact is reviewable in its own right (§9.3).

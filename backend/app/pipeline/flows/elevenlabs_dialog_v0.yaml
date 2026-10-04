@@ -1,15 +1,16 @@
 id: elevenlabs_dialog_v0
-version: "0.2"
+version: "0.3"
 description: >-
   Audio pipeline for ElevenLabs Text to Dialogue (Eleven v4). Runs on a finished
   script and is chosen separately from the pipeline that writes it: tags and
   spoken forms checked against the script, a pause that shows the price before
-  any credits are spent, then the approved lines spoken chunk by chunk. This
-  version speaks a one-minute sample; the whole episode with one joined file
-  follows. It does not start a run on its own.
+  any credits are spent, the approved lines spoken chunk by chunk, then one
+  loudness-normalised MP3 with a clock for every line. A take is a one-minute
+  sample or the whole episode. It does not start a run on its own.
 nodes:
   - node: audio_script
     config: {model: claude-sonnet-5-5}
   - node: audio_approval
   - node: audio_render
+  - node: audio_join
 gates: []

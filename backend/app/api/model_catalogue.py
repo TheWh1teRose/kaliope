@@ -10,6 +10,7 @@ from typing import get_args
 
 from fastapi import APIRouter, Depends
 
+from app.config import get_settings
 from app.llm import registry as llm_registry
 from app.models import User
 from app.schemas.model_catalogue import ModelCatalogueOut, ModelOut, ProviderOut
@@ -23,4 +24,5 @@ def get_models(_user: User = Depends(current_user)) -> ModelCatalogueOut:
     return ModelCatalogueOut(
         models=[ModelOut.model_validate(entry) for entry in llm_registry.catalogue()],
         providers=[ProviderOut(name=name) for name in get_args(llm_registry.ProviderName)],
+        default_model=get_settings().default_model,
     )

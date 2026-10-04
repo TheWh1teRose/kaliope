@@ -321,6 +321,7 @@ class ScriptNode:
                 messages=[Message(role="user", content=content, cache_breaks=breaks)],
                 max_tokens=int(ctx.get("max_tokens", 8000)),
                 temperature=ctx.get("temperature"),
+                effort=ctx.request_effort(model),
                 json_schema=_SCHEMA,
                 cache_system=True,
             )

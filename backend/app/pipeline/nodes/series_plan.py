@@ -20,6 +20,7 @@ the episodes' scripts still take every fact from their own passages.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -29,7 +30,20 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
-from app.pipeline.nodes.content_budget import MIN_VIABLE_MINUTES, source_word_budget
+from app.pipeline.nodes.content_budget import (
+    MIN_VIABLE_MINUTES,
+    episode_source_words,
+    source_word_budget,
+)
+from app.pipeline.objective_rule import (
+    DOCUMENT_OBJECTIVES_NOTE,
+    FORMULATED_GOAL_PROPERTIES,
+    FORMULATED_GOAL_REQUIRED,
+    OBJECTIVE_FORMULATION_RULE,
+    desired_outcome_source,
+    formulated_goal,
+    time_budget_constraint,
+)
 from app.schemas.document import Block, ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
@@ -55,7 +69,8 @@ PASSAGE_CHARS = 600
 #: Why a passage the model skipped stays out once an episode is full.
 LEFT_OUT_FOR_DIALOGUE = "Left out to leave room for dialogue."
 
-_SYSTEM = """\
+_SYSTEM = (
+    """\
 You split a source document into a series of grounded audio episodes.
 
 You are given the document's passages grouped by section. Each passage has an
@@ -76,8 +91,14 @@ Rules:
 - List passages that do not fit an episode's source budget under unassigned
   with a reason. Never invent ids.
 - Each episode has a title, a role in the series (for example introduction,
-  core, deepening, application, closing), a one-sentence summary and two to
-  four learning goals that say what a listener can do or explain afterwards.
+  core, deepening, application, closing), a one-sentence summary, and two to
+  four learning goals. Formulate those goals by this rule:
+
+"""
+    + OBJECTIVE_FORMULATION_RULE
+    + """
+
+- For the goals, return text, bloom_level and derivation. Do not return a bare string.
 - For episodes after the first, name what to recall briefly from earlier
   episodes (recap) and up to three earlier passage ids that the recap may cite
   (recap_block_ids). For every episode but the last, name what the next episode
@@ -86,12 +107,13 @@ Rules:
   episodes build on each other.
 - List the key terms with a short gloss and the episode that introduces each
   one, so every episode uses the same name for the same idea.
-- Do not state facts of your own. Titles, summaries and goals describe the
-  material; they do not add to it.
+- Do not state facts of your own. Titles and summaries describe the material;
+  they do not add to it. Goals follow the rule above and do not add facts either.
 - Write in the document's language.
 
 Return JSON only.
 """
+)
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -121,7 +143,15 @@ _SCHEMA: dict[str, Any] = {
                     "summary": {"type": "string"},
                     "block_ids": {"type": "array", "items": {"type": "string"}},
                     "recap_block_ids": {"type": "array", "items": {"type": "string"}},
-                    "goals": {"type": "array", "items": {"type": "string"}},
+                    "goals": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": FORMULATED_GOAL_PROPERTIES,
+                            "required": FORMULATED_GOAL_REQUIRED,
+                            "additionalProperties": False,
+                        },
+                    },
                     "objectives": {"type": "array", "items": {"type": "integer"}},
                     "recap": {"type": "string"},
                     "preview": {"type": "string"},
@@ -156,7 +186,7 @@ class SeriesPlanInput(BaseModel):
 class SeriesPlanNode:
     name = "series_plan"
     title = "Folgen planen"
-    version = "1.1"
+    version = "1.2"
     Input: type[BaseModel] = SeriesPlanInput
     Output: type[BaseModel] = SeriesPlan
     produces = "series_plan"
@@ -171,15 +201,20 @@ class SeriesPlanNode:
             "The model sees every narratable passage, grouped by section, with its id, "
             "weight, word count and the start of its text. It returns the episodes with "
             "their passages, learning goals, role, recap and preview, plus the series title, "
-            "through-line and key terms. If that answer does not have the asked-for number "
-            "of episodes, it is asked once more; a count that still differs is kept.",
+            "through-line and key terms. Each goal is formulated by the same rule as the "
+            "objectives node: a checkable change derived from the desired outcome, limited "
+            "to the episode's time, at the lowest honest Bloom level. If that answer does "
+            "not have the asked-for number of episodes, it is asked once more; a count that "
+            "still differs is kept.",
             "The answer is then checked, not trusted: unknown ids are dropped, a passage "
             "named twice keeps its first episode, and passages the model did not mention "
             "join a neighbour only while that episode stays within its source-word budget. "
             "The rest stay unassigned, so an episode cannot be filled past the point where "
             "dialogue still fits. An episode the model filled past that budget keeps its "
-            "passages and is named in a warning. An episode below three supportable minutes "
-            "is merged into its smaller neighbour. Episodes keep the requested length.",
+            "passages and is named in a warning. An episode left with no usable learning "
+            "goal is kept and named in a warning. An episode below three supportable "
+            "minutes is merged into its smaller neighbour. Episodes keep the requested "
+            "length.",
             "The planner writes no facts. Each episode later selects, outlines and writes "
             "from its own passages through the normal nodes.",
         ],
@@ -193,7 +228,8 @@ class SeriesPlanNode:
         },
         output="A SeriesPlan: title, through-line, terms, the episodes with their passages "
         "and goals, the passages left out on purpose, the budget verdict, and a warning "
-        "for each episode that carries more source words than its budget.",
+        "for each episode that carries more source words than its budget or has no "
+        "usable learning goal.",
         failure_modes=[
             "The document supports fewer than two episodes of three minutes — verdict "
             "'insufficient'; a single episode fits better.",
@@ -270,6 +306,7 @@ class SeriesPlanNode:
                         messages=[Message(role="user", content=message)],
                         max_tokens=int(ctx.get("max_tokens", 16000)),
                         temperature=ctx.get("temperature"),
+                        effort=ctx.request_effort(ctx.model("claude-opus-5")),
                         json_schema=_SCHEMA,
                         cache_system=True,
                     )
@@ -313,9 +350,34 @@ def episode_count(supportable: float, minutes: int, requested: int | None) -> in
     return max(MIN_EPISODES, min(MAX_EPISODES, math.floor(supportable / max(minutes, 1))))
 
 
-def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, minutes: int) -> str:
-    request = inp.series_request
-    section_titles = {s.id: s.title for s in (inp.parsed.sections or [])}
+_PLACEHOLDER = re.compile(r"\{\{\s*([a-z0-9_]+)\s*\}\}")
+
+PLANNER_USER_TEMPLATE = (
+    "Plan {{episode_count}} episodes of about {{minutes_per_episode}} minutes each.\n"
+    "{{source_budget}}\n"
+    "Format: {{format_name}}. Speakers: {{speakers}}.\n"
+    "Audience: {{audience}}\n"
+    "{{outcome}}\n"
+    "{{time_budget}} per episode.\n"
+    "Document language: {{language}}\n"
+    "{{hint}}\n"
+    "{{objectives}}\n\n"
+    "Passages ({{passage_count}}):{{passages}}"
+)
+
+
+def planner_user_fields(
+    parsed: ParsedDocument,
+    budget: ContentBudget,
+    format_spec: FormatSpec,
+    audience: AudienceSpec,
+    candidates: list[Block],
+    count: int,
+    minutes: int,
+    hint: str | None,
+) -> dict[str, str]:
+    """The pieces of the planner user message, in the order the template joins them."""
+    section_titles = {section.id: section.title for section in (parsed.sections or [])}
     lines: list[str] = []
     current: str | None = "\0"
     for block in candidates:
@@ -330,36 +392,68 @@ def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, min
             f"[{block.id}] (weight {round(block.salience, 2)}, {block.word_count()} words)\n{text}"
         )
 
-    objectives = inp.parsed.objectives
+    objectives = parsed.objectives
     objective_text = (
-        "The document states these objectives; list the numbers each episode serves:\n"
-        + "\n".join(f"{i + 1}. {o}" for i, o in enumerate(objectives))
+        DOCUMENT_OBJECTIVES_NOTE
+        + " List the numbers each episode serves:\n"
+        + "\n".join(f"{index + 1}. {objective}" for index, objective in enumerate(objectives))
         if objectives
         else "The document states no objectives of its own."
     )
-    hint_text = (request.hint or "").strip()
-    hint = f"Guidance on the split: {hint_text}\n" if hint_text else ""
+    desired = (audience.desired_outcome or "").strip()
+    outcome_text = (
+        desired_outcome_source(desired)
+        if desired
+        else "The audience states no desired outcome. Do not invent ambition from the document."
+    )
+    hint_text = (hint or "").strip()
+    guidance = f"Guidance on the split: {hint_text}\n" if hint_text else ""
     total_words = sum(block.word_count() for block in candidates)
-    expansion = inp.budget.dialogue_expansion
-    wpm = inp.budget.words_per_minute
-    per_episode_cap = source_word_budget(minutes, wpm, expansion)
-    even_share = max(1, total_words // max(count, 1))
-    target_source = min(per_episode_cap, even_share)
-    return (
-        f"Plan {count} episodes of about {minutes} minutes each.\n"
-        f"Each episode should use about {target_source} words of source material "
-        f"so the {minutes} minutes have room for dialogue, explanation and questions. "
-        f"{per_episode_cap} words is the most one episode should carry; "
-        f"the document's {total_words} narratable words spread across {count} episodes "
-        f"come to about {even_share} words each. Prefer the smaller figure, and prefer "
-        f"fewer, richer topics. Passages beyond that stay unassigned.\n"
-        f"Format: {inp.format_spec.name}. "
-        f"Speakers: {', '.join(f'{s.name} ({s.role})' for s in inp.format_spec.speakers)}.\n"
-        f"Audience: {inp.audience_spec.description}\n"
-        f"Document language: {inp.parsed.language}\n"
-        f"{hint}\n"
-        f"{objective_text}\n\n"
-        f"Passages ({len(candidates)}):" + "\n".join(lines)
+    target_source, per_episode_cap, even_share = episode_source_words(
+        total_words, count, minutes, budget.words_per_minute, budget.dialogue_expansion
+    )
+    return {
+        "episode_count": str(count),
+        "minutes_per_episode": str(minutes),
+        "source_budget": (
+            f"Each episode should use about {target_source} words of source material "
+            f"so the {minutes} minutes have room for dialogue, explanation and questions. "
+            f"{per_episode_cap} words is the most one episode should carry; "
+            f"the document's {total_words} narratable words spread across {count} episodes "
+            f"come to about {even_share} words each. Prefer the smaller figure, and prefer "
+            f"fewer, richer topics. Passages beyond that stay unassigned."
+        ),
+        "format_name": format_spec.name,
+        "speakers": ", ".join(
+            f"{speaker.name} ({speaker.role})" for speaker in format_spec.speakers
+        ),
+        "audience": audience.description,
+        "outcome": outcome_text,
+        "time_budget": time_budget_constraint(float(minutes)),
+        "language": parsed.language,
+        "hint": guidance,
+        "objectives": objective_text,
+        "passage_count": str(len(candidates)),
+        "passages": "\n".join(lines),
+    }
+
+
+def fill_planner_template(fields: dict[str, str]) -> str:
+    return _PLACEHOLDER.sub(lambda match: fields[match.group(1)], PLANNER_USER_TEMPLATE)
+
+
+def _user_message(inp: SeriesPlanInput, candidates: list[Block], count: int, minutes: int) -> str:
+    return fill_planner_template(
+        planner_user_fields(
+            inp.parsed,
+            inp.budget,
+            inp.format_spec,
+            inp.audience_spec,
+            candidates,
+            count,
+            minutes,
+            inp.series_request.hint,
+        )
     )
 
 
@@ -377,7 +471,8 @@ def build_plan(
     dropped or invented to match it. An episode under three minutes is merged
     into a neighbour. Forgotten passages join a neighbour only while it stays
     within the source-word budget for ``minutes``. An episode that still holds
-    more source words than that budget keeps them and records a warning.
+    more source words than that budget keeps them and records a warning. An
+    episode whose goals are all unusable is kept and records a warning.
     """
     candidates = parsed.narratable_blocks()
     known = {b.id: b for b in candidates}
@@ -492,11 +587,21 @@ def build_plan(
         recap_ids = [
             str(b).strip() for b in entry.get("recap_block_ids", []) if str(b).strip() in earlier
         ][:MAX_RECAP_BLOCKS]
-        goal_texts = [t for t in (str(g).strip() for g in entry.get("goals", [])) if t]
-        goals = [
-            LearningGoal(id=f"{episode_id}-g{i}", text=text, source=source)  # type: ignore[arg-type]
-            for i, text in enumerate(goal_texts)
-        ]
+        goals: list[LearningGoal] = []
+        for raw_goal in entry.get("goals", []) or []:
+            parsed_goal = formulated_goal(raw_goal)
+            if parsed_goal is None:
+                continue
+            text, level, derivation = parsed_goal
+            goals.append(
+                LearningGoal(
+                    id=f"{episode_id}-g{len(goals)}",
+                    text=text,
+                    source=source,  # type: ignore[arg-type]
+                    bloom_level=level,
+                    derivation=derivation,
+                )
+            )
         refs: list[str] = []
         for number in entry.get("objectives", []) or []:
             try:
@@ -545,6 +650,10 @@ def build_plan(
 
     warnings: list[str] = []
     for episode in episodes:
+        if not episode.goals:
+            warnings.append(
+                f"Folge {episode.index} hat keine verwertbaren Lernziele, bitte neu planen"
+            )
         words = _words(episode.block_ids)
         if words > cap:
             warnings.append(

@@ -334,7 +334,7 @@ def test_render_speaks_each_chunk_once_and_stores_the_audio(store: ArtifactStore
     first = audio.chunks[0]
     assert store.blob_path(first.blob, ".mp3").read_bytes().startswith(b"ID3")
     assert [t.segment_id for t in first.lines] == ["b0-s0000", "b0-s0001"]
-    assert first.duration_s == pytest.approx(2.9)
+    assert first.duration_s == pytest.approx(0.95)
     assert audio.characters == 2200 and audio.cost_usd == pytest.approx(0.176)
 
     again = AudioRenderNode().run(inp, _context(store, SpeechClient(stub)))
@@ -375,3 +375,67 @@ def test_render_without_a_provider_or_a_voice_fails_with_a_reason(store: Artifac
     refusing.fail_with = SpeechError("ElevenLabs reports too few credits", status=402)
     with pytest.raises(NodeError, match="too few credits"):
         AudioRenderNode().run(inp, _context(store, SpeechClient(refusing)))
+
+
+# --------------------------------------------------------------------- join
+
+
+def test_join_puts_every_line_on_the_joined_files_clock(store: ArtifactStore) -> None:
+    from app.pipeline.nodes.audio_join import AudioJoinInput, AudioJoinNode
+    from app.schemas.audio import AudioMix
+
+    script = _script(("b0", 100), ("b0", 100), ("b1", 100))
+    stub = StubSpeech()
+    inp = AudioRenderInput(
+        audio_script=script,
+        audio_approval=_approval(),
+        voice_cast=CAST,
+        audio_request=AudioRequest(scope="full"),
+    )
+    audio = AudioRenderNode().run(inp, _context(store, SpeechClient(stub)))
+    mixed = AudioJoinNode().run(AudioJoinInput(audio=audio), _context(store, None))
+    assert isinstance(mixed, AudioMix)
+
+    # Two inputs (1.0 s) + 0.3 s gap + one input (0.5 s).
+    assert mixed.chunk_offsets_s == pytest.approx([0.0, 1.3], abs=0.03)
+    assert mixed.duration_s == pytest.approx(1.8, abs=0.05)
+    third = next(t for t in mixed.lines if t.segment_id == "b1-s0002")
+    assert third.start_s == pytest.approx(1.3, abs=0.03)
+    assert store.blob_path(mixed.blob, ".mp3").exists()
+
+    again = AudioJoinNode().run(AudioJoinInput(audio=audio), _context(store, None))
+    assert again == mixed, "joining the same chunks reuses the file"
+
+
+def test_a_reused_chunk_takes_the_line_ids_of_its_new_place(store: ArtifactStore) -> None:
+    stub = StubSpeech()
+    first = _script(("b0", 100), ("b0", 120))
+    AudioRenderNode().run(
+        AudioRenderInput(
+            audio_script=first,
+            audio_approval=_approval(),
+            voice_cast=CAST,
+            audio_request=AudioRequest(scope="full"),
+        ),
+        _context(store, SpeechClient(stub)),
+    )
+    moved = first.model_copy(
+        update={
+            "lines": [
+                line.model_copy(update={"segment_id": f"neu-{i}", "beat_id": "x"})
+                for i, line in enumerate(first.lines)
+            ]
+        }
+    )
+    audio = AudioRenderNode().run(
+        AudioRenderInput(
+            audio_script=moved,
+            audio_approval=_approval(),
+            voice_cast=CAST,
+            audio_request=AudioRequest(scope="full"),
+        ),
+        _context(store, SpeechClient(stub)),
+    )
+    assert len(stub.requests) == 1, "the same text and voices are not spoken again"
+    assert audio.chunks[0].segment_ids == ["neu-0", "neu-1"]
+    assert [t.segment_id for t in audio.chunks[0].lines] == ["neu-0", "neu-1"]

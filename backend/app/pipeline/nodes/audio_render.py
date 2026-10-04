@@ -14,8 +14,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.pipeline.audio_chunks import plan_chunks, select_lines
-from app.pipeline.framework.artifacts import hash_payload
+from app.pipeline.audio_chunks import (
+    DEFAULT_OUTPUT_FORMAT,
+    cached_chunk,
+    plan_requests,
+    select_lines,
+)
 from app.pipeline.framework.cancel import RunStopped
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
@@ -106,44 +110,29 @@ class AudioRenderNode:
         missing = sorted({line.speaker for line in lines if not cast.voice_for(line.speaker)})
         if missing:
             raise NodeError(f"no voice is set for {', '.join(missing)}")
-        output_format = str(ctx.get("output_format") or "mp3_44100_128")
+        output_format = str(ctx.get("output_format") or DEFAULT_OUTPUT_FORMAT)
 
-        chunks = plan_chunks(lines)
+        planned = plan_requests(lines, cast, output_format)
         rendered: list[AudioChunk] = []
         request_ids: list[str] = []
-        for index, chunk_lines in enumerate(chunks):
-            inputs = [
-                DialogueInput(text=line.tagged, voice_id=cast.voice_for(line.speaker) or "")
-                for line in chunk_lines
-            ]
-            key = hash_payload(
-                {
-                    "node": self.name,
-                    "version": self.version,
-                    "model": cast.model_id,
-                    "stability": cast.stability,
-                    "seed": cast.seed,
-                    "language": cast.language_code,
-                    "format": output_format,
-                    "inputs": [item.model_dump() for item in inputs],
-                }
-            )
-            chunk = self._cached(ctx, key)
+        for plan in planned:
+            chunk = cached_chunk(ctx.artifacts, plan.key)
             if chunk is None:
                 if ctx.stopped():
                     raise RunStopped()
-                ctx.progress(f"speaking chunk {index + 1} of {len(chunks)}")
+                ctx.progress(f"speaking chunk {plan.index + 1} of {len(planned)}")
                 chunk = self._speak(
-                    ctx, cast, inputs, chunk_lines, index, output_format, request_ids
+                    ctx, cast, plan.inputs, plan.lines, plan.index, output_format, request_ids
                 )
-                ctx.artifacts.put_step(key, ctx.artifacts.put("audio_chunk", chunk).hash)
+                # Stored before the next request: a take that fails later resumes here.
+                ctx.artifacts.put_step(plan.key, ctx.artifacts.put("audio_chunk", chunk).hash)
                 if ctx.stopped():
                     # This chunk is already paid for and cached. Do not speak another.
                     rendered.append(chunk)
                     raise RunStopped()
             else:
-                ctx.progress(f"chunk {index + 1} of {len(chunks)} reused")
-                chunk = chunk.model_copy(update={"index": index})
+                ctx.progress(f"chunk {plan.index + 1} of {len(planned)} reused")
+                chunk = _placed(chunk, plan.index, plan.lines)
             rendered.append(chunk)
             if chunk.request_id and chunk.request_id not in request_ids[-1:]:
                 request_ids.append(chunk.request_id)
@@ -156,13 +145,6 @@ class AudioRenderNode:
             cost_usd=round(sum(chunk.cost_usd for chunk in rendered), 6),
             duration_s=round(sum(chunk.duration_s for chunk in rendered), 3),
         )
-
-    def _cached(self, ctx: NodeContext, key: str) -> AudioChunk | None:
-        digest = ctx.artifacts.get_step(key)
-        if digest is None:
-            return None
-        chunk = AudioChunk.model_validate(ctx.artifacts.get_raw(digest))
-        return chunk if ctx.artifacts.has_blob(chunk.blob, chunk.suffix) else None
 
     def _speak(
         self,
@@ -197,6 +179,7 @@ class AudioRenderNode:
                 segment_id=lines[segment.input_index].segment_id,
                 start_s=segment.start_s,
                 end_s=segment.end_s,
+                input_index=segment.input_index,
             )
             for segment in result.segments
             if 0 <= segment.input_index < len(lines)
@@ -212,6 +195,26 @@ class AudioRenderNode:
             duration_s=max((timing.end_s for timing in timings), default=0.0),
             lines=timings,
         )
+
+
+def _placed(chunk: AudioChunk, index: int, lines: list[AudioLine]) -> AudioChunk:
+    """A cached chunk at this position: the same sound, this take's line ids.
+
+    The same text can be spoken in two places, or kept across a script edit
+    elsewhere; the audio is shared, the line ids must be the ones here.
+    """
+    timings = []
+    for position, timing in enumerate(chunk.lines):
+        at = timing.input_index if timing.input_index is not None else position
+        if 0 <= at < len(lines):
+            timings.append(timing.model_copy(update={"segment_id": lines[at].segment_id}))
+    return chunk.model_copy(
+        update={
+            "index": index,
+            "segment_ids": [line.segment_id for line in lines],
+            "lines": timings,
+        }
+    )
 
 
 register_node(AudioRenderNode())
