@@ -47,6 +47,7 @@ const stoppedNotice = computed(() => {
 })
 const confirmStop = ref(false)
 const stopping = ref(false)
+const stopError = ref('')
 
 function duration(node: { started_at: string | null; finished_at: string | null }): string {
   if (!node.started_at || !node.finished_at) return t.common.none
@@ -135,11 +136,14 @@ async function submitNotes(): Promise<void> {
 async function stopRun(): Promise<void> {
   if (!run.value || stopping.value) return
   stopping.value = true
+  stopError.value = ''
   try {
     await runs.stop(props.id)
     confirmStop.value = false
     await reload()
     follow()
+  } catch (exc) {
+    stopError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
   } finally {
     stopping.value = false
   }
@@ -192,7 +196,7 @@ onUnmounted(() => {
           type="button"
           data-stop
           :disabled="stopping"
-          @click="confirmStop = true"
+          @click="stopError = ''; confirmStop = true"
         >
           {{ t.run.stop }}
         </button>
@@ -378,6 +382,7 @@ onUnmounted(() => {
       :lead="t.run.stopLead"
       @close="confirmStop = false"
     >
+      <p v-if="stopError" class="notice notice--fail" role="alert">{{ stopError }}</p>
       <template #actions>
         <button class="btn btn--ghost" type="button" @click="confirmStop = false">
           {{ t.common.cancel }}

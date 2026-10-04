@@ -2,7 +2,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '@/api/client'
 import type { RunStatus } from '@/api/types'
+import { t } from '@/i18n'
 
 import RunsView from './RunsView.vue'
 
@@ -101,6 +103,26 @@ describe('runs list', () => {
     document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
     await flushPromises()
     expect(seriesStore.stop).toHaveBeenCalledWith('s-live')
+    wrapper.unmount()
+  })
+
+  it.each(['run', 'series'] as const)('shows rejected %s stop errors and allows retry', async (kind) => {
+    const stop = kind === 'run' ? runs.stop : seriesStore.stop
+    stop.mockRejectedValueOnce(new ApiError(401, 'Unauthorized', 'Bitte erneut anmelden.'))
+    const wrapper = await mountList()
+    await wrapper.get(kind === 'run' ? '[data-stop]' : '[data-stop-series]').trigger('click')
+    const confirm = () => document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')!
+    confirm().click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('Bitte erneut anmelden.')
+    expect(confirm().disabled).toBe(false)
+    stop.mockRejectedValueOnce(new Error('offline'))
+    confirm().click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(t.errors.generic)
+    confirm().click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
     wrapper.unmount()
   })
 

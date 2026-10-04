@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import { ApiError } from '@/api/client'
 import type { SeriesOut } from '@/api/types'
 import ModalDialog from '@/components/ModalDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -21,6 +22,7 @@ const seriesStore = useSeriesStore()
 const series = ref<SeriesOut[]>([])
 const confirmStop = ref<{ kind: 'run' | 'series'; id: string } | null>(null)
 const stopping = ref(false)
+const stopError = ref('')
 let timer: ReturnType<typeof setInterval> | null = null
 
 function when(value: string): string {
@@ -41,6 +43,7 @@ async function load(): Promise<void> {
 }
 
 function askStop(kind: 'run' | 'series', id: string): void {
+  stopError.value = ''
   confirmStop.value = { kind, id }
 }
 
@@ -48,11 +51,14 @@ async function confirm(): Promise<void> {
   const target = confirmStop.value
   if (!target || stopping.value) return
   stopping.value = true
+  stopError.value = ''
   try {
     if (target.kind === 'run') await runs.stop(target.id)
     else await seriesStore.stop(target.id)
     confirmStop.value = null
     await load()
+  } catch (exc) {
+    stopError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
   } finally {
     stopping.value = false
   }
@@ -185,6 +191,7 @@ onUnmounted(() => {
       :lead="confirmStop?.kind === 'series' ? t.series.stopLead : t.run.stopLead"
       @close="confirmStop = null"
     >
+      <p v-if="stopError" class="notice notice--fail" role="alert">{{ stopError }}</p>
       <template #actions>
         <button class="btn btn--ghost" type="button" @click="confirmStop = null">
           {{ t.common.cancel }}

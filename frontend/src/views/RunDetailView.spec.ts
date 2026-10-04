@@ -2,7 +2,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '@/api/client'
 import type { RunOut, RunStatus } from '@/api/types'
+import { t } from '@/i18n'
 
 import RunDetailView from './RunDetailView.vue'
 
@@ -94,6 +96,33 @@ describe('run detail', () => {
     expect(wrapper.find('pre.trace').exists()).toBe(false)
     expect(wrapper.get('[data-again]').text()).toBe('Erneut starten')
     expect(wrapper.get('[data-again]').attributes('href')).toBe('/documents/d1/runs/new')
+    wrapper.unmount()
+  })
+
+  it('shows rejected stop errors without closing the confirmation', async () => {
+    store.stop.mockRejectedValueOnce(new ApiError(401, 'Unauthorized', 'Bitte erneut anmelden.'))
+    const wrapper = mount(RunDetailView, {
+      props: { id: 'r1' },
+      attachTo: document.body,
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    await wrapper.get('[data-stop]').trigger('click')
+    const confirm = () => document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')!
+    confirm().click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('Bitte erneut anmelden.')
+    expect(confirm().disabled).toBe(false)
+    expect(wrapper.get('[data-stop]').exists()).toBe(true)
+    store.stop.mockRejectedValueOnce(new Error('offline'))
+    confirm().click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(t.errors.generic)
+    store.get.mockImplementation(async () => run('stopped'))
+    confirm().click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(wrapper.find('[data-stop]').exists()).toBe(false)
     wrapper.unmount()
   })
 

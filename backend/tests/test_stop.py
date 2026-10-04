@@ -113,12 +113,18 @@ def document_id(client: TestClient, tmp_path_factory: pytest.TempPathFactory) ->
     return identifier
 
 
+def _job_active(job_id: str) -> bool:
+    with worker._lock:
+        future = worker._futures.get(job_id)
+        return future is not None and not future.done()
+
+
 def _wait_run(client: TestClient, run_id: str, states: set[str]) -> dict[str, Any]:
     deadline = time.monotonic() + 180
     body: dict[str, Any] = {}
     while time.monotonic() < deadline:
         body = client.get(f"/api/runs/{run_id}").json()
-        if body["status"] in states:
+        if body["status"] in states and not _job_active(run_id):
             return body
         time.sleep(0.05)
     raise AssertionError(f"run stayed {body.get('status')}: {body.get('error')}")
@@ -141,7 +147,7 @@ def _wait_take(client: TestClient, run_id: str, take_id: str, states: set[str]) 
     while time.monotonic() < deadline:
         takes = client.get(f"/api/runs/{run_id}/audio").json()["takes"]
         found = next((take for take in takes if take["id"] == take_id), {})
-        if found.get("status") in states:
+        if found.get("status") in states and not _job_active(take_id):
             return found
         time.sleep(0.05)
     raise AssertionError(f"take stayed {found.get('status')}: {found.get('error')}")
@@ -614,3 +620,154 @@ def _completed_run(client: TestClient, document_id: str) -> str:
     stored = _wait_run(client, run_id, {"completed", "failed", "stopped"})
     assert stored["status"] == "completed", stored["error"]
     return run_id
+
+
+def test_busy_run_stop_during_gates_is_durable(
+    client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib
+
+    module = importlib.import_module("app.worker")
+    original = module.run_gates
+    entered = threading.Event()
+    release = threading.Event()
+
+    def gates(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        assert release.wait(30)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "run_gates", gates)
+    registry.register_provider("anthropic", _STUB)
+    created = client.post(
+        "/api/runs", json={"document_id": document_id, "flow_id": "baseline_v0"}
+    )
+    assert created.status_code == 201, created.text
+    run_id = created.json()["id"]
+    try:
+        assert entered.wait(60)
+        stopped = client.post(f"/api/runs/{run_id}/stop").json()
+        assert stopped["outcome"] == "stopping"
+        assert stopped["status"] == "stopped"
+        before = client.get(f"/api/runs/{run_id}").json()
+        assert before["status"] == "stopped"
+        assert before["stopped_by"] == EMAIL
+        assert client.post(f"/api/runs/{run_id}/stop").json()["outcome"] == "already_stopped"
+    finally:
+        release.set()
+    done = _wait_run(client, run_id, {"stopped", "completed", "failed"})
+    assert done["status"] == "stopped"
+    assert done["error"] is None
+    assert done["manifest"] == before["manifest"]
+    assert done["total_cost_usd"] == before["total_cost_usd"]
+    with session_scope() as session:
+        assert _finish_rows(session, run_id) == (0, 0)
+
+
+@pytest.mark.parametrize("stage", ["plan", "checks"])
+def test_busy_series_stop_at_finalization_is_durable(
+    client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    import importlib
+
+    module = importlib.import_module("app.worker")
+    entered = threading.Event()
+    release = threading.Event()
+    if stage == "plan":
+        original = worker._run_for_series
+
+        def finish_plan(*args: Any) -> Any:
+            result = original(*args)
+            entered.set()
+            assert release.wait(30)
+            return result
+
+        monkeypatch.setattr(worker, "_run_for_series", finish_plan)
+    else:
+        check = module.coverage_check
+
+        def coverage(*args: Any) -> Any:
+            entered.set()
+            assert release.wait(30)
+            return check(*args)
+
+        monkeypatch.setattr(module, "coverage_check", coverage)
+    registry.register_provider("anthropic", _STUB)
+    created = client.post(
+        "/api/series",
+        json={"document_id": document_id, "minutes_per_episode": 3, "episodes": 2},
+    )
+    assert created.status_code == 201, created.text
+    series_id = created.json()["id"]
+    try:
+        if stage == "checks":
+            planned = _wait_series(client, series_id, {"planned", "failed"})
+            assert planned["status"] == "planned", planned["error"]
+            assert client.post(f"/api/series/{series_id}/approve").status_code == 200
+        assert entered.wait(120)
+        stopped = client.post(f"/api/series/{series_id}/stop").json()
+        assert stopped["outcome"] == "stopping"
+        assert stopped["status"] == "stopped"
+        before = client.get(f"/api/series/{series_id}").json()
+        assert before["status"] == "stopped"
+        assert before["stopped_by"] == EMAIL
+        assert client.post(f"/api/series/{series_id}/stop").json()["outcome"] == "already_stopped"
+    finally:
+        release.set()
+    done = _wait_series(client, series_id, {"stopped", "planned", "completed", "failed"})
+    assert done["status"] == "stopped"
+    assert done["error"] is None
+    if stage == "checks":
+        assert done["plan"] == before["plan"]
+        assert all(episode["status"] == "completed" for episode in done["episodes"])
+    else:
+        resumed = client.post(f"/api/series/{series_id}/resume")
+        assert resumed.status_code == 200, resumed.text
+        done = _wait_series(client, series_id, {"planned", "failed", "stopped"})
+        assert done["status"] == "planned", done["error"]
+
+
+def test_busy_take_stop_at_completion_keeps_paid_output(
+    client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    speech = StubSpeech()
+    speech_registry.register_provider(speech)
+    run_id = _completed_run(client, document_id)
+    original = worker._end_take
+    entered = threading.Event()
+    release = threading.Event()
+    output: dict[str, Any] = {}
+
+    def end(take_id: str, status: str, **kwargs: Any) -> None:
+        if status == "completed":
+            output.update(kwargs)
+            entered.set()
+            assert release.wait(30)
+        original(take_id, status, **kwargs)
+
+    monkeypatch.setattr(worker, "_end_take", end)
+    created = client.post(f"/api/runs/{run_id}/audio", json={})
+    assert created.status_code == 201, created.text
+    take_id = created.json()["id"]
+    waiting = _wait_take(client, run_id, take_id, {"paused", "failed"})
+    assert waiting["status"] == "paused", waiting["error"]
+    try:
+        assert client.post(f"/api/audio/takes/{take_id}/approve", json={}).status_code == 200
+        assert entered.wait(120)
+        stopped = client.post(f"/api/audio/takes/{take_id}/stop").json()
+        assert stopped["outcome"] == "stopping"
+        assert stopped["status"] == "stopped"
+        assert stopped["stopped_by"] == EMAIL
+        assert client.post(f"/api/audio/takes/{take_id}/stop").json()["outcome"] == "already_stopped"
+    finally:
+        release.set()
+    done = _wait_take(client, run_id, take_id, {"stopped", "completed", "failed"})
+    assert done["status"] == "stopped"
+    assert done["error"] is None
+    assert done["stopped_by"] == EMAIL
+    assert done["total_cost_usd"] == pytest.approx(waiting["total_cost_usd"] + output["spent"])
+    with session_scope() as session:
+        take = session.get(AudioTake, take_id)
+        assert take is not None
+        assert take.manifest_json["bag_hashes"] == output["manifest"]["bag_hashes"]
+        assert "audio_mix" in take.manifest_json["bag_hashes"]
