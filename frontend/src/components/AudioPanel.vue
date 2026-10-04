@@ -224,7 +224,7 @@ async function resume(): Promise<void> {
 
 function schedule(): void {
   window.clearTimeout(timer)
-  if (active.value) timer = window.setTimeout(() => void reload(), POLL_MS)
+  if (active.value || take.value?.active) timer = window.setTimeout(() => void reload(), POLL_MS)
 }
 
 watch(data, schedule)

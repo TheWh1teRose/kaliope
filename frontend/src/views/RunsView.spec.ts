@@ -17,6 +17,7 @@ function runRow(id: string, status: RunStatus) {
     flow_id: 'baseline_v0',
     flow_version: '1.0',
     status,
+    active: false,
     created_at: '2026-10-03T10:00:00Z',
     total_cost_usd: 0.01,
     target_minutes: 15,
@@ -35,6 +36,7 @@ function seriesRow(id: string, status: string) {
     flow_id: 'baseline_v0',
     flow_version: '1.0',
     status,
+    active: false,
     created_at: '2026-10-03T10:00:00Z',
     total_cost_usd: 0.02,
     episodes: [{ index: 1 }, { index: 2 }],
@@ -136,6 +138,30 @@ describe('runs list', () => {
     const wrapper = await mountList()
     expect(wrapper.findAll('[data-stop]')).toHaveLength(2)
     wrapper.unmount()
+  })
+
+  it.each(['run', 'series'])('refreshes stopped %s costs until the worker drains', async (kind) => {
+    vi.useFakeTimers()
+    runs.items = [{ ...runRow('r-live', 'stopped'), active: kind === 'run' }]
+    seriesStore.list.mockResolvedValue([{ ...seriesRow('s-live', 'stopped'), active: kind === 'series' }])
+    const wrapper = await mountList()
+    try {
+      const reads = runs.load.mock.calls.length
+      await vi.advanceTimersByTimeAsync(3999)
+      expect(runs.load).toHaveBeenCalledTimes(reads)
+      runs.load.mockImplementationOnce(async () => {
+        runs.items = [{ ...runRow('r-live', 'stopped'), total_cost_usd: 0.42 }]
+      })
+      seriesStore.list.mockResolvedValue([{ ...seriesRow('s-live', 'stopped'), total_cost_usd: 0.42 }])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(wrapper.text()).toContain('$0.4200')
+      expect(runs.load).toHaveBeenCalledTimes(reads + 1)
+      await vi.advanceTimersByTimeAsync(12000)
+      expect(runs.load).toHaveBeenCalledTimes(reads + 1)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
   })
 
   it('shows Gestoppt with a neutral badge and no stop button', async () => {

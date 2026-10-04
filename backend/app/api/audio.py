@@ -141,6 +141,7 @@ class MixOut(BaseModel):
 
 
 class TakeOut(BaseModel):
+    active: bool = False
     id: str
     run_id: str
     flow_id: str
@@ -734,6 +735,9 @@ def _approval_out(take: AudioTake) -> ApprovalOut | None:
 
 
 def _take_out(db: Session, take: AudioTake, run: Run) -> TakeOut:
+    active = worker.job_active(take.id)
+    if take.status == "stopped" and not active:
+        db.refresh(take)
     store = _store()
     bag = _bag(take)
     script_digest = bag.get("audio_script")
@@ -747,6 +751,7 @@ def _take_out(db: Session, take: AudioTake, run: Run) -> TakeOut:
     mixed = _mix(take, store)
     speakers = FormatSpec.model_validate(run.format_spec_json).speaker_names()
     return TakeOut(
+        active=active,
         id=take.id,
         run_id=take.run_id,
         flow_id=take.flow_id,

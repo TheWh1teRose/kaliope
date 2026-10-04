@@ -99,6 +99,36 @@ describe('run detail', () => {
     wrapper.unmount()
   })
 
+  it('refreshes a stopped run until its final paid state arrives', async () => {
+    vi.useFakeTimers()
+    let drained = false
+    store.get.mockImplementation(async () => ({
+      ...run('stopped'), active: !drained, total_cost_usd: drained ? 0.42 : 0.02,
+    }))
+    const wrapper = mount(RunDetailView, {
+      props: { id: 'r1' },
+      global: { plugins: [router()] },
+    })
+    try {
+      await flushPromises()
+      expect(store.watch).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('$0.0200')
+      await vi.advanceTimersByTimeAsync(1499)
+      expect(store.get).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(store.get).toHaveBeenCalledTimes(2)
+      drained = true
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(wrapper.text()).toContain('$0.4200')
+      expect(store.watch).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(store.get).toHaveBeenCalledTimes(3)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('shows rejected stop errors without closing the confirmation', async () => {
     store.stop.mockRejectedValueOnce(new ApiError(401, 'Unauthorized', 'Bitte erneut anmelden.'))
     const wrapper = mount(RunDetailView, {

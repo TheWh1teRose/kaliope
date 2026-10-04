@@ -23,6 +23,7 @@ const series = ref<SeriesOut[]>([])
 const confirmStop = ref<{ kind: 'run' | 'series'; id: string } | null>(null)
 const stopping = ref(false)
 const stopError = ref('')
+let disposed = false
 let timer: ReturnType<typeof setInterval> | null = null
 
 function when(value: string): string {
@@ -33,9 +34,9 @@ async function load(): Promise<void> {
   await runs.load()
   series.value = await seriesStore.list().catch(() => [])
   const moving =
-    runs.items.some((run) => LIVE_RUN.has(run.status)) ||
-    series.value.some((row) => LIVE_SERIES.has(row.status))
-  if (moving && !timer) timer = setInterval(load, POLL_MS)
+    runs.items.some((run) => LIVE_RUN.has(run.status) || run.active) ||
+    series.value.some((row) => LIVE_SERIES.has(row.status) || row.active)
+  if (!disposed && moving && !timer) timer = setInterval(load, POLL_MS)
   if (!moving && timer) {
     clearInterval(timer)
     timer = null
@@ -66,6 +67,7 @@ async function confirm(): Promise<void> {
 
 onMounted(load)
 onUnmounted(() => {
+  disposed = true
   if (timer) clearInterval(timer)
 })
 </script>

@@ -65,8 +65,15 @@ async function reload(): Promise<void> {
     feedback.value = null
     notesOpen.value = false
   }
+  if (drainTimer) clearTimeout(drainTimer)
+  drainTimer = null
+  if (!disposed && run.value.status === 'stopped' && run.value.active) {
+    drainTimer = setTimeout(() => void reload(), 1500)
+  }
 }
 
+let disposed = false
+let drainTimer: ReturnType<typeof setTimeout> | null = null
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
@@ -86,6 +93,7 @@ function onLiveEvent(line: ProgressLine): void {
 
 function follow(): void {
   if (live.value) runs.watch(props.id, reload, onLiveEvent)
+  else runs.stopWatching()
 }
 
 async function loadFeedback(): Promise<void> {
@@ -171,7 +179,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   runs.stopWatching()
+  if (drainTimer) clearTimeout(drainTimer)
   if (refreshTimer) clearTimeout(refreshTimer)
 })
 </script>

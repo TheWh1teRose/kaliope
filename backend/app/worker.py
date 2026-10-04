@@ -283,6 +283,11 @@ class Worker:
             return self._execute_run(run_id) is not False
         finally:
             self._discard_run_flag(run_id)
+            with session_scope() as session:
+                run = session.get(Run, run_id)
+                stopped = run is not None and run.status == "stopped"
+            if stopped:
+                self._emit(run_id, "run.stopped", {"run_id": run_id})
 
     def _execute_run(self, run_id: str) -> bool | None:
         settings = get_settings()
@@ -620,6 +625,11 @@ class Worker:
         self._arm(series_id)
         return self._track(series_id, self.submit(self.execute_series, series_id))
 
+    def job_active(self, job_id: str) -> bool:
+        with self._lock:
+            future = self._futures.get(job_id)
+            return (future is not None and not future.done()) or job_id in self._current_run.values()
+
     def series_active(self, series_id: str) -> bool:
         with self._lock:
             return series_id in self._active_series
@@ -642,6 +652,11 @@ class Worker:
         finally:
             with self._lock:
                 self._active_series.discard(series_id)
+            with session_scope() as session:
+                series = session.get(Series, series_id)
+                stopped = series is not None and series.status == "stopped"
+            if stopped:
+                bus.publish(series_channel(series_id), "series.stopped", {"series_id": series_id})
 
     def _drive_series(self, series_id: str) -> None:
         store = ArtifactStore(get_settings().artifacts_dir)

@@ -40,7 +40,10 @@ const confirmStop = ref(false)
 
 const IDLE = new Set(['planned', 'completed', 'failed', 'stopped'])
 
-const moving = computed(() => !!series.value && (!IDLE.has(series.value.status) || series.value.active))
+const moving = computed(
+  () => !!series.value && series.value.status !== 'stopped' &&
+    (!IDLE.has(series.value.status) || series.value.active),
+)
 const stuck = computed(
   () => !!series.value && !IDLE.has(series.value.status) && !series.value.active,
 )
@@ -111,27 +114,36 @@ async function reload(): Promise<void> {
   if (replanHint.value === null) {
     replanHint.value = series.value.request.hint ?? ''
   }
+  if (series.value.status === 'stopped') {
+    if (refreshTimer) clearTimeout(refreshTimer)
+    refreshTimer = null
+    if (series.value.active) scheduleRefresh(1500)
+  }
 }
 
+let disposed = false
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
-function scheduleRefresh(): void {
-  if (refreshTimer) return
+function scheduleRefresh(delay = 400): void {
+  if (disposed || refreshTimer) return
   refreshTimer = setTimeout(async () => {
     refreshTimer = null
     await reload()
-  }, 400)
+  }, delay)
 }
 
 function onEvent(event: SeriesEvent): void {
   if (event.type === 'node.progress' && event.run_id && event.node && event.message) {
     live.value = { ...live.value, [`${event.run_id}:${event.node}`]: liveNote(event.message) }
   }
-  if (event.type !== 'node.progress') scheduleRefresh()
+  if (event.type !== 'node.progress' && series.value?.status !== 'stopped') scheduleRefresh()
 }
 
 function follow(): void {
-  if (!moving.value) return
+  if (!moving.value) {
+    seriesStore.stopWatching()
+    return
+  }
   seriesStore.watch(props.id, {
     onEvent,
     onTerminal: async () => {
@@ -229,6 +241,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   seriesStore.stopWatching()
   if (refreshTimer) clearTimeout(refreshTimer)
 })

@@ -272,6 +272,7 @@ export interface FeedbackOut {
 }
 
 export interface RunOut {
+  active?: boolean
   id: string
   document_id: string
   document_title: string | null
@@ -1258,6 +1259,7 @@ export interface AudioMixOut {
 export type TakeStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped'
 
 export interface AudioTakeOut {
+  active?: boolean
   id: string
   run_id: string
   flow_id: string

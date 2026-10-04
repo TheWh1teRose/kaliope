@@ -1033,6 +1033,9 @@ def _gate_reports(db: Session, run_id: str) -> list[GateReport]:
 
 
 def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
+    active = worker.job_active(run.id)
+    if run.status == "stopped" and not active:
+        db.refresh(run)
     document = db.get(Document, run.document_id)
     config = run.config_json or {}
     nodes: list[RunNodeOut] = []
@@ -1060,6 +1063,7 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         gates = _gate_reports(db, run.id)
 
     return RunOut(
+        active=active,
         id=run.id,
         document_id=run.document_id,
         document_title=(document.title or document.filename) if document else None,

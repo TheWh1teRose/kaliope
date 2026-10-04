@@ -488,6 +488,9 @@ def _pending_graph(flow: Flow) -> RunGraphOut:
 
 
 def _series_out(db: Session, series: Series) -> SeriesOut:
+    active = worker.series_active(series.id)
+    if series.status == "stopped" and not active:
+        db.refresh(series)
     store = _store()
     plan = load_plan(store, series)
     planner = plan_run(db, series.id)
@@ -537,7 +540,7 @@ def _series_out(db: Session, series: Series) -> SeriesOut:
         total_cost_usd=round(sum(r.total_cost_usd for r in all_runs), 8),
         episodes=episodes,
         progress=stage_progress(db, series),
-        active=worker.series_active(series.id),
+        active=active,
         stopped_by=_person(db, (series.request_json or {}).get("stopped_by")),
     )
 

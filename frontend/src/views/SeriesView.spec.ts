@@ -249,6 +249,48 @@ describe('series view', () => {
     expect(store.watch).not.toHaveBeenCalled()
   })
 
+  it.each(['mount', 'terminal', 'stop'])('polls a stopped worker without reopening SSE after %s', async (entry) => {
+    vi.useFakeTimers()
+    let drained = false
+    const stopped = () => ({ ...series('stopped'), active: !drained, total_cost_usd: drained ? 0.42 : 0.14 })
+    store.get.mockImplementation(async () => stopped())
+    if (entry !== 'mount') store.get.mockResolvedValueOnce(series('writing'))
+    const wrapper = mount(SeriesView, {
+      props: { id: 's1' },
+      attachTo: document.body,
+      global: { plugins: [router()] },
+    })
+    try {
+      await flushPromises()
+      if (entry === 'terminal') {
+        await store.watch.mock.calls[0][1].onTerminal()
+      } else if (entry === 'stop') {
+        await wrapper.get('[data-stop]').trigger('click')
+        document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
+        await flushPromises()
+      }
+      const reads = store.get.mock.calls.length
+      const streams = store.watch.mock.calls.length
+      expect(streams).toBe(entry === 'mount' ? 0 : 1)
+      expect(wrapper.find('[data-stop]').exists()).toBe(false)
+      await vi.advanceTimersByTimeAsync(1499)
+      expect(store.get).toHaveBeenCalledTimes(reads)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(store.get).toHaveBeenCalledTimes(reads + 1)
+      expect(store.watch).toHaveBeenCalledTimes(streams)
+      drained = true
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(wrapper.text()).toContain('$0.4200')
+      expect(store.watch).toHaveBeenCalledTimes(streams)
+      const finalReads = store.get.mock.calls.length
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(store.get).toHaveBeenCalledTimes(finalReads)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('follows a moving series and switches to an episode from its lane', async () => {
     store.get.mockResolvedValueOnce(series('writing'))
     const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })

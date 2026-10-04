@@ -203,6 +203,7 @@ class PauseOut(BaseModel):
 
 
 class RunOut(BaseModel):
+    active: bool = False
     id: str
     document_id: str
     document_title: str | None = None

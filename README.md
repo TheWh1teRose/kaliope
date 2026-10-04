@@ -251,6 +251,12 @@ either, so its prompts and cache keys are unchanged (pinned by
 `tests/test_series_golden.py`). Series that fail or were stopped resume where
 they left off.
 
+Known stop/resume limits: after resuming a series, its stopper label (and that of
+queued episodes) can still name the previous stopper; resumed run-node accounting
+can replace previously paid totals even though cached artifacts remain reusable.
+Stopping the planner as an individual run can stop the series without copying the
+planner's stopper label onto the series. These are accepted limits for PR #40.
+
 The series view shows the whole pipeline on one pannable canvas — the planner as
 a column, one lane per episode — compact (state, cost, tokens, duration) or with
 every input and output, and follows the run live. After the last episode the S1

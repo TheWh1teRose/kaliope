@@ -247,6 +247,32 @@ describe('AudioPanel', () => {
     wrapper.unmount()
   })
 
+  it('polls a stopped take until its paid chunk state is final', async () => {
+    vi.useFakeTimers()
+    let drained = false
+    vi.mocked(audioApi.takes).mockImplementation(async () => answer(true, [take({
+      status: 'stopped', active: !drained, approval: null,
+      total_cost_usd: drained ? 0.42 : 0.01,
+    })]))
+    const wrapper = await mountPanel()
+    try {
+      const reads = vi.mocked(audioApi.takes).mock.calls.length
+      expect(wrapper.find('[data-stop]').exists()).toBe(false)
+      await vi.advanceTimersByTimeAsync(1499)
+      expect(audioApi.takes).toHaveBeenCalledTimes(reads)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(audioApi.takes).toHaveBeenCalledTimes(reads + 1)
+      drained = true
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(wrapper.text()).toContain('$0.42')
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(audioApi.takes).toHaveBeenCalledTimes(reads + 2)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('shows a stopped take without treating it as a failure', async () => {
     vi.mocked(audioApi.takes).mockResolvedValue(
       answer(true, [

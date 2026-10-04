@@ -20,6 +20,7 @@ from sqlalchemy import CheckConstraint, func, select
 
 from app.config import get_settings
 from app.db import session_scope
+from app.events import bus
 from app.llm import registry
 from app.llm.base import CompletionRequest
 from app.main import create_app
@@ -244,6 +245,10 @@ def test_stopping_a_running_run_keeps_artifacts_and_a_rerun_reuses_them(
         assert stopped.status_code == 200, stopped.text
         assert stopped.json()["outcome"] == "stopping"
         assert stopped.json()["stopped_by"] == EMAIL
+        draining = client.get(f"/api/runs/{run_id}").json()
+        assert draining["status"] == "stopped" and draining["active"] is True
+        listed = client.get("/api/runs").json()
+        assert next(row for row in listed if row["id"] == run_id)["active"] is True
         provider.release.set()
         body = _wait_run(client, run_id, {"stopped", "failed", "completed"})
     finally:
@@ -252,6 +257,14 @@ def test_stopping_a_running_run_keeps_artifacts_and_a_rerun_reuses_them(
 
     assert body["status"] == "stopped", body["error"]
     assert body["error"] is None
+    assert body["active"] is False
+    assert body["total_cost_usd"] > draining["total_cost_usd"]
+    subscriber, replay = bus.subscribe(run_id)
+    try:
+        assert sum(event.type == "run.stopped" for event in replay) >= 2
+        assert replay[-1].type == "run.stopped"
+    finally:
+        bus.unsubscribe(run_id, subscriber)
     nodes = {node["node_name"]: node for node in body["nodes"]}
     assert nodes["ingest"]["artifact_hash"]
     assert nodes["content_budget"]["artifact_hash"]
@@ -527,6 +540,8 @@ def test_stopping_audio_mid_chunk_keeps_the_chunk_that_was_already_paid_for(
         )
         stopped = client.post(f"/api/audio/takes/{take_id}/stop")
         assert stopped.json()["outcome"] == "stopping"
+        draining = client.get(f"/api/runs/{run_id}/audio").json()["takes"][0]
+        assert draining["status"] == "stopped" and draining["active"] is True
         speech.release.set()
         stored = _wait_take(client, run_id, take_id, {"stopped", "failed", "completed"})
     finally:
@@ -534,6 +549,7 @@ def test_stopping_audio_mid_chunk_keeps_the_chunk_that_was_already_paid_for(
 
     assert stored["status"] == "stopped", stored["error"]
     assert stored["error"] is None
+    assert stored["active"] is False
     assert len(speech.requests) == 1
     first = tuple(item.text for item in speech.requests[0].inputs)
     chunk_cost = cost_usd(cast["model_id"], speech.requests[0].characters())
@@ -710,12 +726,14 @@ def test_busy_series_stop_at_finalization_is_durable(
         assert stopped["status"] == "stopped"
         before = client.get(f"/api/series/{series_id}").json()
         assert before["status"] == "stopped"
+        assert before["active"] is True
         assert before["stopped_by"] == EMAIL
         assert client.post(f"/api/series/{series_id}/stop").json()["outcome"] == "already_stopped"
     finally:
         release.set()
     done = _wait_series(client, series_id, {"stopped", "planned", "completed", "failed"})
     assert done["status"] == "stopped"
+    assert done["active"] is False
     assert done["error"] is None
     if stage == "checks":
         assert done["plan"] == before["plan"]
