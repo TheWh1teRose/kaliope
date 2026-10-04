@@ -28,7 +28,7 @@ from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.registry import Flow as PipelineFlow
 from app.security import hash_password
 from app.speech import registry as speech_registry
-from app.speech.base import DialogueRequest
+from app.speech.base import DialogueRequest, cost_usd
 from app.worker import worker
 from tests.support import StubProvider, StubSpeech
 from tests.test_gates import claim, filler, make_context
@@ -512,6 +512,7 @@ def test_stopping_audio_mid_chunk_keeps_the_chunk_that_was_already_paid_for(
     take_id = started.json()["id"]
     waiting = _wait_take(client, run_id, take_id, {"paused", "failed"})
     assert waiting["status"] == "paused", waiting["error"]
+    paid_before = waiting["total_cost_usd"]
     try:
         approved = client.post(f"/api/audio/takes/{take_id}/approve", json={})
         assert approved.status_code == 200, approved.text
@@ -529,6 +530,8 @@ def test_stopping_audio_mid_chunk_keeps_the_chunk_that_was_already_paid_for(
     assert stored["error"] is None
     assert len(speech.requests) == 1
     first = tuple(item.text for item in speech.requests[0].inputs)
+    chunk_cost = cost_usd(cast["model_id"], speech.requests[0].characters())
+    assert stored["total_cost_usd"] == pytest.approx(paid_before + chunk_cost)
 
     # The stop replaced the in-flight render. Approving again resumes from the
     # approval and must reuse the chunk that was already spoken.
@@ -546,6 +549,8 @@ def test_stopping_audio_mid_chunk_keeps_the_chunk_that_was_already_paid_for(
     assert done["status"] == "completed", done["error"]
     spoken = [tuple(item.text for item in request.inputs) for request in speech.requests]
     assert spoken.count(first) == 1
+    paid = sum(cost_usd(cast["model_id"], request.characters()) for request in speech.requests)
+    assert done["total_cost_usd"] == pytest.approx(paid_before + paid)
 
     finished = client.post(f"/api/audio/takes/{take_id}/stop").json()
     assert finished["outcome"] == "finished"

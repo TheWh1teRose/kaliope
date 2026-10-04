@@ -313,6 +313,7 @@ class FlowRunner:
         record.tokens_in = usage_delta.input_tokens + usage_delta.cache_read_tokens
         record.tokens_out = usage_delta.output_tokens
         record.cost_usd = round(self._spent() - cost_before, 8)
+        manifest.nodes.append(record)
         manifest.recompute_total()
         self.on_node(record)
         self.llm.node_name = None
