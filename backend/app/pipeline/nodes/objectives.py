@@ -16,11 +16,18 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
+from app.pipeline.objective_rule import (
+    DOCUMENT_OBJECTIVES_NOTE,
+    FORMULATED_GOAL_PROPERTIES,
+    FORMULATED_GOAL_REQUIRED,
+    OBJECTIVE_FORMULATION_RULE,
+    desired_outcome_source,
+    formulated_goal,
+    time_budget_constraint,
+)
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
-    BLOOM_LEVELS,
     AudienceSpec,
-    BloomLevel,
     ContentBudget,
     Objective,
     Objectives,
@@ -32,45 +39,11 @@ DEFAULT_MAX_OBJECTIVES = 5
 DEFAULT_MAX_CONTEXT_CHARS = 8_000
 MIN_BLOCK_CHARS = 80
 
-_SYSTEM = """\
-You write the learning objectives for a grounded audio episode.
-
-An objective describes what changes for the listener after they have heard the
-episode — a capability they did not have before, stated so it can be checked.
-It is not a topic, a chapter title, or a summary of the source.
-
-You are given a desired outcome. That is the only source. Derive every
-objective from it. The document is there so you can make an objective concrete
-and refuse ones the material cannot support; it is not a second source of
-objectives. Do not invent a goal the desired outcome does not imply.
-
-You are also given a time budget: how long the episode will actually last.
-That is a hard constraint on what can change. Write only objectives a listener
-can honestly reach in that time. A short episode cannot produce apply,
-evaluate or create unless the desired outcome is already that narrow — and
-even then, usually only one such objective. Prefer fewer objectives over a
-list that would need a lecture. If the desired outcome is larger than the
-time allows, keep the achievable core and leave the rest out; do not dilute
-it into a catalogue of unfinishable goals.
-
-Classify each objective on Bloom's taxonomy, using the lowest honest level:
-
-- remember: recall a fact, term or sequence
-- understand: explain, paraphrase or give the idea in their own words
-- apply: use the idea in a familiar situation
-- analyse: break a situation into parts and see how they relate
-- evaluate: judge against a criterion
-- create: produce something new from the ideas
-
-Do not inflate the level. A short episode that should leave the listener able
-to explain a mechanism is 'understand', not 'create'. Not every level needs to
-appear. Prefer fewer, sharper objectives over a full taxonomy for its own sake.
-
-Write the objectives in the language of the desired outcome, as change
-statements (what the listener can do or explain afterwards).
-
-Return JSON only.
-"""
+_SYSTEM = (
+    "You write the learning objectives for a grounded audio episode.\n\n"
+    f"{OBJECTIVE_FORMULATION_RULE}\n\n"
+    "Return JSON only.\n"
+)
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -81,14 +54,9 @@ _SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string"},
-                    "text": {"type": "string"},
-                    "bloom_level": {
-                        "type": "string",
-                        "enum": list(BLOOM_LEVELS),
-                    },
-                    "derivation": {"type": "string"},
+                    **FORMULATED_GOAL_PROPERTIES,
                 },
-                "required": ["text", "bloom_level"],
+                "required": FORMULATED_GOAL_REQUIRED,
                 "additionalProperties": False,
             },
         },
@@ -96,23 +64,6 @@ _SCHEMA: dict[str, Any] = {
     },
     "required": ["objectives", "rationale"],
     "additionalProperties": False,
-}
-
-#: Spellings a model commonly returns that still name a real Bloom level.
-_BLOOM_ALIASES: dict[str, BloomLevel] = {
-    "remember": "remember",
-    "knowledge": "remember",
-    "understand": "understand",
-    "comprehension": "understand",
-    "apply": "apply",
-    "application": "apply",
-    "analyse": "analyse",
-    "analyze": "analyse",
-    "analysis": "analyse",
-    "evaluate": "evaluate",
-    "evaluation": "evaluate",
-    "create": "create",
-    "synthesis": "create",
 }
 
 
@@ -279,14 +230,14 @@ class ObjectivesNode:
         for index, entry in enumerate(data.get("objectives", [])):
             if len(items) >= max_objectives:
                 break
-            text = str(entry.get("text", "")).strip()
-            if not text:
+            if not isinstance(entry, dict):
                 continue
-            level = _bloom_level(entry.get("bloom_level"))
-            if level is None:
-                unknown_levels += 1
+            parsed = formulated_goal(entry)
+            if parsed is None:
+                if str(entry.get("text", "")).strip():
+                    unknown_levels += 1
                 continue
-            derivation = str(entry.get("derivation") or "").strip() or None
+            text, level, derivation = parsed
             items.append(
                 Objective(
                     id=str(entry.get("id") or f"o{index}").strip() or f"o{index}",
@@ -308,13 +259,6 @@ class ObjectivesNode:
         )
 
 
-def _bloom_level(raw: Any) -> BloomLevel | None:
-    if raw is None:
-        return None
-    key = str(raw).strip().lower()
-    return _BLOOM_ALIASES.get(key)
-
-
 def _user_prompt(
     spec: AudienceSpec,
     parsed: ParsedDocument,
@@ -323,12 +267,11 @@ def _user_prompt(
     max_context_chars: int,
 ) -> str:
     parts = [
-        f"Desired outcome (the source — derive every objective from this):\n{spec.desired_outcome}",
+        desired_outcome_source(spec.desired_outcome or ""),
         f"\nWrite at most {max_objectives} objectives.",
         (
-            f"Time budget (constraint — only write objectives a listener can "
-            f"reach in this time): {budget.target_minutes:.1f} minutes "
-            f"(~{budget.target_words} words at {budget.words_per_minute} wpm)."
+            time_budget_constraint(budget.target_minutes)
+            + f" (~{budget.target_words} words at {budget.words_per_minute} wpm)."
         ),
         f"Document language: {parsed.language}",
     ]
@@ -338,9 +281,7 @@ def _user_prompt(
 
     if parsed.objectives:
         parts.append(
-            "\nThe document states its own objectives. Use them only to make a "
-            "desired-outcome objective concrete; do not copy them as a second list.\n"
-            + "\n".join(f"- {o}" for o in parsed.objectives)
+            "\n" + DOCUMENT_OBJECTIVES_NOTE + "\n" + "\n".join(f"- {o}" for o in parsed.objectives)
         )
 
     titles = [s.title for s in (parsed.sections or []) if s.title]

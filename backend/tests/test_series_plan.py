@@ -21,7 +21,17 @@ from app.pipeline.nodes.series_plan import (
     build_plan,
     episode_count,
 )
-from app.schemas.pipeline import DEFAULT_DIALOGUE_EXPANSION, ContentBudget, SeriesRequest
+from app.pipeline.objective_rule import (
+    OBJECTIVE_FORMULATION_RULE,
+    desired_outcome_source,
+    time_budget_constraint,
+)
+from app.schemas.pipeline import (
+    DEFAULT_DIALOGUE_EXPANSION,
+    ContentBudget,
+    LearningGoal,
+    SeriesRequest,
+)
 from tests.series_support import AUDIENCE, FORMAT, learning_document
 from tests.support import StubProvider
 
@@ -62,7 +72,12 @@ def _plan(
 
 
 def _episode(ids: list[str], **extra: Any) -> dict[str, Any]:
-    return {"title": "T", "block_ids": ids, "goals": ["Ziel"], **extra}
+    return {
+        "title": "T",
+        "block_ids": ids,
+        "goals": [{"text": "Ziel", "bloom_level": "understand"}],
+        **extra,
+    }
 
 
 def test_sample_word_counts_expand_a_read_through_and_suggest_episodes() -> None:
@@ -98,6 +113,95 @@ def test_raising_the_episode_count_lowers_the_source_budget(tmp_path: Path) -> N
     five = message(5)
     assert "about 810 words of source material" in two
     assert "about 560 words of source material" in five
+
+
+def test_episode_goals_use_the_objectives_rule(tmp_path: Path) -> None:
+    audience = AUDIENCE.model_copy(update={"desired_outcome": "Die Kipppunkte erklären können"})
+    provider = StubProvider()
+    SeriesPlanNode().run(
+        SeriesPlanInput(
+            parsed=DOC,
+            budget=_budget(51.85),
+            format_spec=FORMAT,
+            audience_spec=audience,
+            series_request=SeriesRequest(episodes=2, minutes_per_episode=15),
+        ),
+        _context(tmp_path, provider),
+    )
+    sent = provider.calls[0]
+    assert sent.system is not None
+    assert OBJECTIVE_FORMULATION_RULE in sent.system
+    user = sent.messages[0].content
+    assert desired_outcome_source("Die Kipppunkte erklären können") in user
+    assert f"{time_budget_constraint(15)} per episode." in user
+
+    plan = _plan(
+        {
+            "title": "S",
+            "episodes": [
+                _episode(
+                    IDS[:10],
+                    goals=[
+                        {
+                            "text": "Die Kipppunkte erklären",
+                            "bloom_level": "analyze",
+                            "derivation": "Aus dem Wunsch, Mechanismen zu erklären",
+                        },
+                        {"text": "  ", "bloom_level": "remember"},
+                        {"text": "Nur ein Thema", "bloom_level": "not-a-level"},
+                        "nur ein Satz",
+                    ],
+                )
+            ],
+        }
+    )
+    goal = plan.episodes[0].goals[0]
+    assert [item.id for item in plan.episodes[0].goals] == ["ep01-g0"]
+    assert goal.text == "Die Kipppunkte erklären"
+    assert goal.bloom_level == "analyse"
+    assert goal.derivation == "Aus dem Wunsch, Mechanismen zu erklären"
+    assert goal.model_dump()["bloom_level"] == "analyse"
+    assert all("Lernziele" not in warning for warning in plan.warnings)
+    plain = LearningGoal(id="g0", text="Ziel", source="generated")
+    assert "bloom_level" not in plain.model_dump()
+
+
+def test_bare_string_goals_keep_the_episode_and_warn() -> None:
+    # 15 minutes at 135 wpm and 2.5× is 810 words. Five blocks are 700, under that cap.
+    plan = _plan(
+        {
+            "title": "S",
+            "episodes": [
+                _episode(IDS[:5], goals=["Erklären", "Anwenden"]),
+                _episode(
+                    IDS[5:10],
+                    goals=[
+                        {"text": "Erklären", "bloom_level": "not-a-level"},
+                        {"text": "  ", "bloom_level": "remember"},
+                    ],
+                ),
+                _episode(IDS[10:15], goals=[]),
+                _episode(IDS[15:]),
+            ],
+        },
+        minutes=15,
+        budget=_budget(51.85),
+    )
+    warnings = [
+        "Folge 1 hat keine verwertbaren Lernziele, bitte neu planen",
+        "Folge 2 hat keine verwertbaren Lernziele, bitte neu planen",
+        "Folge 3 hat keine verwertbaren Lernziele, bitte neu planen",
+    ]
+    assert [episode.block_ids for episode in plan.episodes] == [
+        IDS[:5],
+        IDS[5:10],
+        IDS[10:15],
+        IDS[15:],
+    ]
+    assert [episode.goals for episode in plan.episodes[:3]] == [[], [], []]
+    assert plan.episodes[3].goals
+    assert plan.warnings == warnings
+    assert plan.model_dump(mode="json")["warnings"] == warnings
 
 
 def test_count_follows_the_budget_unless_the_run_asked_for_one() -> None:
@@ -239,6 +343,7 @@ def test_recap_ids_must_come_from_earlier_episodes_and_goals_get_ids() -> None:
     assert second.recap_block_ids == IDS[:3]
     assert second.recap == "Zurück" and second.preview is None, "the last episode has no preview"
     assert [g.id for g in first.goals] == ["ep01-g0"]
+    assert first.goals[0].bloom_level == "understand"
     assert plan.terms[0].first_episode == 2
 
 

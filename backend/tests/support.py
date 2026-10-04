@@ -234,7 +234,7 @@ class StubProvider:
             chunks[min(count - 1, int(seen * count / total))].append(block_id)
             seen += int(words)
         chunks = [chunk for chunk in chunks if chunk]
-        objectives = "The document states these objectives" in text
+        objectives = "states its own objectives" in text
         episodes = []
         for index, chunk in enumerate(chunks):
             episodes.append(
@@ -244,7 +244,18 @@ class StubProvider:
                     "summary": f"Die Passagen {chunk[0]} bis {chunk[-1]}.",
                     "block_ids": chunk,
                     "recap_block_ids": [chunks[index - 1][0]] if index else [],
-                    "goals": [f"Teil {index + 1} erklären", f"Teil {index + 1} anwenden"],
+                    "goals": [
+                        {
+                            "text": f"Teil {index + 1} erklären",
+                            "bloom_level": "understand",
+                            "derivation": "Aus dem gewünschten Ergebnis.",
+                        },
+                        {
+                            "text": f"Teil {index + 1} anwenden",
+                            "bloom_level": "apply",
+                            "derivation": "Aus dem gewünschten Ergebnis.",
+                        },
+                    ],
                     "objectives": [1] if objectives else [],
                     "recap": "Was in der letzten Folge geklärt wurde." if index else "",
                     "preview": "Was als Nächstes kommt." if index < len(chunks) - 1 else "",

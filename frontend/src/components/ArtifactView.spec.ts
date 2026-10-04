@@ -8,6 +8,7 @@ import {
   readAudioScript,
   readBeat,
   readOutline,
+  readSeriesPlan,
   readScript,
   readSelection,
   setArtifactMode,
@@ -79,6 +80,7 @@ describe('pickRenderer', () => {
     expect(pickRenderer('Script')).toBe('script')
     expect(pickRenderer('Selection')).toBe('selection')
     expect(pickRenderer('AudioScript')).toBe('audio')
+    expect(pickRenderer('SeriesPlan')).toBe('series')
   })
 
   it('returns none for every other model name', () => {
@@ -106,6 +108,28 @@ describe('payload shape', () => {
     expect(read?.rationale).toBe('Erklärende Passagen gewählt.')
     expect(readSelection({ learning_goals: [] })).toBeNull()
     expect(readSelection({ learning_goals: [{ id: 'g0' }], selected_blocks: [] })).toBeNull()
+  })
+
+  it('reads a series plan as episodes with role, goals and passages', () => {
+    const read = readSeriesPlan({
+      title: 'Eine Serie',
+      through_line: 'Vom Grundsatz zur Anwendung.',
+      episodes: [
+        {
+          title: 'Folge 1',
+          role: 'Einführung',
+          block_ids: ['b12'],
+          goals: [{ text: 'Erklären', bloom_level: 'understand' }],
+        },
+      ],
+    })
+    expect(read?.title).toBe('Eine Serie')
+    expect(read?.throughLine).toBe('Vom Grundsatz zur Anwendung.')
+    expect(read?.episodes[0].role).toBe('Einführung')
+    expect(read?.episodes[0].goals).toEqual([{ text: 'Erklären', bloom: 'understand' }])
+    expect(read?.episodes[0].block_ids).toEqual(['b12'])
+    expect(readSeriesPlan({ title: 'kaputt' })).toBeNull()
+    expect(readSeriesPlan({ episodes: [{ title: 'halb' }] })).toBeNull()
   })
 
   it('rejects a preview string that is not an object', () => {

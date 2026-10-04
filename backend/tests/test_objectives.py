@@ -11,7 +11,8 @@ from app.llm.base import Completion, CompletionRequest, LLMClient, Usage
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import bootstrap_nodes
 from app.pipeline.framework.spec import node_params
-from app.pipeline.nodes.objectives import ObjectivesInput, ObjectivesNode, _bloom_level
+from app.pipeline.nodes.objectives import ObjectivesInput, ObjectivesNode
+from app.pipeline.objective_rule import bloom_level
 from app.pipeline.validation import validate_flow
 from app.schemas.document import Block, IngestionReport, ParsedDocument, RunSpan
 from app.schemas.pipeline import AudienceSpec, ContentBudget
@@ -135,12 +136,12 @@ def run_node(
 
 
 def test_bloom_aliases_snap_onto_the_taxonomy() -> None:
-    assert _bloom_level("analyze") == "analyse"
-    assert _bloom_level("Analyse") == "analyse"
-    assert _bloom_level("knowledge") == "remember"
-    assert _bloom_level("synthesis") == "create"
-    assert _bloom_level("not-a-level") is None
-    assert _bloom_level(None) is None
+    assert bloom_level("analyze") == "analyse"
+    assert bloom_level("Analyse") == "analyse"
+    assert bloom_level("knowledge") == "remember"
+    assert bloom_level("synthesis") == "create"
+    assert bloom_level("not-a-level") is None
+    assert bloom_level(None) is None
 
 
 def test_refuses_when_the_desired_outcome_is_missing() -> None:

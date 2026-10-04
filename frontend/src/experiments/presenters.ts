@@ -54,5 +54,12 @@ export function presenterFor(key: string, revealed: Set<string>): OutputPresente
         output.output?.selection ? { model: 'Selection', payload: output.output.selection } : null,
     }
   }
+  if (key === 'series_plan') {
+    return {
+      ...fallback,
+      artifactOf: (output) =>
+        output.output?.plan ? { model: 'SeriesPlan', payload: output.output.plan } : null,
+    }
+  }
   return fallback
 }
