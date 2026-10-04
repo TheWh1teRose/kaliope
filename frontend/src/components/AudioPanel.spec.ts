@@ -220,7 +220,16 @@ describe('AudioPanel', () => {
   it('asks in the page before stopping a take that is waiting for approval', async () => {
     vi.mocked(audioApi.takes)
       .mockResolvedValueOnce(answer(true, [take({})]))
-      .mockResolvedValueOnce(answer(true, [take({ status: 'stopped', error: null, approval: null })]))
+      .mockResolvedValueOnce(
+        answer(true, [
+          take({
+            status: 'stopped',
+            error: null,
+            approval: null,
+            stopped_by: 'reviewer@kalliope.test',
+          }),
+        ]),
+      )
     const wrapper = mount(AudioPanel, {
       props: { runId: 'run-1', formatId: 'two_host_dialogue' },
       attachTo: document.body,
@@ -233,17 +242,25 @@ describe('AudioPanel', () => {
     document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
     await flushPromises()
     expect(audioApi.stop).toHaveBeenCalledWith('take-1')
-    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt')
+    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt von reviewer@kalliope.test')
     expect(wrapper.find('.notice--fail').exists()).toBe(false)
     wrapper.unmount()
   })
 
   it('shows a stopped take without treating it as a failure', async () => {
     vi.mocked(audioApi.takes).mockResolvedValue(
-      answer(true, [take({ status: 'stopped', error: null, approval: null })]),
+      answer(true, [
+        take({
+          status: 'stopped',
+          error: null,
+          approval: null,
+          stopped_by: 'reviewer@kalliope.test',
+        }),
+      ]),
     )
     const wrapper = await mountPanel()
     expect(wrapper.get('[data-stopped] .badge').text()).toBe('Gestoppt')
+    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt von reviewer@kalliope.test')
     expect(wrapper.get('[data-stopped] .badge').classes()).toContain('badge--idle')
     expect(wrapper.find('.notice--fail').exists()).toBe(false)
     expect(wrapper.find('[data-stop]').exists()).toBe(false)

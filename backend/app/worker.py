@@ -553,6 +553,8 @@ class Worker:
             run = session.get(Run, run_id)
             if run is None:  # pragma: no cover
                 return
+            if run.status == "stopped":
+                return
             for report in suite.reports:
                 session.add(
                     GateResult(
@@ -578,8 +580,6 @@ class Worker:
                     )
                 )
             _record_artifact(session, stored.hash, "gate_reports", stored.size_bytes)
-            if run.status == "stopped":
-                return
             run.status = "completed"
             run.finished_at = datetime.now(UTC)
 

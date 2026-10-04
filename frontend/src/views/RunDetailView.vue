@@ -11,7 +11,7 @@ import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
 import StatusPill from '@/components/StatusPill.vue'
-import { t } from '@/i18n'
+import { fill, t } from '@/i18n'
 import { type ProgressLine, useRunsStore } from '@/stores/runs'
 import { runTitle } from '@/titles'
 
@@ -41,6 +41,10 @@ const reviewable = computed(
 const awaitingNotes = computed(() => run.value?.status === 'paused')
 const stoppable = computed(() => ['queued', 'running'].includes(run.value?.status ?? ''))
 const stopped = computed(() => run.value?.status === 'stopped')
+const stoppedNotice = computed(() => {
+  const who = run.value?.stopped_by
+  return who ? fill(t.run.stoppedNoticeBy, { who }) : t.run.stoppedNotice
+})
 const confirmStop = ref(false)
 const stopping = ref(false)
 
@@ -214,7 +218,7 @@ onUnmounted(() => {
     <p v-if="run.verdict === 'insufficient'" class="notice notice--fail">
       {{ t.run.verdictInsufficient }}
     </p>
-    <p v-if="stopped" class="notice" data-stopped>{{ t.run.stoppedNotice }}</p>
+    <p v-if="stopped" class="notice" data-stopped>{{ stoppedNotice }}</p>
 
     <section v-if="graph" class="sheet">
       <div class="spread">

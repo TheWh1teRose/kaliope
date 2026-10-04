@@ -16,18 +16,22 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import CheckConstraint
+from sqlalchemy import CheckConstraint, func, select
 
+from app.config import get_settings
 from app.db import session_scope
 from app.llm import registry
 from app.llm.base import CompletionRequest
 from app.main import create_app
-from app.models import AudioTake, Document, Run, Series, User
+from app.models import AudioTake, Document, GateResult, Run, Segment, Series, User
+from app.pipeline.framework.artifacts import ArtifactStore
+from app.pipeline.framework.registry import Flow as PipelineFlow
 from app.security import hash_password
 from app.speech import registry as speech_registry
 from app.speech.base import DialogueRequest
 from app.worker import worker
 from tests.support import StubProvider, StubSpeech
+from tests.test_gates import claim, filler, make_context
 from tests.test_series_api import _long_pdf
 
 PASSWORD = "stop-password-1"
@@ -546,6 +550,55 @@ def test_stopping_audio_mid_chunk_keeps_the_chunk_that_was_already_paid_for(
     finished = client.post(f"/api/audio/takes/{take_id}/stop").json()
     assert finished["outcome"] == "finished"
     assert _wait_take(client, run_id, take_id, {"completed"})["status"] == "completed"
+
+
+def test_a_stop_during_gates_does_not_block_the_next_finish(document_id: str) -> None:
+    context = make_context([claim(filler(30))])
+    flow = PipelineFlow(id="baseline_v0", version="1", nodes=[], gates=["G4"])
+    bag = {
+        "parsed": context.parsed,
+        "script": context.script,
+        "outline": context.outline,
+        "selection": context.selection,
+        "budget": context.budget,
+        "format_spec": context.format_spec,
+    }
+    with session_scope() as session:
+        run = Run(
+            document_id=document_id,
+            flow_id="baseline_v0",
+            flow_version="1.0",
+            status="stopped",
+        )
+        session.add(run)
+        session.flush()
+        run_id = run.id
+
+    store = ArtifactStore(get_settings().artifacts_dir)
+    worker._finish_run(run_id, bag, flow, store)
+
+    with session_scope() as session:
+        stored = session.get(Run, run_id)
+        assert stored is not None and stored.status == "stopped"
+        assert _finish_rows(session, run_id) == (0, 0)
+        stored.status = "running"
+
+    worker._finish_run(run_id, bag, flow, store)
+
+    with session_scope() as session:
+        stored = session.get(Run, run_id)
+        assert stored is not None and stored.status == "completed"
+        assert _finish_rows(session, run_id) == (1, 1)
+
+
+def _finish_rows(session: Any, run_id: str) -> tuple[int, int]:
+    gates = session.scalar(
+        select(func.count()).select_from(GateResult).where(GateResult.run_id == run_id)
+    )
+    segments = session.scalar(
+        select(func.count()).select_from(Segment).where(Segment.run_id == run_id)
+    )
+    return int(gates or 0), int(segments or 0)
 
 
 def _completed_run(client: TestClient, document_id: str) -> str:

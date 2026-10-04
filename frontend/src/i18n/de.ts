@@ -326,6 +326,8 @@ export default {
     stopConfirm: 'Ja, stoppen',
     stoppedNotice:
       'Gestoppt. Bereits erzeugte Schritte bleiben erhalten und werden beim nächsten Lauf wiederverwendet.',
+    stoppedNoticeBy:
+      'Gestoppt von {who}. Bereits erzeugte Schritte bleiben erhalten und werden beim nächsten Lauf wiederverwendet.',
     again: 'Erneut starten',
     scope: 'Umfang',
     scopeOne: 'Eine Folge',
@@ -438,6 +440,8 @@ export default {
     stopLead:
       'Die Folge, die gerade läuft, wird beendet. Weitere Folgen starten nicht. Der Plan und fertige Folgen bleiben.',
     stoppedNotice: 'Gestoppt. Der Plan und die fertigen Folgen bleiben. „Fortsetzen“ nimmt die Serie wieder auf.',
+    stoppedNoticeBy:
+      'Gestoppt von {who}. Der Plan und die fertigen Folgen bleiben. „Fortsetzen“ nimmt die Serie wieder auf.',
     progressPlan: 'Plan',
     progressPlanDone: 'freigegeben',
     progressPlanHeld: 'wartet auf deine Freigabe',
@@ -1078,6 +1082,8 @@ export default {
     failed: 'Fehlgeschlagen',
     stopped: 'Gestoppt',
     stoppedHint: 'Gestoppt. Bereits erzeugte Stücke bleiben gespeichert und werden nicht noch einmal berechnet.',
+    stoppedHintBy:
+      'Gestoppt von {who}. Bereits erzeugte Stücke bleiben gespeichert und werden nicht noch einmal berechnet.',
     stop: 'Stoppen',
     stopTitle: 'Audio stoppen?',
     stopLead:

@@ -75,6 +75,7 @@ function series(status: SeriesOut['status']): SeriesOut {
     })),
     progress: { outlined: 0, written: 0, episodes: 0 },
     active: false,
+    stopped_by: status === 'stopped' ? 'reviewer@kalliope.test' : null,
   }
 }
 
@@ -293,7 +294,7 @@ describe('series view', () => {
     await flushPromises()
     expect(wrapper.get('[data-series-status]').text()).toContain('Gestoppt')
     expect(wrapper.get('[data-series-status]').classes()).toContain('badge--idle')
-    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt')
+    expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt von reviewer@kalliope.test')
     expect(wrapper.find('[data-series-error]').exists()).toBe(false)
     expect(wrapper.find('[data-stop]').exists()).toBe(false)
     expect(wrapper.find('[data-resume]').exists()).toBe(true)

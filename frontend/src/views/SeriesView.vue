@@ -70,6 +70,10 @@ const countWarning = computed(() => {
   if (asked == null || planned == null || asked === planned) return ''
   return fill(t.series.countDiffers, { asked, planned })
 })
+const stoppedNotice = computed(() => {
+  const who = series.value?.stopped_by
+  return who ? fill(t.series.stoppedNoticeBy, { who }) : t.series.stoppedNotice
+})
 const budgetLine = computed(() => {
   if (!plan.value) return ''
   const budget = plan.value.budget
@@ -278,7 +282,7 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <p v-if="series.status === 'stopped'" class="notice" data-stopped>{{ t.series.stoppedNotice }}</p>
+    <p v-if="series.status === 'stopped'" class="notice" data-stopped>{{ stoppedNotice }}</p>
     <p v-if="series.error" class="notice notice--fail" data-series-error>{{ series.error }}</p>
     <p v-else-if="stuck" class="notice notice--warn">{{ t.series.stuck }}</p>
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>

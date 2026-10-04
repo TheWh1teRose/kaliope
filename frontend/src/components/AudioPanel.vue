@@ -45,6 +45,10 @@ interface SpokenLine {
 }
 
 const take = computed<AudioTakeOut | null>(() => data.value?.takes[0] ?? null)
+const stoppedHint = computed(() => {
+  const who = take.value?.stopped_by
+  return who ? fill(t.audio.stoppedHintBy, { who }) : t.audio.stoppedHint
+})
 const active = computed(() => (take.value ? takeActive(take.value.status) : false))
 const configured = computed(() => data.value?.configured ?? false)
 const missing = computed(() => {
@@ -283,7 +287,7 @@ onUnmounted(() => window.clearTimeout(timer))
 
       <div v-if="take.status === 'stopped'" class="notice" data-stopped>
         <span class="badge badge--idle">{{ t.audio.stopped }}</span>
-        <p>{{ t.audio.stoppedHint }}</p>
+        <p>{{ stoppedHint }}</p>
       </div>
 
       <div v-else-if="take.status === 'paused' && take.approval" class="approval">
