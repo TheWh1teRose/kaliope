@@ -442,3 +442,25 @@ def test_model_catalogue_lists_models_and_providers(client: TestClient) -> None:
     assert opus["thinking_default"] == "on"
     assert opus["thinking_off_max_effort"] == "high"
     assert {p["name"] for p in body["providers"]} == {"anthropic", "openai", "google"}
+
+
+def test_disabled_cap_on_google_uses_the_catalogue_model_limit() -> None:
+    provider = GoogleProvider()
+    fake = _FakeGoogle()
+    provider._client = fake
+    provider.complete(_request("gemini-2.5-pro", max_tokens=0))
+    assert fake.calls[0]["max_output_tokens"] == registry.MODELS["gemini-2.5-pro"].max_output_tokens
+
+
+def test_disabled_required_cap_needs_a_known_model_limit() -> None:
+    with pytest.raises(LLMError, match="set max_tokens explicitly"):
+        registry.max_output_for("claude-unknown", 0)
+    assert registry.max_output_for("claude-unknown", 42) == 42
+
+
+def test_disabled_openai_cap_omits_optional_sdk_argument() -> None:
+    provider = OpenAIProvider()
+    fake = _FakeOpenAI()
+    provider._client = fake
+    provider.complete(_request("gpt-6.1-sol", max_tokens=0))
+    assert "max_completion_tokens" not in fake.calls[0]

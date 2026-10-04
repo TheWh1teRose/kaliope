@@ -40,8 +40,11 @@ class OpenAIProvider:
         kwargs: dict[str, Any] = {
             "model": request.model,
             "messages": messages,
-            "max_completion_tokens": registry.max_output_for(request.model, request.max_tokens),
         }
+        if request.max_tokens:
+            kwargs["max_completion_tokens"] = registry.max_output_for(
+                request.model, request.max_tokens
+            )
         params = registry.adapt_parameters(request)
         warnings.extend(params.warnings)
         if params.temperature is not None:

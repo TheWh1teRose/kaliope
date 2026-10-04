@@ -518,3 +518,26 @@ def test_authoring_requires_a_session(client: TestClient) -> None:
     assert fresh.get("/api/pipelines").status_code == 401
     assert fresh.get("/api/nodes").status_code == 401
     assert fresh.put("/api/pipelines/baseline_v0", json=_draft()).status_code == 401
+
+
+def test_disabling_script_cap_preserves_saved_numeric_revision(signed_in: TestClient) -> None:
+    before = signed_in.get("/api/pipelines/baseline_v0").json()
+    draft = before["definition"]
+    entry = next(n for n in draft["nodes"] if n["node"] == "script")
+    entry["config"]["max_tokens"] = 64000
+    numeric = signed_in.put("/api/pipelines/baseline_v0", json=draft)
+    assert numeric.status_code == 200, numeric.text
+    numeric_revision = numeric.json()["revision"]
+
+    entry["config"]["max_tokens"] = 0
+    disabled = signed_in.put("/api/pipelines/baseline_v0", json=draft)
+    assert disabled.status_code == 200, disabled.text
+    with session_scope() as session:
+        flow = catalogue.get_flow(session, "baseline_v0")
+    assert next(n for n in flow.nodes if n.node == "script").config["max_tokens"] == 0
+
+    old = signed_in.get(f"/api/pipelines/baseline_v0/versions/{numeric_revision}").json()
+    assert (
+        next(n for n in old["spec"]["nodes"] if n["node"] == "script")["config"]["max_tokens"]
+        == 64000
+    )

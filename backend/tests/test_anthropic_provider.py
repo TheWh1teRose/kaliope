@@ -226,3 +226,13 @@ def test_a_message_without_cache_breaks_is_sent_as_plain_text() -> None:
     provider, messages = _provider()
     provider.complete(_request("claude-opus-5", max_tokens=1_000, temperature=None))
     assert messages.create_calls[0]["messages"] == [{"role": "user", "content": "label the blocks"}]
+
+
+def test_disabled_cap_uses_the_model_limit_and_streams() -> None:
+    from app.llm.registry import MODELS
+
+    provider, messages = _provider()
+    completion = provider.complete(_request("claude-opus-5", max_tokens=0, temperature=None))
+    assert messages.create_calls == []
+    assert messages.stream_calls[0]["max_tokens"] == MODELS["claude-opus-5"].max_output_tokens
+    assert completion.text == "ok"

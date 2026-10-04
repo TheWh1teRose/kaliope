@@ -464,6 +464,12 @@ def cost_usd(model_id: str, usage: Usage) -> float:
 
 def max_output_for(model_id: str, requested: int) -> int:
     spec = MODELS.get(model_id)
+    if requested == 0:
+        if spec is None:
+            raise LLMError(
+                f"no documented output limit for '{model_id}'; set max_tokens explicitly"
+            )
+        return spec.max_output_tokens
     if spec is None:
         return requested
     return min(requested, spec.max_output_tokens)
