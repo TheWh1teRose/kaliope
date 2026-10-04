@@ -182,8 +182,6 @@ class ScriptNode:
         output="A Script: ordered segments with speaker, text, kind, beat id and anchors.",
         failure_modes=[
             "The format spec declares no speakers.",
-            "The provider stops at its output token limit: the beat fails and its partial "
-            "response is stored in the artifact named in the error.",
             "No segment survived — every beat's passage ids were missing from the parse, or "
             "the model answered with empty text throughout.",
         ],
@@ -232,7 +230,7 @@ class ScriptNode:
             maximum=64000,
             description=(
                 "0 disables the app's output cap. Provider limits still apply, including "
-                "reasoning tokens. A length stop fails the beat and preserves partial output."
+                "reasoning tokens. Output may still be cut off at the provider limit."
             ),
             advanced=True,
         ),
@@ -330,13 +328,9 @@ class ScriptNode:
             )
         )
         if completion.stop_reason in {"max_tokens", "length", "MAX_TOKENS"}:
-            partial = ctx.artifacts.put_raw(
-                "script_beat_partial",
-                {"beat_id": beat.id, "completion": completion.model_dump(mode="json")},
-            )
-            raise NodeError(
+            ctx.progress(
                 f"model response was cut off for beat '{beat.id}' (output token limit, "
-                f"including reasoning); partial output artifact: {partial.hash}"
+                "including reasoning); parsed output may be incomplete"
             )
         data = completion.json_payload()
 

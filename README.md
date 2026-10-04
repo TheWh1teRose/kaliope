@@ -343,9 +343,9 @@ providers requiring a cap use the model's catalogue limit. Model and context
 limits still apply: Sol 6.1 supports at most 128,000 output tokens, including
 reasoning ([model limits](https://developers.openai.com/api/docs/models/gpt-6.1-sol),
 [token accounting](https://developers.openai.com/api/docs/guides/token-counting)).
-A length stop fails the beat, preserves its partial response as an artifact
-named in the error, and keeps earlier completed beats cached. There is no
-automatic continuation. Existing numeric settings and saved revisions stay intact.
+A length stop emits a progress warning that output may be incomplete; usable
+JSON is parsed as before. There is no automatic continuation. Existing numeric
+settings and saved revisions stay intact.
 
 Every save appends a **revision**; nothing is ever overwritten, and restoring an
 old revision writes a new one carrying the old content. A run records the flow

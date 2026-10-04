@@ -99,23 +99,29 @@ def test_existing_default_and_numeric_settings_are_preserved(
     assert sdk.calls[0]["max_completion_tokens"] == (8000 if cap is None else cap)
 
 
+@pytest.mark.parametrize("cap", [None, 8000, 64_000, 0])
 @pytest.mark.parametrize("parseable", [False, True])
-def test_provider_cutoff_stays_failed_and_keeps_partial_output(
-    tmp_path: Path, parseable: bool
+def test_provider_cutoff_preserves_parsing_and_warns(
+    tmp_path: Path, cap: int | None, parseable: bool
 ) -> None:
     sdk = EpisodeSDK(hard_limit=True, parseable=parseable)
-    ctx = context(tmp_path, sdk, 0)
-    with pytest.raises(NodeError, match="cut off") as error:
-        ScriptNode().run(_input(), ctx)
-    digest = str(error.value).split("partial output artifact: ")[1]
-    partial = ctx.artifacts.get_raw(digest)
-    assert partial["completion"]["text"] == ctx.llm.traces[-1]["response_text"]
-    assert partial["completion"]["stop_reason"] == "length"
-    assert partial["beat_id"] == "beat000"
-    assert len(sdk.calls) == 1  # No implicit retry, continuation or success cache.
-    with pytest.raises(NodeError):
-        ScriptNode().run(_input(), ctx)
-    assert len(sdk.calls) == 2
+    ctx = context(tmp_path, sdk, cap)
+    progress: list[str] = []
+    ctx.progress = progress.append
+    if parseable:
+        script = ScriptNode().run(_input(), ctx)
+        assert {s.beat_id for s in script.segments} == {"beat000", "beat001", "beat002"}
+        assert len(sdk.calls) == 3
+        assert ScriptNode().run(_input(), ctx) == script
+        assert len(sdk.calls) == 3
+    else:
+        with pytest.raises(LLMError, match="cut off"):
+            ScriptNode().run(_input(), ctx)
+        assert len(sdk.calls) == 1
+        with pytest.raises(LLMError, match="cut off"):
+            ScriptNode().run(_input(), ctx)
+        assert len(sdk.calls) == 2
+    assert any("cut off" in message and "incomplete" in message for message in progress)
 
 
 @pytest.mark.parametrize("cap, status", [(64_000, "failed"), (0, "completed")])
@@ -146,7 +152,7 @@ def test_series_episode_runner_reports_the_real_script_outcome(
     assert result.manifest.nodes[0].config["max_tokens"] == cap
     if status == "failed":
         assert "script" not in result.artifact_hashes
-        assert result.error and "partial output artifact" in result.error
+        assert result.error and "cut off" in result.error
         assert len(sdk.calls) == 2
     else:
         assert "script" in result.artifact_hashes
