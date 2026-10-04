@@ -228,12 +228,17 @@ class RunOut(BaseModel):
     #: Set for a run of a series: 0 is the planner run, 1… the episodes.
     series_id: str | None = None
     episode_index: int | None = None
-    #: Who stopped the run, when it was stopped. Empty otherwise.
+    #: Recorded stopper label; queued series episodes may retain it until execution starts.
     stopped_by: str | None = None
 
 
 class StopOut(BaseModel):
-    """What a stop request did. ``finished`` means the run had already ended."""
+    """What a stop request did to a run, series or audio take.
+
+    ``stopping`` acknowledges a durable stopped status while the worker drains;
+    ``stopped`` means no worker was busy. ``already_stopped`` and ``finished``
+    leave the item unchanged; ``finished`` includes idle approval/review states.
+    """
 
     id: str
     status: str

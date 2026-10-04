@@ -25,7 +25,7 @@ export interface ProgressLine {
   cost_usd?: number
 }
 
-/** Terminal event types; the stream closes itself after either of them. */
+/** Terminal event types; the stream closes itself after any of them. */
 export const TERMINAL = new Set(['run.completed', 'run.failed', 'run.paused', 'run.stopped'])
 
 const RUN_EVENTS = [

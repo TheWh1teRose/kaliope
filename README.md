@@ -162,7 +162,7 @@ script's line and compares word by word; case and punctuation do not count. A
 refused line is asked for once more and otherwise spoken untagged, marked
 `fallback`, so a tag never fails a run. Beats are cached one by one.
 
-`audio_approval` stops the take with the price: lines, characters, requests and
+`audio_approval` pauses the take with the price: lines, characters, requests and
 dollars at the model's rate. Nothing is spent until someone approves in the run
 view, where the voices per speaker are chosen (saved per format, never inside
 the format spec, so a voice change leaves the script cache alone).
@@ -265,6 +265,29 @@ check reports how much of the document the series covers.
 The experiment **Folgen planen** starts from the planner's system prompt and
 the same user message production sends. Both stay editable, along with the
 model settings, and a run can be saved and collected.
+
+### Stopping generation
+
+Choose **Stoppen** in the runs list or run detail, on a running series, or in
+the run's audio panel, then confirm. Runs can be stopped while queued or running;
+series while queued, planning, outlining or writing; audio takes while queued,
+running or waiting for voice approval. A series waiting for plan approval is
+already idle. Stopping a series leaves its plan and finished episodes intact
+and prevents later stages from starting; audio takes are stopped separately.
+
+An accepted stop marks the item **stopped** immediately. A provider request
+already in progress can still finish and incur a charge; no subsequent paid
+request is started. Its cost is recorded, its returned LLM text is discarded,
+and a returned speech chunk is cached for reuse. Completed artifacts stay.
+The open views refresh while the worker drains so final costs can appear after
+the stopped status. Repeating a stop, or stopping an item that has already
+ended, changes nothing.
+
+Use **Erneut starten** for a standalone run or **Fortsetzen** for a stopped
+series. A stopped audio take cannot be resumed directly: prepare a new take
+with the same text, voices and settings to reuse its cached chunks. The accepted
+series attribution and run accounting limits are described under
+[Series of episodes](#series-of-episodes).
 
 ### Gates
 

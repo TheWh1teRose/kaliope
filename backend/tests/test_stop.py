@@ -148,7 +148,7 @@ def _wait_take(client: TestClient, run_id: str, take_id: str, states: set[str]) 
     while time.monotonic() < deadline:
         takes = client.get(f"/api/runs/{run_id}/audio").json()["takes"]
         found = next((take for take in takes if take["id"] == take_id), {})
-        if found.get("status") in states and not _job_active(take_id):
+        if found.get("status") in states and not found.get("active", False):
             return found
         time.sleep(0.05)
     raise AssertionError(f"take stayed {found.get('status')}: {found.get('error')}")
