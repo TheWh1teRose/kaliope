@@ -655,9 +655,7 @@ def test_busy_run_stop_during_gates_is_durable(
 
     monkeypatch.setattr(module, "run_gates", gates)
     registry.register_provider("anthropic", _STUB)
-    created = client.post(
-        "/api/runs", json={"document_id": document_id, "flow_id": "baseline_v0"}
-    )
+    created = client.post("/api/runs", json={"document_id": document_id, "flow_id": "baseline_v0"})
     assert created.status_code == 201, created.text
     run_id = created.json()["id"]
     try:
@@ -776,7 +774,9 @@ def test_busy_take_stop_at_completion_keeps_paid_output(
         assert stopped["outcome"] == "stopping"
         assert stopped["status"] == "stopped"
         assert stopped["stopped_by"] == EMAIL
-        assert client.post(f"/api/audio/takes/{take_id}/stop").json()["outcome"] == "already_stopped"
+        assert (
+            client.post(f"/api/audio/takes/{take_id}/stop").json()["outcome"] == "already_stopped"
+        )
     finally:
         release.set()
     done = _wait_take(client, run_id, take_id, {"stopped", "completed", "failed"})

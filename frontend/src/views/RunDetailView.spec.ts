@@ -143,7 +143,7 @@ describe('run detail', () => {
     await flushPromises()
     expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('Bitte erneut anmelden.')
     expect(confirm().disabled).toBe(false)
-    expect(wrapper.get('[data-stop]').exists()).toBe(true)
+    expect(wrapper.find('[data-stop]').exists()).toBe(true)
     store.stop.mockRejectedValueOnce(new Error('offline'))
     confirm().click()
     await flushPromises()

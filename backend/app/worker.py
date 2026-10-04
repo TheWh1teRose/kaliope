@@ -628,7 +628,9 @@ class Worker:
     def job_active(self, job_id: str) -> bool:
         with self._lock:
             future = self._futures.get(job_id)
-            return (future is not None and not future.done()) or job_id in self._current_run.values()
+            return (
+                future is not None and not future.done()
+            ) or job_id in self._current_run.values()
 
     def series_active(self, series_id: str) -> bool:
         with self._lock:
