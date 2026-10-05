@@ -211,11 +211,12 @@ short script typed with any speakers, or on a beat loaded from a run.
 
 ### Review links
 
-Finished runs and completed series have a **Review-Link** action. Choose the
-public titles and a completed full recording for each episode, inspect the
-preview, then create and copy the link. Samples, failed takes and unavailable
-mixes are excluded; a newer failed or pending take does not hide an older ready
-full recording. Series sharing requires every planned episode to be finished
+Finished runs have a **Feedback** menu containing link creation and received
+feedback; completed series also have a **Review-Link** action. Choose the public
+titles and a completed full recording for each episode, then create and copy the
+link. Snapshot validation happens internally, without a preview step. Samples,
+failed takes and unavailable mixes are excluded; a newer failed or pending take
+does not hide an older ready full recording. Series sharing requires every planned episode to be finished
 and includes the entire roster in plan order, without the hidden planning run.
 Empty scripts and missing selected resources cannot be shared.
 Sharing an episode without audio requires an explicit
@@ -232,18 +233,25 @@ cannot edit the script.
 
 On each line the reviewer can mark 👍 impressed, 🤢 not good, or 🤮 horrible.
 The same mark again clears it. A comment is optional and only on a marked
-line. After 🤢 or 🤮, an optional “Klingt nach KI-Slop” tag can be added;
-dislike and suspected AI slop stay separate, and nothing classifies slop
-automatically. A short questionnaire is always available and is offered again
+line, opened with a separate comment button (including on negative reactions).
+Reactions and clears save independently of the questionnaire. Comments save
+after a short typing pause or on blur. Queued line changes coalesce to the latest
+value; feedback writes are serialized and spaced at least 1.1 seconds apart.
+Rate-limited writes retry once after a minute. Failed line changes remain dirty
+with an explicit retry button; failed questionnaires can be submitted again.
+Leaving with pending or failed line changes prompts the browser's standard
+unsaved-changes warning. Forced termination cannot guarantee delivery.
+The AI-slop control and reviewer-name field are no longer shown; legacy stored
+data is retained. A short questionnaire is always available and is offered again
 when playback of any recording ends: optional stars from 0.5 to 5 in half
 steps, what worked, and what did not. Playback ending is not evidence that
 someone listened. The reviewer is remembered in that browser by an unguessable
-key sent as a header, with an optional short label, and does not need an
-account. The server stores only the key's SHA-256. Feedback is bound to that
-link and its frozen snapshot, addressed by a share-local line ordinal.
+key sent as a header and does not need an account. The server stores only the
+key's SHA-256. Feedback is bound to that link and its frozen snapshot, addressed
+by a share-local line ordinal.
 Replacing the link does not carry marks onto the new text. Writes use the same
 expiry and revocation check as reads. The owner summary on the share screen
-lists reactions, slop tags, stars, answers and marked lines. Each link admits
+lists reactions, stars, answers and marked lines. Each link admits
 at most 20 browser identities for feedback; clearing feedback does not release
 a slot. Already admitted browsers can continue updating their feedback.
 
@@ -254,7 +262,13 @@ log as well.
 
 Each link is a frozen snapshot: when choosing audio, its original recorded
 source script is captured together with the exact mix. An older recording is
-labelled in the owner selection. For series, the roster and order are frozen
+labelled in the owner selection. Available recorded line timings are frozen as
+well: playback highlights the actual current segment, including after seeking
+or pausing. The wider reader lets the script scroll separately from the player
+and cited source. Playback preserves manual scrolling; the “Aktuelle Passage
+finden” button scrolls to the highlight on request.
+Recordings or existing links without alignment remain readable without invented
+highlights. For series, the roster and order are frozen
 too. Subsequent edits, new recordings or replanning do not change the link.
 The snapshot references immutable private media in the artifact store rather
 than making a bucket or existing authenticated audio endpoints public.
@@ -272,10 +286,10 @@ artifacts and pinned media retain the existing artifact-store lifetime; expiry
 or revocation removes access, not stored files.
 
 Creation is disabled until `REVIEW_PUBLIC_ORIGIN` is configured as the reviewed
-external HTTPS origin, with no credentials, path, query or fragment. Preview,
-status and revocation remain available without it. Owner preview, creation and
-revocation accept the configured public origin even when a proxy makes the API
-report a different base address. Local development proxies also accept HTTP(S)
+external HTTPS origin, with no credentials, path, query or fragment. The preview
+API (used for internal snapshot validation), status and revocation remain
+available without it. Owner preview, creation and revocation accept the configured
+public origin even when a proxy makes the API report a different base address. Local development proxies also accept HTTP(S)
 origins on `localhost`, `127.0.0.1` or `::1` when `Sec-Fetch-Site` is `same-origin`.
 Other origins must match the API's base origin; `Sec-Fetch-Site: cross-site` is
 always refused. These checks do not replace owner authentication.
@@ -405,8 +419,9 @@ the rendered source page on the right. Clicking a citation puts them in
 register — the page scrolls to the anchored rectangle, a registration crosshair
 parks on it, and a tie line is drawn across the gutter.
 
-Per segment: the same reactions, optional slop tag and marked-line comment as
-[Review links](#review-links), plus edit inline, general comment, and **undo**.
+Per segment: 👍 impressed, 🤢 not good, or 🤮 horrible, optional slop tag and
+marked-line comment, plus edit inline, general comment, and **undo**.
+These internal controls are distinct from the public [Review links](#review-links).
 These reactions replace the accept, flag and tag controls; older events remain
 in the event stream. Reactions are separate from the edit undo stack.
 **Saving an edit requires a reason code** — the eleven codes

@@ -20,6 +20,8 @@ class ReaderCitation(BaseModel):
 
 class ReaderSegment(BaseModel):
     ordinal: int = 0
+    start_s: float | None = None
+    end_s: float | None = None
     speaker: str
     text: str
     citations: list[ReaderCitation] = Field(default_factory=list)

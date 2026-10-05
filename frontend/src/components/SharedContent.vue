@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { ApiError } from '@/api/client'
 import {
-  rememberedLabel,
-  rememberLabel,
   sharedDate,
   sharedDuration,
   sharingApi,
@@ -45,7 +44,19 @@ const sheetOpen = ref(false)
 const endedOffer = ref(false)
 const sheetSent = ref(false)
 const sheetBusy = ref(false)
-const label = ref(rememberedLabel())
+const label = ref('') // Retain legacy stored labels internally, without offering a name field.
+const commentOpen = ref<Record<string, boolean>>({})
+const clock = ref<number | null>(null)
+const currentSegment = computed(() => clock.value == null ? -1 :
+  (episode.value?.segments.findIndex(segment => segment.start_s != null && segment.end_s != null &&
+    clock.value! >= segment.start_s && clock.value! < segment.end_s) ?? -1))
+function updateClock(): void { clock.value = player.value?.currentTime ?? null }
+const script = ref<HTMLElement | null>(null)
+function findPlaying(): void {
+  const container = script.value
+  const line = container?.querySelector<HTMLElement>('[aria-current="true"]')
+  if (container && line) container.scrollTop += line.getBoundingClientRect().top - container.getBoundingClientRect().top
+}
 const stars = ref<number | null>(null)
 const worked = ref('')
 const didNot = ref('')
@@ -77,6 +88,8 @@ const starsText = computed(() =>
 )
 
 watch(episode, () => {
+  flushComments()
+  clock.value = null
   player.value?.pause()
   audioFailed.value = false
   activePage.value = null
@@ -87,8 +100,25 @@ watch(
   () => props.token,
   () => void loadFeedback(),
 )
-onMounted(() => void loadFeedback())
-onUnmounted(() => player.value?.pause())
+onMounted(() => {
+  void loadFeedback()
+  window.addEventListener('beforeunload', leaving)
+})
+onUnmounted(() => {
+  flushComments()
+  window.removeEventListener('beforeunload', leaving)
+  player.value?.pause()
+})
+const pendingComments = new Map<string, { timer: ReturnType<typeof setTimeout>; save: () => void }>()
+let pendingWrites = 0
+function flushComments(): void {
+  for (const { timer, save } of pendingComments.values()) { clearTimeout(timer); save() }
+  pendingComments.clear()
+}
+function leaving(event: BeforeUnloadEvent): void {
+  flushComments()
+  if (pendingWrites || dirtyMarks.size) { event.preventDefault(); event.returnValue = '' }
+}
 
 function lineKey(index: number): string {
   const current = episode.value
@@ -100,7 +130,16 @@ function commentAt(index: number): string {
   return commentDraft.value[lineKey(index)] ?? markAt(index).comment
 }
 function draftComment(index: number, value: string): void {
-  commentDraft.value = { ...commentDraft.value, [lineKey(index)]: value }
+  const context = lineContext(index)
+  commentDraft.value = { ...commentDraft.value, [context.id]: value }
+  const pending = pendingComments.get(context.id)
+  if (pending) clearTimeout(pending.timer)
+  const save = () => {
+    const current = marks.value[context.id]
+    if (current?.reaction && current.comment !== value) void persist(index, { ...current, comment: value }, context)
+  }
+  const timer = setTimeout(() => { pendingComments.delete(context.id); save() }, 350)
+  pendingComments.set(context.id, { timer, save })
 }
 function ordinalOf(index: number): number {
   return episode.value?.segments[index]?.ordinal ?? index
@@ -111,12 +150,28 @@ function markAt(index: number): LocalMark {
   )
 }
 let writes: Promise<unknown> = Promise.resolve()
-const versions: Record<string, number> = {}
-let confirmed: Record<string, LocalMark> = {}
+const dirtyMarks = new Map<string, { next: LocalMark; context: ReturnType<typeof lineContext> }>()
+let draining = false
+let nextWriteAt = 0
 function ordered<T>(operation: () => Promise<T>): Promise<T> {
-  const result = writes.then(operation)
+  pendingWrites++
+  const result = writes.then(operation).finally(() => { pendingWrites-- })
   writes = result.catch(() => undefined)
   return result
+}
+async function writeFeedback<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const delay = nextWriteAt - Date.now()
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
+    nextWriteAt = Date.now() + 1100
+    try {
+      return await operation()
+    } catch (exc) {
+      if (!(exc instanceof ApiError) || exc.status !== 429) throw exc
+      nextWriteAt = Date.now() + 60_000
+      if (attempt) throw exc
+    }
+  }
 }
 function draft() {
   return { label: label.value, stars: stars.value, worked: worked.value, didNot: didNot.value }
@@ -146,65 +201,84 @@ async function loadFeedback(): Promise<void> {
   try {
     const data = await ordered(() => sharingApi.feedback(token))
     if (props.token !== token) return
-    confirmed = stateMarks(data)
-    marks.value = { ...confirmed }
-    applySheet({ ...data, label: data.label ?? rememberedLabel() }, before)
+    dirtyMarks.clear()
+    commentDraft.value = {}
+    marks.value = stateMarks(data)
+    applySheet(data, before)
     hydratedToken.value = token
     saveError.value = ''
   } catch {
     if (props.token === token) saveError.value = t.sharing.feedbackLoadError
   }
 }
-async function persist(index: number, next: LocalMark): Promise<void> {
-  const episodeIndex = episode.value?.index
-  if (!lineWritable.value || !props.token || episodeIndex == null) return
-  const id = lineKey(index)
-  const token = props.token
-  const ordinal = ordinalOf(index)
-  const version = (versions[id] ?? 0) + 1
-  versions[id] = version
-  const previousDraft = commentDraft.value[id]
+function lineContext(index: number) {
+  return { episodeIndex: episode.value?.index, id: lineKey(index), token: props.token, ordinal: ordinalOf(index) }
+}
+function persist(index: number, next: LocalMark, context = lineContext(index)): void {
+  const { episodeIndex, id, token } = context
+  if (!token || hydratedToken.value !== token || props.token !== token || episodeIndex == null) return
   if (!next.reaction) {
     const drafts = { ...commentDraft.value }
     delete drafts[id]
     commentDraft.value = drafts
   }
   marks.value = { ...marks.value, [id]: next }
-  saveError.value = ''
+  dirtyMarks.set(id, { next, context })
+  void drainMarks()
+}
+async function drainMarks(): Promise<void> {
+  if (draining) return
+  draining = true
   try {
-    const saved = await ordered(() => sharingApi.saveMark(token, {
-        episode: episodeIndex,
-        ordinal,
-        reaction: next.reaction,
-        slop: next.slop,
-        comment: next.comment.trim() || null,
+    while (dirtyMarks.size) {
+      const id = dirtyMarks.keys().next().value!
+      await ordered(() => writeFeedback(async () => {
+        const entry = dirtyMarks.get(id)
+        if (!entry) return
+        const { next, context } = entry
+        const { token, episodeIndex, ordinal } = context
+        if (!token || props.token !== token || hydratedToken.value !== token || episodeIndex == null) {
+          dirtyMarks.delete(id)
+          return
+        }
+        let saved: FeedbackState
+        try {
+          saved = await sharingApi.saveMark(token, {
+            episode: episodeIndex, ordinal, reaction: next.reaction,
+            slop: next.slop, comment: next.comment.trim() || null,
+          })
+        } catch (exc) {
+          if (exc instanceof ApiError && exc.status === 429) {
+            nextWriteAt = Date.now() + 60_000
+            saveError.value = t.sharing.saveError
+          }
+          if (dirtyMarks.get(id) !== entry) return
+          throw exc
+        }
+        if (props.token !== token || dirtyMarks.get(id) !== entry) return
+        dirtyMarks.delete(id)
+        const stored = stateMarks(saved)[id]
+        const copy = { ...marks.value }
+        if (stored) copy[id] = stored
+        else delete copy[id]
+        marks.value = copy
       }))
-    if (props.token !== token) return
-    const stored = stateMarks(saved)[id]
-    if (stored) confirmed[id] = stored
-    else delete confirmed[id]
-    if (versions[id] !== version) return
-    const copy = { ...marks.value }
-    if (stored) copy[id] = stored
-    else delete copy[id]
-    marks.value = copy
+    }
+    saveError.value = ''
   } catch {
-    if (props.token !== token || versions[id] !== version) return
-    if (previousDraft !== undefined && commentDraft.value[id] === undefined) {
-      commentDraft.value = { ...commentDraft.value, [id]: previousDraft }
-    }
-    const previous = confirmed[id]
-    if (previous) marks.value = { ...marks.value, [id]: previous }
-    else {
-      const copy = { ...marks.value }
-      delete copy[id]
-      marks.value = copy
-    }
     saveError.value = t.sharing.saveError
+  } finally {
+    draining = false
   }
+}
+function retryFeedback(): void {
+  flushComments()
+  if (!lineWritable.value) void loadFeedback()
+  else void drainMarks()
 }
 function toggle(index: number, reaction: LineReaction): void {
   if (!lineWritable.value) return
+  flushComments()
   const current = markAt(index)
   const next = current.reaction === reaction ? null : reaction
   void persist(index, {
@@ -213,16 +287,7 @@ function toggle(index: number, reaction: LineReaction): void {
     comment: next ? commentAt(index) : '',
   })
 }
-function toggleSlop(index: number): void {
-  const current = markAt(index)
-  if (current.reaction !== 'dislike' && current.reaction !== 'horrible') return
-  void persist(index, { ...current, slop: !current.slop, comment: commentAt(index) })
-}
-function saveComment(index: number, value: string): void {
-  const current = markAt(index)
-  if (!current.reaction || value === current.comment) return
-  void persist(index, { ...current, comment: value })
-}
+
 function showCite(index: number, citeIndex: number, citation: SharedCitation): void {
   const page = citation.rects[0]?.page
   if (page == null) return
@@ -262,7 +327,8 @@ function starFill(n: number): string {
   return '0%'
 }
 async function sendSheet(): Promise<void> {
-  if (!props.token || sheetBusy.value) return
+  if (!lineWritable.value || !props.token || sheetBusy.value) return
+  flushComments()
   sheetBusy.value = true
   sheetError.value = ''
   const token = props.token
@@ -274,10 +340,9 @@ async function sendSheet(): Promise<void> {
       did_not: before.didNot.trim() || null,
   }
   try {
-    const saved = await ordered(() => sharingApi.saveSheet(token, payload))
+    const saved = await ordered(() => writeFeedback(() => sharingApi.saveSheet(token, payload)))
     if (props.token !== token) return
     applySheet(saved, before)
-    rememberLabel(saved.label ?? '')
     sheetSent.value = true
   } catch {
     sheetError.value = t.sharing.sheetError
@@ -364,7 +429,13 @@ async function sendSheet(): Promise<void> {
             :src="episode.audio.url"
             :aria-label="t.sharing.audioLabel"
             @error="audioFailed = true"
-            @ended="onEnded"
+            @ended="updateClock(); onEnded()"
+            @timeupdate="updateClock"
+            @play="updateClock"
+            @pause="updateClock"
+            @seeking="updateClock"
+            @seeked="updateClock"
+            @loadedmetadata="updateClock"
           />
           <div v-if="audioFailed" class="notice notice--fail" role="alert">
             <p>{{ t.sharing.playbackError }}</p>
@@ -374,16 +445,22 @@ async function sendSheet(): Promise<void> {
           </div>
         </div>
         <p v-else class="notice" role="status">{{ t.sharing.noAudio }}</p>
-        <p v-if="saveError" class="notice notice--fail" role="alert">{{ saveError }}</p>
+        <p v-if="saveError" class="notice notice--fail" role="alert">
+          {{ saveError }}
+          <button class="btn btn--sm" type="button" @click="retryFeedback">{{ t.common.retry }}</button>
+        </p>
         <p v-if="!writable" class="hint">{{ t.sharing.previewMarks }}</p>
+        <button v-if="currentSegment >= 0" class="btn btn--sm" type="button" @click="findPlaying">{{ t.sharing.findPlaying }}</button>
         <div class="register">
-          <div class="script">
+          <div ref="script" class="script" tabindex="0" :aria-label="t.sharing.script">
             <p class="eyebrow script-label">{{ t.sharing.script }}</p>
             <p v-if="!episode.segments.length" class="empty">{{ t.sharing.empty }}</p>
             <section
               v-for="(segment, index) in episode.segments"
               :key="lineKey(index)"
               class="segment"
+              :class="{ 'segment--playing': currentSegment === index }"
+              :aria-current="currentSegment === index ? 'true' : undefined"
             >
               <h3>{{ segment.speaker }}</h3>
               <p class="prose">{{ segment.text }}</p>
@@ -423,17 +500,12 @@ async function sendSheet(): Promise<void> {
                 v-if="markAt(index).reaction"
                 class="extra"
               >
-                <button
-                  v-if="markAt(index).reaction !== 'impressed'"
-                  type="button"
-                  class="btn btn--sm"
-                  :aria-pressed="markAt(index).slop"
-                  :disabled="!lineWritable"
-                  @click="toggleSlop(index)"
-                >
-                  {{ t.sharing.slop }}
+                <button type="button" class="btn btn--sm comment-toggle"
+                  :aria-expanded="!!commentOpen[lineKey(index)]"
+                  @click="commentOpen[lineKey(index)] = !commentOpen[lineKey(index)]">
+                  {{ t.sharing.comment }}
                 </button>
-                <label class="field">
+                <label v-if="commentOpen[lineKey(index)]" class="field">
                   <span class="meta">{{ t.sharing.comment }}</span>
                   <textarea
                     class="textarea"
@@ -442,7 +514,8 @@ async function sendSheet(): Promise<void> {
                     :value="commentAt(index)"
                     @input="draftComment(index, ($event.target as HTMLTextAreaElement).value)"
                     :disabled="!lineWritable"
-                    @change="saveComment(index, ($event.target as HTMLTextAreaElement).value)"
+                    @change="flushComments"
+                    @blur="flushComments"
                   />
                 </label>
               </div>
@@ -539,17 +612,6 @@ async function sendSheet(): Promise<void> {
           </div>
         </div>
         <div class="field">
-          <label for="share-label">{{ t.sharing.label }}</label>
-          <input
-            id="share-label"
-            v-model="label"
-            class="input"
-            maxlength="40"
-            :disabled="!writable"
-          />
-          <p class="hint">{{ t.sharing.labelHint }}</p>
-        </div>
-        <div class="field">
           <label for="share-worked">{{ t.sharing.worked }}</label>
           <textarea
             id="share-worked"
@@ -579,7 +641,7 @@ async function sendSheet(): Promise<void> {
         <button
           class="btn btn--primary"
           type="button"
-          :disabled="!writable || sheetBusy"
+          :disabled="!lineWritable || sheetBusy"
           @click="sendSheet"
         >
           {{ t.sharing.sendSheet }}
@@ -617,7 +679,7 @@ h1 {
 }
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 0.65fr) minmax(0, 1.8fr);
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
 }
 .layout > * {
   min-width: 0;
@@ -688,7 +750,7 @@ audio {
 }
 .register {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
   gap: 0;
   border-top: 1px solid var(--rule);
   margin-top: var(--s4);
@@ -699,6 +761,24 @@ audio {
 }
 .script {
   padding-right: var(--s4);
+  max-height: 65vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.segment--playing {
+  background: var(--mark-soft);
+  box-shadow: inset 3px 0 var(--mark);
+  padding-left: var(--s3);
+}
+.source {
+  max-height: 75vh;
+  overflow-y: auto;
+}
+.source-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--chrome);
 }
 .source {
   border-left: 1px solid var(--rule);

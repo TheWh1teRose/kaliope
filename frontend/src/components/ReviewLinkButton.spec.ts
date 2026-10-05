@@ -86,7 +86,7 @@ async function preview(wrapper: ReturnType<typeof mount>) {
   await flushPromises()
 }
 describe('owner review links', () => {
-  it('requires missing-audio acknowledgement and a preview before creating', async () => {
+  it('requires missing-audio acknowledgement and validates internally without a visible preview', async () => {
     const w = await show()
     expect(w.text()).toContain('älteren Skriptstand')
     expect(w.find('form button').attributes('disabled')).toBeDefined()
@@ -99,12 +99,8 @@ describe('owner review links', () => {
       ],
       acknowledge_missing_audio: true,
     })
-    expect(w.text()).toContain('Recorded preview')
-    const create = w
-      .findAll('button')
-      .find((b) => b.text() === 'Link erstellen')!
-    await create.trigger('click')
-    await flushPromises()
+    expect(w.text()).not.toContain('Recorded preview')
+    expect(w.find('.preview').exists()).toBe(false)
     expect(sharingApi.create).toHaveBeenCalledWith(
       'series',
       'series-one',
@@ -125,10 +121,6 @@ describe('owner review links', () => {
     })
     const w = await show()
     await preview(w)
-    await w
-      .findAll('button')
-      .find((b) => b.text() === 'Neuen Link erstellen')!
-      .trigger('click')
     expect(sharingApi.create).not.toHaveBeenCalled()
     await w
       .findAll('button')
@@ -143,7 +135,33 @@ describe('owner review links', () => {
       'link-one',
     )
     await w.find('#share-title').setValue('Changed')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(sharingApi.preview).toHaveBeenCalledTimes(2)
     expect(w.find('.preview').exists()).toBe(false)
+  })
+  it.each([false, true])('refreshes a conflicting snapshot on an explicit create retry (replacement: %s)', async replacement => {
+    vi.mocked(sharingApi.links).mockResolvedValue({ configured: true, links: replacement ? [metadata] : [] })
+    vi.mocked(sharingApi.create).mockRejectedValueOnce(new ApiError(409, '', 'Snapshot changed'))
+    const w = await show()
+    await preview(w)
+    async function confirm() {
+      await w.findAll('button').find(b => b.text() === 'Erstellen und ersetzen')!.trigger('click')
+      await flushPromises()
+    }
+    if (replacement) await confirm()
+    expect(sharingApi.create).toHaveBeenCalledTimes(1)
+    expect(w.find('[role="alert"]').text()).toBe('Snapshot changed')
+    vi.mocked(sharingApi.preview).mockResolvedValueOnce({ snapshot, key: 'fresh-key' })
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(sharingApi.preview).toHaveBeenCalledTimes(2)
+    if (replacement) {
+      expect(sharingApi.create).toHaveBeenCalledTimes(1)
+      await confirm()
+    }
+    expect(sharingApi.create).toHaveBeenLastCalledWith('series', 'series-one', expect.any(Object), 'fresh-key', replacement ? metadata.id : null)
+    expect(w.find('input[readonly]').element).toHaveProperty('value', 'https://review.example.test/r/token')
   })
   it('does not report revoke success on failure and allows a retry', async () => {
     vi.mocked(sharingApi.links).mockResolvedValue({

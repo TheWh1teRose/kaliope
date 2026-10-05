@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import SharedContent from './SharedContent.vue'
-import { rememberedLabel, rememberLabel, sharingApi, type FeedbackState, type SharedSnapshot } from '@/api/sharing'
+import { rememberLabel, sharingApi, type FeedbackState, type SharedSnapshot } from '@/api/sharing'
 
 const empty: FeedbackState = { label: null, stars: null, worked: null, did_not: null, marks: [] }
 const snapshot: SharedSnapshot = {
@@ -20,7 +20,8 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 let cleanup: (() => void)[] = []
-afterEach(() => { cleanup.forEach(fn => fn()); cleanup = []; vi.restoreAllMocks(); rememberLabel('') })
+beforeEach(() => vi.useFakeTimers())
+afterEach(() => { cleanup.forEach(fn => fn()); cleanup = []; vi.useRealTimers(); vi.restoreAllMocks(); rememberLabel('') })
 function reader(sharedSnapshot: SharedSnapshot = snapshot) {
   const wrapper = mount(SharedContent, {
     props: { snapshot: sharedSnapshot, selected: 1, token: 'token' },
@@ -48,12 +49,15 @@ describe('feedback persistence', () => {
     await flushPromises()
     expect(first.attributes('disabled')).toBeUndefined()
     expect(wrapper.findAll('[aria-label="Mag ich nicht"]')[1].attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('.segment textarea').exists()).toBe(false)
+    await wrapper.find('.comment-toggle').trigger('click')
     expect((wrapper.find('.segment textarea').element as HTMLTextAreaElement).value).toBe('Saved comment')
     await first.trigger('click')
     await flushPromises()
     expect(wrapper.findAll('[aria-label="Mag ich nicht"]')[1].attributes('aria-pressed')).toBe('true')
     await wrapper.findAll('[aria-label="Furchtbar"]')[1].trigger('click')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls[1][1]).toMatchObject({ ordinal: 1, reaction: 'horrible', slop: true, comment: 'Saved comment' })
   })
   it('keeps line writes disabled after feedback loading fails but leaves the questionnaire available', async () => {
@@ -68,24 +72,23 @@ describe('feedback persistence', () => {
     await wrapper.find('.head button').trigger('click')
     expect(wrapper.find('#share-worked').attributes('disabled')).toBeUndefined()
   })
-  it('keeps an explicitly cleared remembered label empty after repeated submissions', async () => {
+  it('hides reviewer names and keeps legacy labels without rewriting them', async () => {
     rememberLabel('Lena')
-    vi.spyOn(sharingApi, 'feedback').mockResolvedValue(empty)
-    const save = vi.spyOn(sharingApi, 'saveSheet').mockResolvedValue(empty)
+    vi.spyOn(sharingApi, 'feedback').mockResolvedValue({ ...empty, label: 'Lena' })
+    const save = vi.spyOn(sharingApi, 'saveSheet').mockResolvedValue({ ...empty, label: 'Lena' })
     const wrapper = reader()
     await flushPromises()
     await wrapper.find('.head button').trigger('click')
-    expect((wrapper.find('#share-label').element as HTMLInputElement).value).toBe('Lena')
-    await wrapper.find('#share-label').setValue('')
+    expect(wrapper.find('#share-label').exists()).toBe(false)
     await wrapper.find('.panel__foot .btn--primary').trigger('click')
     await flushPromises()
-    expect((wrapper.find('#share-label').element as HTMLInputElement).value).toBe('')
-    expect(rememberedLabel()).toBe('')
+    expect(wrapper.find('#share-label').exists()).toBe(false)
     await wrapper.find('.panel__foot .btn--primary').trigger('click')
     await flushPromises()
-    expect(save.mock.calls.map(call => call[1].label)).toEqual([null, null])
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(save.mock.calls.map(call => call[1].label)).toEqual(['Lena', 'Lena'])
   })
-  it.each(['reaction', 'slop', 'comment', 'rollback'])('preserves input-only line drafts across a pending %s save', async action => {
+  it.each(['reaction', 'comment', 'rollback'])('preserves input-only line drafts across a pending %s save', async action => {
     const marked: FeedbackState = { ...empty, marks: [{ episode: 1, ordinal: 0,
       reaction: 'dislike', slop: false, comment: 'Saved' }] }
     vi.spyOn(sharingApi, 'feedback').mockResolvedValue(action === 'reaction' ? empty : marked)
@@ -94,8 +97,8 @@ describe('feedback persistence', () => {
     const wrapper = reader()
     await flushPromises()
     if (action === 'reaction') await wrapper.find('[aria-label="Mag ich nicht"]').trigger('click')
-    else if (action === 'comment') await wrapper.find('.segment textarea').setValue('Submitted')
-    else await wrapper.findAll('button').find(button => button.text() === 'Klingt nach KI-Slop')!.trigger('click')
+    await wrapper.find('.comment-toggle').trigger('click')
+    if (action !== 'reaction') await wrapper.find('.segment textarea').setValue('Submitted')
     const textarea = wrapper.find('.segment textarea')
     ;(textarea.element as HTMLTextAreaElement).value = 'Unsent draft'
     await textarea.trigger('input')
@@ -106,6 +109,7 @@ describe('feedback persistence', () => {
     expect(save).toHaveBeenCalledTimes(1)
     await wrapper.find('.segment textarea').trigger('change')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls[1][1].comment).toBe('Unsent draft')
   })
   it('discards the old line draft when a reaction is explicitly cleared', async () => {
@@ -115,13 +119,15 @@ describe('feedback persistence', () => {
     const save = vi.spyOn(sharingApi, 'saveMark').mockResolvedValueOnce(empty).mockResolvedValue(marked)
     const wrapper = reader()
     await flushPromises()
+    await wrapper.find('.comment-toggle').trigger('click')
     const textarea = wrapper.find('.segment textarea')
     ;(textarea.element as HTMLTextAreaElement).value = 'Old draft'
     await textarea.trigger('input')
     await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
     await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
     await flushPromises()
-    expect(save.mock.calls[1][1].comment).toBe(null)
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(save.mock.calls.at(-1)![1].comment).toBe(null)
   })
   it('retains a multi-page citation while navigating forward and back', async () => {
     vi.spyOn(sharingApi, 'feedback').mockResolvedValue(empty)
@@ -144,7 +150,6 @@ describe('feedback persistence', () => {
     vi.spyOn(sharingApi, 'saveSheet').mockReturnValue(sheet.promise)
     const wrapper = reader()
     await wrapper.find('.head button').trigger('click')
-    await wrapper.find('#share-label').setValue('Reviewer')
     await wrapper.find('#share-worked').setValue('Draft')
     await wrapper.find('#share-did-not').setValue('Other draft')
     await wrapper.findAll('.star')[3].trigger('click')
@@ -155,12 +160,13 @@ describe('feedback persistence', () => {
     await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
     await flushPromises()
     await wrapper.find('.head button').trigger('click')
-    expect((wrapper.find('#share-label').element as HTMLInputElement).value).toBe('Reviewer')
+    expect(wrapper.find('#share-label').exists()).toBe(false)
     expect((wrapper.find('#share-did-not').element as HTMLTextAreaElement).value).toBe('Other draft')
     await wrapper.find('.panel__foot .btn--primary').trigger('click')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(sharingApi.saveSheet).toHaveBeenCalledWith('token', {
-      label: 'Reviewer', stars: 4, worked: 'Draft', did_not: 'Other draft',
+      label: null, stars: 4, worked: 'Draft', did_not: 'Other draft',
     })
     await wrapper.find('#share-worked').setValue('New draft')
     sheet.resolve({ ...empty, label: 'Reviewer', stars: 4, worked: 'Draft', did_not: 'Other draft' })
@@ -183,6 +189,7 @@ describe('feedback persistence', () => {
     if (fail) first.reject(new Error('failed'))
     else first.resolve({ ...empty, marks: [{ episode: 1, ordinal: 0, reaction: 'impressed', slop: false, comment: null }] })
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save).toHaveBeenCalledTimes(2)
     expect(save.mock.calls[1][1].reaction).toBe(null)
     expect(button.attributes('aria-pressed')).toBe('false')

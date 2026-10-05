@@ -81,7 +81,7 @@ watch(() => props.token, load)
 
 <style scoped>
 .public-review {
-  max-width: 1060px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: var(--s5);
 }

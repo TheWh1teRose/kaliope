@@ -1258,6 +1258,7 @@ export default {
     slop: 'Klingt nach KI-Slop',
     comment: 'Kommentar (optional)',
     source: 'Quelle',
+    findPlaying: 'Aktuelle Passage finden',
     sourceHint: 'Wähle einen Beleg, um die Stelle auf der eingefrorenen Seite zu sehen.',
     noSource: 'Keine belegte Seite in diesem Stand.',
     cite: 'Beleg, Seite {n}',
