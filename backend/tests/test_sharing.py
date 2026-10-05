@@ -613,7 +613,11 @@ def test_recorded_alignment_is_frozen_without_private_segment_ids(owner: TestCli
         recording = db.get(AudioTake, tid)
         assert recording
         mix = AudioMix(
-            blob=blob, duration_s=12, gap_s=0.3, loudness_lufs=-16, chunk_offsets_s=[0],
+            blob=blob,
+            duration_s=12,
+            gap_s=0.3,
+            loudness_lufs=-16,
+            chunk_offsets_s=[0],
             lines=[{"segment_id": "seg-private", "start_s": 2.3, "end_s": 9.1}],
         )
         recording.manifest_json = {"bag_hashes": {"audio_mix": store().put("audio_mix", mix).hash}}
@@ -643,9 +647,12 @@ def test_marks_and_comments_persist_without_questionnaire_and_clear_survives_ret
     assert summary["horrible"] == 1
     assert summary["lines"][0]["comment"] == "Unclear"
     assert owner.get(path, headers=_reviewer(2)).json()["marks"] == []
-    assert owner.put(
-        path + "/marks", headers=_reviewer(), json={**payload, "reaction": None}
-    ).status_code == 200
+    assert (
+        owner.put(
+            path + "/marks", headers=_reviewer(), json={**payload, "reaction": None}
+        ).status_code
+        == 200
+    )
     assert owner.get(path, headers=_reviewer()).json()["marks"] == []
 
 
@@ -1020,8 +1027,12 @@ def test_old_snapshot_without_ordinals_still_reads(owner: TestClient) -> None:
     body = owner.get(f"/api/public/review-links/{token}").json()
     assert body["episodes"][0]["segments"] == [
         {
-            "ordinal": 0, "speaker": "Host", "text": "Old line", "citations": [],
-            "start_s": None, "end_s": None,
+            "ordinal": 0,
+            "speaker": "Host",
+            "text": "Old line",
+            "citations": [],
+            "start_s": None,
+            "end_s": None,
         }
     ]
     assert body["episodes"][0]["pages"] == []
