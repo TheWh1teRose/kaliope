@@ -266,6 +266,78 @@ def test_creation_rejects_changed_preview_and_foreign_or_sample_take(owner: Test
     assert owner.get(base).json()["links"] == []
 
 
+def test_proxied_application_can_preview_create_and_revoke(
+    owner: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dev server rewrites Host to the API and forwards the page Origin."""
+    rid = run()
+    base = f"/api/runs/{rid}/review-link"
+    proxied = {
+        "Host": "127.0.0.1:8000",
+        "Origin": "http://localhost:5173",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    preview = owner.post(base + "/preview", json=choice(), headers=proxied)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["snapshot"]["title"] == "Public title"
+    created = owner.post(
+        base, json={**choice(), "preview_key": preview.json()["key"]}, headers=proxied
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["url"].startswith("https://review.example.test/r/")
+
+    monkeypatch.setattr(get_settings(), "review_public_origin", "")
+    listed = owner.get(base)
+    assert listed.status_code == 200
+    assert listed.json()["configured"] is False
+    blocked = owner.post(
+        base, json={**choice(), "preview_key": preview.json()["key"]}, headers=proxied
+    )
+    assert blocked.status_code == 409
+    assert (
+        blocked.json()["detail"]
+        == "Eine geprüfte öffentliche HTTPS-Adresse muss zuerst konfiguriert werden."
+    )
+    still = owner.post(base + "/preview", json=choice(), headers=proxied)
+    assert still.status_code == 200, still.text
+    revoked = owner.delete("/api/review-links/" + created.json()["link"]["id"], headers=proxied)
+    assert revoked.status_code == 204
+    assert owner.get(base).json()["links"][0]["status"] == "revoked"
+
+
+def test_shared_address_accepts_its_own_origin_and_refuses_other_sites(owner: TestClient) -> None:
+    rid = run()
+    url = f"/api/runs/{rid}/review-link/preview"
+    same = owner.post(
+        url,
+        json=choice(),
+        headers={"Host": "127.0.0.1:8000", "Origin": "http://127.0.0.1:8000"},
+    )
+    assert same.status_code == 200, same.text
+    foreign = owner.post(
+        url,
+        json=choice(),
+        headers={
+            "Host": "127.0.0.1:8000",
+            "Origin": "https://evil.test",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
+    assert foreign.status_code == 403
+    assert foreign.json()["detail"] == "Use the application to manage review links."
+    cross_site = owner.post(
+        url,
+        json=choice(),
+        headers={
+            "Host": "127.0.0.1:8000",
+            "Origin": "http://127.0.0.1:8000",
+            "Sec-Fetch-Site": "cross-site",
+        },
+    )
+    assert cross_site.status_code == 403
+    assert cross_site.json()["detail"] == "Use the application to manage review links."
+
+
 def test_auth_csrf_configuration_and_expiry(
     owner: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
