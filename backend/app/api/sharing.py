@@ -78,7 +78,7 @@ def _mutation(request: Request, user: User = Depends(require_admin)) -> User:
     # The dev proxy rewrites Host and forwards the page Origin. A deployed
     # service can likewise report an internal base while the browser sends the
     # configured public origin. A foreign Origin, and any cross-site fetch, stay refused.
-    proxied_page = site == "same-origin" and bool(origin) and _loopback_origin(origin)
+    proxied_page = site == "same-origin" and origin is not None and _loopback_origin(origin)
     public_page = bool(configured) and origin == configured
     mismatched = bool(origin) and origin != allowed and not proxied_page and not public_page
     if site == "cross-site" or mismatched:
