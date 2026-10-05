@@ -50,6 +50,7 @@ const summary = ref<ReviewSummary | null>(null)
 
 const showOriginal = ref<Set<string>>(new Set())
 const commentDraft = ref<Record<string, string>>({})
+const reactionError = ref('')
 
 const highlight = computed(() => activeAnchor.value?.rects ?? [])
 
@@ -115,9 +116,11 @@ function reconcileClearedComment(segmentId: string, before: string | undefined):
 }
 let reactionWrites: Promise<void> = Promise.resolve()
 function orderedReaction(operation: () => Promise<void>): Promise<void> {
-  const result = reactionWrites.then(operation)
-  reactionWrites = result.catch(() => undefined)
-  return result
+  reactionWrites = reactionWrites.then(operation).then(
+    () => { reactionError.value = '' },
+    () => { reactionError.value = t.review.saveError },
+  )
+  return reactionWrites
 }
 function react(segmentId: string, reaction: 'impressed' | 'dislike' | 'horrible'): Promise<void> {
   return orderedReaction(() => recordReaction(segmentId, reaction))
@@ -294,6 +297,8 @@ onMounted(async () => {
         {{ t.review.complete }}
       </button>
     </header>
+
+    <p v-if="reactionError" class="notice notice--fail" role="alert">{{ reactionError }}</p>
 
     <SourceRegister
       :document-id="script?.document_id ?? null"

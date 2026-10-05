@@ -21,15 +21,53 @@ function deferred<T>() {
 }
 let cleanup: (() => void)[] = []
 afterEach(() => { cleanup.forEach(fn => fn()); cleanup = []; vi.restoreAllMocks(); rememberLabel('') })
-function reader() {
+function reader(sharedSnapshot: SharedSnapshot = snapshot) {
   const wrapper = mount(SharedContent, {
-    props: { snapshot, selected: 1, token: 'token' },
+    props: { snapshot: sharedSnapshot, selected: 1, token: 'token' },
     global: { stubs: { teleport: true } },
   })
   cleanup.push(() => wrapper.unmount())
   return wrapper
 }
 describe('feedback persistence', () => {
+  it('loads all saved lines before permitting mutations', async () => {
+    const load = deferred<FeedbackState>()
+    vi.spyOn(sharingApi, 'feedback').mockReturnValue(load.promise)
+    const saved: FeedbackState = { ...empty, marks: [{ episode: 1, ordinal: 1,
+      reaction: 'dislike', slop: true, comment: 'Saved comment' }] }
+    const save = vi.spyOn(sharingApi, 'saveMark').mockResolvedValue(saved)
+    const wrapper = reader({ ...snapshot, episodes: [{ ...snapshot.episodes[0], segments: [
+      snapshot.episodes[0].segments[0], { ordinal: 1, speaker: 'Host', text: 'Line B' },
+    ] }] })
+    const first = wrapper.findAll('[aria-label="Beeindruckt"]')[0]
+    expect(first.attributes('disabled')).toBeDefined()
+    await first.trigger('click')
+    await flushPromises()
+    expect(save).not.toHaveBeenCalled()
+    load.resolve(saved)
+    await flushPromises()
+    expect(first.attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('[aria-label="Mag ich nicht"]')[1].attributes('aria-pressed')).toBe('true')
+    expect((wrapper.find('.segment textarea').element as HTMLTextAreaElement).value).toBe('Saved comment')
+    await first.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[aria-label="Mag ich nicht"]')[1].attributes('aria-pressed')).toBe('true')
+    await wrapper.findAll('[aria-label="Furchtbar"]')[1].trigger('click')
+    await flushPromises()
+    expect(save.mock.calls[1][1]).toMatchObject({ ordinal: 1, reaction: 'horrible', slop: true, comment: 'Saved comment' })
+  })
+  it('keeps line writes disabled after feedback loading fails but leaves the questionnaire available', async () => {
+    vi.spyOn(sharingApi, 'feedback').mockRejectedValue(new Error('failed'))
+    const save = vi.spyOn(sharingApi, 'saveMark').mockResolvedValue(empty)
+    const wrapper = reader()
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toContain('nicht geladen')
+    expect(wrapper.find('[aria-label="Beeindruckt"]').attributes('disabled')).toBeDefined()
+    await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
+    expect(save).not.toHaveBeenCalled()
+    await wrapper.find('.head button').trigger('click')
+    expect(wrapper.find('#share-worked').attributes('disabled')).toBeUndefined()
+  })
   it('keeps an explicitly cleared remembered label empty after repeated submissions', async () => {
     rememberLabel('Lena')
     vi.spyOn(sharingApi, 'feedback').mockResolvedValue(empty)

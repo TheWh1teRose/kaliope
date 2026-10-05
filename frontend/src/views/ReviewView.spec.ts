@@ -49,6 +49,28 @@ async function editor() {
   return { wrapper, review }
 }
 describe('internal reaction comment drafts', () => {
+  it.each(['reaction', 'slop', 'comment', 'undo'])('reports a failed %s write and permits a successful retry without losing drafts', async action => {
+    const { wrapper, review } = await editor()
+    const save = vi.spyOn(review, action === 'undo' ? 'undo' : 'record')
+      .mockRejectedValueOnce(new Error('failed')).mockResolvedValue(undefined)
+    const textarea = wrapper.find('.react-extra textarea')
+    ;(textarea.element as HTMLTextAreaElement).value = 'Keep this draft'
+    await textarea.trigger('input')
+    async function submit() {
+      if (action === 'reaction') await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
+      else if (action === 'slop') await wrapper.find('.react-extra button').trigger('click')
+      else if (action === 'undo') await wrapper.findAll('.acts button').find(button => button.text().startsWith('↺'))!.trigger('click')
+      else await wrapper.find('.react-extra textarea').trigger('change')
+      await flushPromises()
+    }
+    await submit()
+    expect(wrapper.find('[role="alert"]').text()).toContain('nicht gespeichert')
+    expect((wrapper.find('.react-extra textarea').element as HTMLTextAreaElement).value).toBe('Keep this draft')
+    await submit()
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect((wrapper.find('.react-extra textarea').element as HTMLTextAreaElement).value).toBe('Keep this draft')
+  })
   it.each(['reaction', 'slop', 'comment'])('preserves input-only drafts during a pending %s refresh', async action => {
     const { wrapper, review } = await editor()
     let release!: () => void

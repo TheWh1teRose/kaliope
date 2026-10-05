@@ -39,6 +39,7 @@ const commentDraft = ref<Record<string, string>>({})
 const player = ref<HTMLAudioElement | null>(null)
 const audioFailed = ref(false)
 const saveError = ref('')
+const hydratedToken = ref<string | null>(null)
 const sheetError = ref('')
 const sheetOpen = ref(false)
 const endedOffer = ref(false)
@@ -68,6 +69,7 @@ const pagePos = computed(() =>
   pages.value.findIndex((page) => page.page === sourcePage.value?.page),
 )
 const writable = computed(() => Boolean(props.token))
+const lineWritable = computed(() => writable.value && hydratedToken.value === props.token)
 const starsText = computed(() =>
   stars.value == null
     ? t.sharing.starsNone
@@ -109,7 +111,6 @@ function markAt(index: number): LocalMark {
   )
 }
 let writes: Promise<unknown> = Promise.resolve()
-let markVersion = 0
 const versions: Record<string, number> = {}
 let confirmed: Record<string, LocalMark> = {}
 function ordered<T>(operation: () => Promise<T>): Promise<T> {
@@ -138,27 +139,29 @@ function stateMarks(data: FeedbackState): Record<string, LocalMark> {
   return next
 }
 async function loadFeedback(): Promise<void> {
+  hydratedToken.value = null
   if (!props.token) return
   const token = props.token
-  const version = markVersion
   const before = draft()
   try {
     const data = await ordered(() => sharingApi.feedback(token))
     if (props.token !== token) return
     confirmed = stateMarks(data)
-    if (version === markVersion) marks.value = { ...confirmed }
+    marks.value = { ...confirmed }
     applySheet({ ...data, label: data.label ?? rememberedLabel() }, before)
+    hydratedToken.value = token
+    saveError.value = ''
   } catch {
-    return
+    if (props.token === token) saveError.value = t.sharing.feedbackLoadError
   }
 }
 async function persist(index: number, next: LocalMark): Promise<void> {
   const episodeIndex = episode.value?.index
-  if (!props.token || episodeIndex == null) return
+  if (!lineWritable.value || !props.token || episodeIndex == null) return
   const id = lineKey(index)
   const token = props.token
   const ordinal = ordinalOf(index)
-  const version = ++markVersion
+  const version = (versions[id] ?? 0) + 1
   versions[id] = version
   const previousDraft = commentDraft.value[id]
   if (!next.reaction) {
@@ -201,7 +204,7 @@ async function persist(index: number, next: LocalMark): Promise<void> {
   }
 }
 function toggle(index: number, reaction: LineReaction): void {
-  if (!writable.value) return
+  if (!lineWritable.value) return
   const current = markAt(index)
   const next = current.reaction === reaction ? null : reaction
   void persist(index, {
@@ -409,7 +412,7 @@ async function sendSheet(): Promise<void> {
                   :class="[`react--${item.tone}`, { 'react--on': markAt(index).reaction === item.id }]"
                   :aria-pressed="markAt(index).reaction === item.id"
                   :aria-label="item.label"
-                  :disabled="!writable"
+                  :disabled="!lineWritable"
                   @click="toggle(index, item.id)"
                 >
                   <span aria-hidden="true">{{ item.emoji }}</span>
@@ -425,7 +428,7 @@ async function sendSheet(): Promise<void> {
                   type="button"
                   class="btn btn--sm"
                   :aria-pressed="markAt(index).slop"
-                  :disabled="!writable"
+                  :disabled="!lineWritable"
                   @click="toggleSlop(index)"
                 >
                   {{ t.sharing.slop }}
@@ -438,7 +441,7 @@ async function sendSheet(): Promise<void> {
                     maxlength="500"
                     :value="commentAt(index)"
                     @input="draftComment(index, ($event.target as HTMLTextAreaElement).value)"
-                    :disabled="!writable"
+                    :disabled="!lineWritable"
                     @change="saveComment(index, ($event.target as HTMLTextAreaElement).value)"
                   />
                 </label>
