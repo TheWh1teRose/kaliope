@@ -50,11 +50,38 @@ _invalid_attempts: OrderedDict[str, tuple[float, int]] = OrderedDict()
 _invalid_lock = Lock()
 
 
+def _loopback_origin(origin: str) -> bool:
+    """True for an HTTP(S) origin whose host is the local machine."""
+    try:
+        parsed = urlsplit(origin)
+        host = parsed.hostname
+    except ValueError:
+        return False
+    return bool(
+        host
+        and parsed.scheme in {"http", "https"}
+        and host.lower() in {"localhost", "127.0.0.1", "::1"}
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == ""
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
 def _mutation(request: Request, user: User = Depends(require_admin)) -> User:
     origin = request.headers.get("origin")
+    site = request.headers.get("sec-fetch-site")
     own = urlsplit(str(request.base_url))
     allowed = f"{own.scheme}://{own.netloc}"
-    if (origin and origin != allowed) or request.headers.get("sec-fetch-site") == "cross-site":
+    configured = get_settings().review_public_origin
+    # The dev proxy rewrites Host and forwards the page Origin. A deployed
+    # service can likewise report an internal base while the browser sends the
+    # configured public origin. A foreign Origin, and any cross-site fetch, stay refused.
+    proxied_page = site == "same-origin" and origin is not None and _loopback_origin(origin)
+    public_page = bool(configured) and origin == configured
+    mismatched = bool(origin) and origin != allowed and not proxied_page and not public_page
+    if site == "cross-site" or mismatched:
         raise problem(403, "Forbidden", "Use the application to manage review links.")
     return user
 
