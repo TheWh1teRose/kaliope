@@ -151,7 +151,7 @@ describe('public feedback polish', () => {
     expect(save).toHaveBeenCalledTimes(1)
     expect(sheet).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
-    expect(save.mock.calls[1][1]).toMatchObject({ reaction: null, comment: null })
+    expect(save.mock.calls[1][1]).toMatchObject({ reaction: null, comment: 'Retained draft' })
     await vi.advanceTimersByTimeAsync(1100)
     expect(sheet).toHaveBeenCalledTimes(1)
     expect(w.find('[aria-label="Mag ich nicht"]').attributes('aria-pressed')).toBe('false')
@@ -262,7 +262,7 @@ describe('public feedback polish', () => {
     await returned.find('[aria-label="Furchtbar"]').trigger('click')
     await flushPromises()
     await vi.advanceTimersByTimeAsync(1100)
-    expect(state.marks).toEqual([])
+    expect(save.mock.calls.at(-1)![1]).toMatchObject({ reaction: null, comment: 'This was confusing' })
   })
 
   it('orders a comment queued behind a slow reaction, protects newer input and warns before leaving', async () => {

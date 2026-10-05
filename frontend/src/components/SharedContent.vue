@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ApiError } from '@/api/client'
 import {
   sharedDate,
@@ -51,11 +51,39 @@ const currentSegment = computed(() => clock.value == null ? -1 :
   (episode.value?.segments.findIndex(segment => segment.start_s != null && segment.end_s != null &&
     clock.value! >= segment.start_s && clock.value! < segment.end_s) ?? -1))
 function updateClock(): void { clock.value = player.value?.currentTime ?? null }
+function onPlay(): void { updateClock(); void followSegment() }
+function onPause(): void { updateClock() }
+async function followSegment(): Promise<void> {
+  await nextTick()
+  findPlaying()
+  const index = currentSegment.value
+  const first = episode.value?.segments[index]?.citations?.[0]
+  if (first) showCite(index, 0, first)
+  else {
+    activeRects.value = []
+    activeCite.value = ''
+  }
+}
+watch(currentSegment, () => { void followSegment() })
 const script = ref<HTMLElement | null>(null)
+const source = ref<HTMLElement | null>(null)
+function scrollEvidence(anchor: SVGGraphicsElement): void {
+  const container = source.value
+  if (!container) return
+  const barHeight = container.querySelector('.source-bar')?.getBoundingClientRect().height ?? 0
+  const rect = anchor.getBoundingClientRect()
+  const target = container.scrollTop + rect.top - container.getBoundingClientRect().top
+    - barHeight - (container.clientHeight - barHeight - rect.height) / 2
+  container.scrollTop = Math.max(0, Math.min(target, container.scrollHeight - container.clientHeight))
+}
 function findPlaying(): void {
   const container = script.value
   const line = container?.querySelector<HTMLElement>('[aria-current="true"]')
-  if (container && line) container.scrollTop += line.getBoundingClientRect().top - container.getBoundingClientRect().top
+  if (container && line) {
+    const target = container.scrollTop + line.getBoundingClientRect().top - container.getBoundingClientRect().top
+      - (container.clientHeight - line.getBoundingClientRect().height) / 2
+    container.scrollTop = Math.max(0, Math.min(target, container.scrollHeight - container.clientHeight))
+  }
 }
 const stars = ref<number | null>(null)
 const worked = ref('')
@@ -135,8 +163,8 @@ function draftComment(index: number, value: string): void {
   const pending = pendingComments.get(context.id)
   if (pending) clearTimeout(pending.timer)
   const save = () => {
-    const current = marks.value[context.id]
-    if (current?.reaction && current.comment !== value) void persist(index, { ...current, comment: value }, context)
+    const current = marks.value[context.id] ?? { reaction: null, slop: false, comment: '' }
+    if (current.comment !== value) void persist(index, { ...current, comment: value }, context)
   }
   const timer = setTimeout(() => { pendingComments.delete(context.id); save() }, 350)
   pendingComments.set(context.id, { timer, save })
@@ -217,11 +245,6 @@ function lineContext(index: number) {
 function persist(index: number, next: LocalMark, context = lineContext(index)): void {
   const { episodeIndex, id, token } = context
   if (!token || hydratedToken.value !== token || props.token !== token || episodeIndex == null) return
-  if (!next.reaction) {
-    const drafts = { ...commentDraft.value }
-    delete drafts[id]
-    commentDraft.value = drafts
-  }
   marks.value = { ...marks.value, [id]: next }
   dirtyMarks.set(id, { next, context })
   void drainMarks()
@@ -284,13 +307,17 @@ function toggle(index: number, reaction: LineReaction): void {
   void persist(index, {
     reaction: next,
     slop: next === 'dislike' || next === 'horrible' ? current.slop : false,
-    comment: next ? commentAt(index) : '',
+    comment: commentAt(index),
   })
 }
 
 function showCite(index: number, citeIndex: number, citation: SharedCitation): void {
   const page = citation.rects[0]?.page
-  if (page == null) return
+  if (page == null || !pages.value.some(item => item.page === page)) {
+    activeRects.value = []
+    activeCite.value = ''
+    return
+  }
   activePage.value = page
   activeRects.value = citation.rects
   activeCite.value = `${lineKey(index)}:${citeIndex}`
@@ -357,7 +384,7 @@ async function sendSheet(): Promise<void> {
     <header class="head">
       <div class="spread wrap">
         <p class="eyebrow">{{ t.sharing.intro }}</p>
-        <button class="btn btn--sm" type="button" @click="openSheet">
+        <button class="btn btn--primary" type="button" @click="openSheet">
           {{ t.sharing.feedback }}
         </button>
       </div>
@@ -416,6 +443,8 @@ async function sendSheet(): Promise<void> {
           {{ fill(t.sharing.progress, { n: position + 1, total: snapshot.episodes.length }) }}
         </p>
         <h2 class="h-section">{{ episode.title }}</h2>
+        <div class="playback-bar">
+          <button class="btn btn--primary" type="button" @click="openSheet">{{ t.sharing.feedback }}</button>
         <div v-if="episode.audio" class="audio">
           <div class="row wrap">
             <span class="badge badge--pass">{{ t.sharing.fullEpisode }}</span
@@ -431,10 +460,10 @@ async function sendSheet(): Promise<void> {
             @error="audioFailed = true"
             @ended="updateClock(); onEnded()"
             @timeupdate="updateClock"
-            @play="updateClock"
-            @pause="updateClock"
+            @play="onPlay"
+            @pause="onPause"
             @seeking="updateClock"
-            @seeked="updateClock"
+            @seeked="updateClock(); followSegment()"
             @loadedmetadata="updateClock"
           />
           <div v-if="audioFailed" class="notice notice--fail" role="alert">
@@ -445,6 +474,7 @@ async function sendSheet(): Promise<void> {
           </div>
         </div>
         <p v-else class="notice" role="status">{{ t.sharing.noAudio }}</p>
+        </div>
         <p v-if="saveError" class="notice notice--fail" role="alert">
           {{ saveError }}
           <button class="btn btn--sm" type="button" @click="retryFeedback">{{ t.common.retry }}</button>
@@ -495,16 +525,14 @@ async function sendSheet(): Promise<void> {
                   <span aria-hidden="true">{{ item.emoji }}</span>
                   <span class="sr-only">{{ item.label }}</span>
                 </button>
-              </div>
-              <div
-                v-if="markAt(index).reaction"
-                class="extra"
-              >
                 <button type="button" class="btn btn--sm comment-toggle"
+                  :disabled="!lineWritable"
                   :aria-expanded="!!commentOpen[lineKey(index)]"
                   @click="commentOpen[lineKey(index)] = !commentOpen[lineKey(index)]">
-                  {{ t.sharing.comment }}
+                  {{ t.sharing.comment }}<span v-if="commentAt(index).trim()" aria-hidden="true"> · ✓</span>
                 </button>
+              </div>
+              <div class="extra">
                 <label v-if="commentOpen[lineKey(index)]" class="field">
                   <span class="meta">{{ t.sharing.comment }}</span>
                   <textarea
@@ -521,7 +549,7 @@ async function sendSheet(): Promise<void> {
               </div>
             </section>
           </div>
-          <aside class="source">
+          <aside ref="source" class="source">
             <div class="source-bar">
               <span class="eyebrow">{{ t.sharing.source }}</span>
               <span class="grow" />
@@ -553,11 +581,13 @@ async function sendSheet(): Promise<void> {
             </div>
             <CitedPage
               v-if="sourcePage"
+              :key="sourcePage.page"
               :url="sourcePage.url"
               :width="sourcePage.width"
               :height="sourcePage.height"
               :page="sourcePage.page"
               :highlight="activeRects"
+              @anchor="scrollEvidence"
             />
             <p v-else class="hint source-empty">{{ t.sharing.noSource }}</p>
             <p v-if="sourcePage && !activeRects.length" class="hint source-empty">
@@ -656,7 +686,7 @@ async function sendSheet(): Promise<void> {
   background: var(--card);
   border: 1px solid var(--rule);
   border-radius: var(--r-lg);
-  overflow: hidden;
+  overflow: clip;
 }
 .head {
   padding: var(--s6);
@@ -728,6 +758,13 @@ h2 {
   margin: var(--s2) 0 var(--s4);
   overflow-wrap: anywhere;
 }
+.playback-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+  padding: var(--s2) 0;
+}
 audio {
   display: block;
   width: 100%;
@@ -761,7 +798,7 @@ audio {
 }
 .script {
   padding-right: var(--s4);
-  max-height: 65vh;
+  height: 70vh;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -771,7 +808,7 @@ audio {
   padding-left: var(--s3);
 }
 .source {
-  max-height: 75vh;
+  height: 70vh;
   overflow-y: auto;
 }
 .source-bar {
@@ -888,9 +925,10 @@ audio {
   .source {
     border-left: 0;
     border-top: 1px solid var(--rule);
-    min-height: 50vh;
+    height: 55vh;
   }
   .script {
+    height: 55vh;
     padding-right: 0;
   }
   .head,

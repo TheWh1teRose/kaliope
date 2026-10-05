@@ -29,7 +29,7 @@ export interface SharedEpisode {
 export interface FeedbackMark {
   episode: number
   ordinal: number
-  reaction: LineReaction
+  reaction: LineReaction | null
   slop: boolean
   comment: string | null
 }
@@ -62,7 +62,7 @@ export interface FeedbackSummary {
     key: string
     speaker: string
     text: string
-    reaction: LineReaction
+    reaction: LineReaction | null
     slop: boolean
     comment: string | null
   }[]

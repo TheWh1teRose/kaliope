@@ -222,7 +222,9 @@ const statusLabel = t.sharing.status
         {{ t.sharing.notConfigured }}
       </p>
       <p v-if="readinessError" class="notice">{{ readinessError }}</p>
-      <form v-if="options" @submit.prevent="create()">
+      <details v-if="options" class="create-options" :open="!management.links.length">
+        <summary>{{ active ? t.sharing.newLink : t.sharing.createLink }}</summary>
+      <form @submit.prevent="create()">
         <div class="field">
           <label for="share-title">{{ t.sharing.publicTitle }}</label
           ><input
@@ -298,6 +300,7 @@ const statusLabel = t.sharing.status
           {{ active ? t.sharing.newLink : t.sharing.createLink }}
         </button>
       </form>
+      </details>
       <div
         v-if="replaceConfirmation"
         class="notice"
@@ -333,13 +336,14 @@ const statusLabel = t.sharing.status
             @focus="($event.target as HTMLInputElement).select()"
         /></label>
         <div class="actions">
-          <button class="btn" @click="copy">{{ t.sharing.copy }}</button
-          >
+          <button class="btn" @click="copy">{{ t.sharing.copy }}</button>
+          <a class="btn" :href="url" target="_blank" rel="noopener noreferrer">{{ t.common.open }}</a>
         </div>
         <p role="status" class="hint">{{ copyState }}</p>
       </section>
       <section v-if="management.links.length" class="management">
         <h3 class="h-section">{{ t.sharing.manage }}</h3>
+        <p v-if="!url" class="hint">{{ t.sharing.existingUrlUnavailable }}</p>
         <p class="hint">{{ t.sharing.recallLimit }}</p>
         <div v-for="link in management.links" :key="link.id" class="link-row">
           <div>
@@ -404,7 +408,7 @@ const statusLabel = t.sharing.status
                           ? '👍'
                           : line.reaction === 'dislike'
                             ? '🤢'
-                            : '🤮'
+                            : line.reaction === 'horrible' ? '🤮' : t.sharing.comment
                       }}
                       · {{ fill(t.sharing.responseLabel, { n: line.response }) }}
                     </p>
@@ -447,6 +451,14 @@ const statusLabel = t.sharing.status
 </template>
 
 <style scoped>
+.create-options {
+  margin: var(--s4) 0;
+}
+.create-options summary {
+  cursor: pointer;
+  font-weight: 550;
+  margin-bottom: var(--s4);
+}
 .field {
   margin-bottom: var(--s3);
 }

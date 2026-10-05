@@ -1217,6 +1217,7 @@ export default {
     replaceLabel: 'Aktiven Link ersetzen',
     created: 'Link erstellt',
     tokenOnce: 'Der vollständige Link wird nur jetzt angezeigt. Später kannst du ihn widerrufen oder ausdrücklich ersetzen.',
+    existingUrlUnavailable: 'Der vollständige Link wurde nur beim Erstellen angezeigt und kann nicht erneut abgerufen werden. Ein bereits kopierter Link bleibt bis zum Ablauf oder Widerruf gültig.',
     copy: 'Link kopieren',
     copied: 'Link kopiert.',
     copyManually: 'Bitte wähle die Adresse aus und kopiere sie manuell.',

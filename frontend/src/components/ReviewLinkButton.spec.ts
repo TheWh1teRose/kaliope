@@ -86,6 +86,37 @@ async function preview(wrapper: ReturnType<typeof mount>) {
   await flushPromises()
 }
 describe('owner review links', () => {
+  it('shows existing link status and revoke on each inline reload without creating or recovering a bearer URL', async () => {
+    vi.mocked(sharingApi.links).mockResolvedValue({ configured: true, links: [metadata] })
+    for (let reload = 0; reload < 2; reload++) {
+      const w = mount(ReviewLinkButton, {
+        props: { kind: 'runs', targetId: 'run-one', ready: true, inline: true },
+      })
+      wrappers.push(w)
+      await flushPromises()
+      expect(w.find('.management').text()).toContain('Aktiv')
+      expect(w.find('.management button').text()).toBe('Widerrufen')
+      expect(w.find('details').attributes('open')).toBeUndefined()
+      expect(w.find('.management').text()).toContain('kann nicht erneut abgerufen werden')
+      expect(w.find('input[readonly]').exists()).toBe(false)
+      expect(sharingApi.create).not.toHaveBeenCalled()
+      w.unmount()
+    }
+    expect(sharingApi.links).toHaveBeenCalledTimes(2)
+  })
+  it('labels an owner comment-only line without inventing an emoji rating', async () => {
+    vi.mocked(sharingApi.links).mockResolvedValue({ configured: true, links: [{
+      ...metadata,
+      feedback: {
+        impressed: 0, dislike: 0, horrible: 0, slop: 0,
+        responses: [{ index: 1, label: null, stars: null, worked: null, did_not: null, impressed: 0, dislike: 0, horrible: 0, slop: 0 }],
+        lines: [{ response: 1, label: null, key: 'e1-s00', speaker: 'Host', text: 'Line', reaction: null, slop: false, comment: 'Comment only' }],
+      },
+    }] })
+    const w = await show()
+    expect(w.find('.marked').text()).toContain('Comment only')
+    expect(w.find('.marked').text()).not.toContain('🤮')
+  })
   it('requires missing-audio acknowledgement and validates internally without a visible preview', async () => {
     const w = await show()
     expect(w.text()).toContain('älteren Skriptstand')

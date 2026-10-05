@@ -3,7 +3,7 @@
  * One frozen source page. The overlay uses the page's own point coordinates,
  * the same registration mark as the Redaktion canvas, without zone plates.
  */
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{
   url: string
@@ -12,6 +12,16 @@ const props = defineProps<{
   highlight: { page: number; bbox: [number, number, number, number] }[]
   page: number
 }>()
+
+const emit = defineEmits<{ (e: 'anchor', anchor: SVGGraphicsElement): void }>()
+const overlay = ref<SVGSVGElement | null>(null)
+async function locateAnchor(): Promise<void> {
+  await nextTick()
+  const anchor = overlay.value?.querySelector<SVGGraphicsElement>('.mark')
+  if (anchor) emit('anchor', anchor)
+}
+onMounted(() => { void locateAnchor() })
+watch(() => [props.highlight, props.page, props.url], () => { void locateAnchor() })
 
 const marks = computed(() => props.highlight.filter((rect) => rect.page === props.page))
 const crosshair = computed(() => {
@@ -24,9 +34,10 @@ const crosshair = computed(() => {
 
 <template>
   <div class="canvas">
-    <div class="frame">
-      <img :src="url" alt="" />
+    <div class="frame" :style="{ aspectRatio: `${width || 595} / ${height || 842}` }">
+      <img :src="url" alt="" @load="locateAnchor" />
       <svg
+        ref="overlay"
         class="overlay"
         :viewBox="`0 0 ${width || 595} ${height || 842}`"
         preserveAspectRatio="none"

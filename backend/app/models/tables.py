@@ -613,7 +613,7 @@ class ReviewFeedback(Base):
 
 
 class ReviewFeedbackMark(Base):
-    """A reaction on one frozen line, addressed by share-local ordinal."""
+    """A reaction and/or comment on a frozen line, addressed by share-local ordinal."""
 
     __tablename__ = "review_feedback_marks"
     __table_args__ = (
@@ -626,7 +626,7 @@ class ReviewFeedbackMark(Base):
     )
     episode_index: Mapped[int] = mapped_column(Integer)
     ordinal: Mapped[int] = mapped_column(Integer)
-    #: ``impressed`` | ``dislike`` | ``horrible``.
+    #: ``impressed`` | ``dislike`` | ``horrible``; empty string for an unrated comment.
     reaction: Mapped[str] = mapped_column(String(16))
     slop: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)

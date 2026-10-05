@@ -212,7 +212,11 @@ short script typed with any speakers, or on a beat loaded from a run.
 ### Review links
 
 Finished runs have a **Feedback** menu containing link creation and received
-feedback; completed series also have a **Review-Link** action. Choose the public
+feedback; existing links show their status and revocation action on reload,
+without creating a replacement. With an existing link the creation options are
+collapsed initially. The bearer URL can only be copied/opened in the creation
+session: the server retains its digest, not a recoverable token. Completed series
+also have a **Review-Link** action. Choose the public
 titles and a completed full recording for each episode, then create and copy the
 link. Snapshot validation happens internally, without a preview step. Samples,
 failed takes and unavailable mixes are excluded; a newer failed or pending take
@@ -226,15 +230,20 @@ The link opens a separate reader without a login, for both signed-out and
 signed-in visitors. It exposes the chosen titles, speaker/text segments,
 creation/expiry dates, the selected audio, and only the source pages a shared
 line actually cites. Those pages are frozen as images with the snapshot, and a
-citation highlights that passage. Workspace identifiers, voice settings, edit
+citation highlights that passage. Playback and seeking center the active script
+line using the recording's saved alignment. Each new line selects its first citation
+and centers the highlighted source region, if its frozen page is available. Untimed
+or uncited lines do not invent alignment or evidence; source exploration remains
+manual while paused. Script and source panes have matching, independent scroll
+viewports. Workspace identifiers, voice settings, edit
 history and the internal review session are not included. Opening the page
 does not start a review session or change a run's status. The public page
 cannot edit the script.
 
 On each line the reviewer can mark 👍 impressed, 🤢 not good, or 🤮 horrible.
-The same mark again clears it. A comment is optional and only on a marked
-line, opened with a separate comment button (including on negative reactions).
-Reactions and clears save independently of the questionnaire. Comments save
+The same mark again clears the reaction, without clearing its comment. Each line
+also has a separate comment button usable without any emoji rating. Comments
+and reactions save independently of each other and of the questionnaire. Comments save
 after a short typing pause or on blur. Queued line changes coalesce to the latest
 value; feedback writes are serialized and spaced at least 1.1 seconds apart.
 Rate-limited writes retry once after a minute. Failed line changes remain dirty
@@ -242,7 +251,8 @@ with an explicit retry button; failed questionnaires can be submitted again.
 Leaving with pending or failed line changes prompts the browser's standard
 unsaved-changes warning. Forced termination cannot guarantee delivery.
 The AI-slop control and reviewer-name field are no longer shown; legacy stored
-data is retained. A short questionnaire is always available and is offered again
+data is retained. A prominent questionnaire button stays beside the player while
+scrolling. The short questionnaire is always available and is offered again
 when playback of any recording ends: optional stars from 0.5 to 5 in half
 steps, what worked, and what did not. Playback ending is not evidence that
 someone listened. The reviewer is remembered in that browser by an unguessable
