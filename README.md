@@ -214,7 +214,11 @@ short script typed with any speakers, or on a beat loaded from a run.
 Finished runs and completed series have a **Review-Link** action. Choose the
 public titles and a completed full recording for each episode, inspect the
 preview, then create and copy the link. Samples, failed takes and unavailable
-mixes are excluded. Sharing an episode without audio requires an explicit
+mixes are excluded; a newer failed or pending take does not hide an older ready
+full recording. Series sharing requires every planned episode to be finished
+and includes the entire roster in plan order, without the hidden planning run.
+Empty scripts and missing selected resources cannot be shared.
+Sharing an episode without audio requires an explicit
 acknowledgement; it remains script-only even if audio is generated later.
 
 The link opens a separate reader without a login, for both signed-out and
@@ -234,7 +238,8 @@ than making a bucket or existing authenticated audio endpoints public.
 Anyone with the URL can read and listen, and can forward or save the content.
 Links expire after 30 days and can be revoked manually. Revocation is checked
 on every metadata/audio request, including byte ranges; it cannot recall bytes
-already received. One link can be active per run/series. Replacing it requires
+already received. One link can be active per run/series; a run link and its
+series link are independent. Replacing it requires
 confirmation and atomically revokes the previous link only after the new
 snapshot is validated. The full URL is returned once when created; management
 lists dates and status, never the bearer token. Losing it requires replacement.
@@ -486,7 +491,7 @@ backend/app/
 ├─ main.py config.py db.py security.py accounts.py errors.py events.py migrations.py worker.py cli.py
 ├─ models/       SQLAlchemy ORM
 ├─ schemas/      pydantic domain + API models, zone taxonomy, reason codes
-├─ api/          auth · folders · documents · runs · series · review · audio
+├─ api/          auth · folders · documents · runs · series · review · audio · sharing
 ├─ llm/          provider protocol, pricing and capability registry, three providers
 ├─ speech/       speech provider protocol, client (retries, cost), ElevenLabs
 ├─ lang/         detection, per-language resources, readability formulas
