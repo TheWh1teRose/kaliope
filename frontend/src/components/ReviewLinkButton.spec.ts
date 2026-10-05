@@ -140,6 +140,29 @@ describe('owner review links', () => {
     expect(sharingApi.preview).toHaveBeenCalledTimes(2)
     expect(w.find('.preview').exists()).toBe(false)
   })
+  it.each([false, true])('refreshes a conflicting snapshot on an explicit create retry (replacement: %s)', async replacement => {
+    vi.mocked(sharingApi.links).mockResolvedValue({ configured: true, links: replacement ? [metadata] : [] })
+    vi.mocked(sharingApi.create).mockRejectedValueOnce(new ApiError(409, '', 'Snapshot changed'))
+    const w = await show()
+    await preview(w)
+    async function confirm() {
+      await w.findAll('button').find(b => b.text() === 'Erstellen und ersetzen')!.trigger('click')
+      await flushPromises()
+    }
+    if (replacement) await confirm()
+    expect(sharingApi.create).toHaveBeenCalledTimes(1)
+    expect(w.find('[role="alert"]').text()).toBe('Snapshot changed')
+    vi.mocked(sharingApi.preview).mockResolvedValueOnce({ snapshot, key: 'fresh-key' })
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(sharingApi.preview).toHaveBeenCalledTimes(2)
+    if (replacement) {
+      expect(sharingApi.create).toHaveBeenCalledTimes(1)
+      await confirm()
+    }
+    expect(sharingApi.create).toHaveBeenLastCalledWith('series', 'series-one', expect.any(Object), 'fresh-key', replacement ? metadata.id : null)
+    expect(w.find('input[readonly]').element).toHaveProperty('value', 'https://review.example.test/r/token')
+  })
   it('does not report revoke success on failure and allows a retry', async () => {
     vi.mocked(sharingApi.links).mockResolvedValue({
       configured: true,

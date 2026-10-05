@@ -235,8 +235,12 @@ On each line the reviewer can mark 👍 impressed, 🤢 not good, or 🤮 horrib
 The same mark again clears it. A comment is optional and only on a marked
 line, opened with a separate comment button (including on negative reactions).
 Reactions and clears save independently of the questionnaire. Comments save
-after a short typing pause or on blur; queued writes remain ordered and leaving
-with pending writes prompts the browser's standard unsaved-changes warning.
+after a short typing pause or on blur. Queued line changes coalesce to the latest
+value; feedback writes are serialized and spaced at least 1.1 seconds apart.
+Rate-limited writes retry once after a minute. Failed line changes remain dirty
+with an explicit retry button; failed questionnaires can be submitted again.
+Leaving with pending or failed line changes prompts the browser's standard
+unsaved-changes warning. Forced termination cannot guarantee delivery.
 The AI-slop control and reviewer-name field are no longer shown; legacy stored
 data is retained. A short questionnaire is always available and is offered again
 when playback of any recording ends: optional stars from 0.5 to 5 in half

@@ -158,7 +158,13 @@ async function create(confirmed = false): Promise<void> {
         })),
       ]
   } catch (exc) {
-    if (current === generation) error.value = message(exc)
+    if (current === generation) {
+      error.value = message(exc)
+      if (exc instanceof ApiError && exc.status === 409) {
+        preview.value = null
+        replaceConfirmation.value = false
+      }
+    }
   } finally {
     if (current === generation) busy.value = false
   }

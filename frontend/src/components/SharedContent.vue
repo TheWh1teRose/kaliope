@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { ApiError } from '@/api/client'
 import {
   sharedDate,
   sharedDuration,
@@ -116,7 +117,7 @@ function flushComments(): void {
 }
 function leaving(event: BeforeUnloadEvent): void {
   flushComments()
-  if (pendingWrites) { event.preventDefault(); event.returnValue = '' }
+  if (pendingWrites || dirtyMarks.size) { event.preventDefault(); event.returnValue = '' }
 }
 
 function lineKey(index: number): string {
@@ -149,13 +150,29 @@ function markAt(index: number): LocalMark {
   )
 }
 let writes: Promise<unknown> = Promise.resolve()
-const versions: Record<string, number> = {}
-let confirmed: Record<string, LocalMark> = {}
+const dirtyMarks = new Map<string, { next: LocalMark; context: ReturnType<typeof lineContext> }>()
+let draining = false
+let nextWriteAt = 0
 function ordered<T>(operation: () => Promise<T>): Promise<T> {
   pendingWrites++
   const result = writes.then(operation).finally(() => { pendingWrites-- })
   writes = result.catch(() => undefined)
   return result
+}
+async function writeFeedback<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const delay = nextWriteAt - Date.now()
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
+    nextWriteAt = Date.now() + 1100
+    try {
+      return await operation()
+    } catch (exc) {
+      if (!(exc instanceof ApiError) || exc.status !== 429) throw exc
+      nextWriteAt = Date.now() + 60_000
+      if (attempt) throw exc
+      saveError.value = t.sharing.saveError
+    }
+  }
 }
 function draft() {
   return { label: label.value, stars: stars.value, worked: worked.value, didNot: didNot.value }
@@ -185,8 +202,9 @@ async function loadFeedback(): Promise<void> {
   try {
     const data = await ordered(() => sharingApi.feedback(token))
     if (props.token !== token) return
-    confirmed = stateMarks(data)
-    marks.value = { ...confirmed }
+    dirtyMarks.clear()
+    commentDraft.value = {}
+    marks.value = stateMarks(data)
     applySheet(data, before)
     hydratedToken.value = token
     saveError.value = ''
@@ -197,50 +215,64 @@ async function loadFeedback(): Promise<void> {
 function lineContext(index: number) {
   return { episodeIndex: episode.value?.index, id: lineKey(index), token: props.token, ordinal: ordinalOf(index) }
 }
-async function persist(index: number, next: LocalMark, context = lineContext(index)): Promise<void> {
-  const { episodeIndex, id, token, ordinal } = context
+function persist(index: number, next: LocalMark, context = lineContext(index)): void {
+  const { episodeIndex, id, token } = context
   if (!token || hydratedToken.value !== token || props.token !== token || episodeIndex == null) return
-  const version = (versions[id] ?? 0) + 1
-  versions[id] = version
-  const previousDraft = commentDraft.value[id]
   if (!next.reaction) {
     const drafts = { ...commentDraft.value }
     delete drafts[id]
     commentDraft.value = drafts
   }
   marks.value = { ...marks.value, [id]: next }
-  saveError.value = ''
+  dirtyMarks.set(id, { next, context })
+  void drainMarks()
+}
+async function drainMarks(): Promise<void> {
+  if (draining) return
+  draining = true
   try {
-    const saved = await ordered(() => sharingApi.saveMark(token, {
-        episode: episodeIndex,
-        ordinal,
-        reaction: next.reaction,
-        slop: next.slop,
-        comment: next.comment.trim() || null,
+    while (dirtyMarks.size) {
+      const id = dirtyMarks.keys().next().value!
+      await ordered(() => writeFeedback(async () => {
+        const entry = dirtyMarks.get(id)
+        if (!entry) return
+        const { next, context } = entry
+        const { token, episodeIndex, ordinal } = context
+        if (!token || props.token !== token || hydratedToken.value !== token || episodeIndex == null) {
+          dirtyMarks.delete(id)
+          return
+        }
+        let saved: FeedbackState
+        try {
+          saved = await sharingApi.saveMark(token, {
+            episode: episodeIndex, ordinal, reaction: next.reaction,
+            slop: next.slop, comment: next.comment.trim() || null,
+          })
+        } catch (exc) {
+          if (exc instanceof ApiError && exc.status === 429) nextWriteAt = Date.now() + 60_000
+          if (dirtyMarks.get(id) !== entry) return
+          throw exc
+        }
+        if (props.token !== token || dirtyMarks.get(id) !== entry) return
+        dirtyMarks.delete(id)
+        const stored = stateMarks(saved)[id]
+        const copy = { ...marks.value }
+        if (stored) copy[id] = stored
+        else delete copy[id]
+        marks.value = copy
       }))
-    if (props.token !== token) return
-    const stored = stateMarks(saved)[id]
-    if (stored) confirmed[id] = stored
-    else delete confirmed[id]
-    if (versions[id] !== version) return
-    const copy = { ...marks.value }
-    if (stored) copy[id] = stored
-    else delete copy[id]
-    marks.value = copy
+    }
+    saveError.value = ''
   } catch {
-    if (props.token !== token || versions[id] !== version) return
-    if (previousDraft !== undefined && commentDraft.value[id] === undefined) {
-      commentDraft.value = { ...commentDraft.value, [id]: previousDraft }
-    }
-    const previous = confirmed[id]
-    if (previous) marks.value = { ...marks.value, [id]: previous }
-    else {
-      const copy = { ...marks.value }
-      delete copy[id]
-      marks.value = copy
-    }
     saveError.value = t.sharing.saveError
+  } finally {
+    draining = false
   }
+}
+function retryFeedback(): void {
+  flushComments()
+  if (!lineWritable.value) void loadFeedback()
+  else void drainMarks()
 }
 function toggle(index: number, reaction: LineReaction): void {
   if (!lineWritable.value) return
@@ -306,7 +338,7 @@ async function sendSheet(): Promise<void> {
       did_not: before.didNot.trim() || null,
   }
   try {
-    const saved = await ordered(() => sharingApi.saveSheet(token, payload))
+    const saved = await ordered(() => writeFeedback(() => sharingApi.saveSheet(token, payload)))
     if (props.token !== token) return
     applySheet(saved, before)
     sheetSent.value = true
@@ -411,7 +443,10 @@ async function sendSheet(): Promise<void> {
           </div>
         </div>
         <p v-else class="notice" role="status">{{ t.sharing.noAudio }}</p>
-        <p v-if="saveError" class="notice notice--fail" role="alert">{{ saveError }}</p>
+        <p v-if="saveError" class="notice notice--fail" role="alert">
+          {{ saveError }}
+          <button class="btn btn--sm" type="button" @click="retryFeedback">{{ t.common.retry }}</button>
+        </p>
         <p v-if="!writable" class="hint">{{ t.sharing.previewMarks }}</p>
         <button v-if="currentSegment >= 0" class="btn btn--sm" type="button" @click="findPlaying">{{ t.sharing.findPlaying }}</button>
         <div class="register">

@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SharedContent from './SharedContent.vue'
+import { ApiError } from '@/api/client'
 import { sharingApi, type FeedbackState, type SharedSnapshot } from '@/api/sharing'
 
 const empty: FeedbackState = { label: null, stars: null, worked: null, did_not: null, marks: [] }
@@ -29,6 +30,92 @@ function reader() {
 afterEach(() => { wrappers.forEach(w => w.unmount()); wrappers = []; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('public feedback polish', () => {
+  it('bounds continuous typing writes and persists the latest unfinished draft', async () => {
+    vi.useFakeTimers()
+    let state = { ...empty }
+    vi.spyOn(sharingApi, 'feedback').mockImplementation(async () => state)
+    const times: number[] = []
+    const save = vi.spyOn(sharingApi, 'saveMark').mockImplementation(async (_, body) => {
+      times.push(Date.now())
+      state = { ...empty, marks: body.reaction ? [{ ...body, reaction: body.reaction }] : [] }
+      return state
+    })
+    const w = reader()
+    await flushPromises()
+    await w.find('[aria-label="Mag ich nicht"]').trigger('click')
+    await w.find('.comment-toggle').trigger('click')
+    const input = w.find('.segment textarea')
+    for (let n = 1; n <= 130; n++) {
+      ;(input.element as HTMLTextAreaElement).value = 'x'.repeat(n)
+      await input.trigger('input')
+      await vi.advanceTimersByTimeAsync(500)
+    }
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(state.marks[0].comment).toBe('x'.repeat(130))
+    expect(save.mock.calls.length).toBeLessThan(65)
+    expect(times.slice(1).every((time, index) => time - times[index] >= 1100)).toBe(true)
+    w.unmount(); wrappers = []
+    const returned = reader()
+    await flushPromises()
+    await returned.find('.comment-toggle').trigger('click')
+    expect((returned.find('textarea').element as HTMLTextAreaElement).value).toBe('x'.repeat(130))
+  })
+
+  it('retains 429 drafts, retries the latest clear after cooldown, and paces questionnaire writes', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(sharingApi, 'feedback').mockResolvedValue(empty)
+    const save = vi.spyOn(sharingApi, 'saveMark').mockRejectedValueOnce(new ApiError(429, '', 'limited'))
+      .mockImplementation(async (_, body) => ({ ...empty, marks: body.reaction ? [{ ...body, reaction: body.reaction }] : [] }))
+    const sheet = vi.spyOn(sharingApi, 'saveSheet').mockResolvedValue(empty)
+    const w = reader()
+    await flushPromises()
+    const reaction = w.find('[aria-label="Mag ich nicht"]')
+    await reaction.trigger('click')
+    await flushPromises()
+    expect(reaction.attributes('aria-pressed')).toBe('true')
+    expect(w.find('[role="alert"]').exists()).toBe(true)
+    await w.find('.comment-toggle').trigger('click')
+    await w.find('.segment textarea').setValue('Retained draft')
+    await reaction.trigger('click')
+    await w.find('.head button').trigger('click')
+    await w.find('#share-worked').setValue('Questionnaire')
+    await w.find('.panel__foot .btn--primary').trigger('click')
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(sheet).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(save.mock.calls[1][1]).toMatchObject({ reaction: null, comment: null })
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(sheet).toHaveBeenCalledTimes(1)
+    expect(w.find('[aria-label="Mag ich nicht"]').attributes('aria-pressed')).toBe('false')
+  })
+
+  it('stops automatic retries after repeated 429 and retains comments for explicit retry', async () => {
+    vi.useFakeTimers()
+    const marked: FeedbackState = { ...empty, marks: [{ episode: 1, ordinal: 0, reaction: 'dislike', slop: false, comment: null }] }
+    vi.spyOn(sharingApi, 'feedback').mockResolvedValue(marked)
+    const save = vi.spyOn(sharingApi, 'saveMark')
+      .mockRejectedValueOnce(new ApiError(429, '', 'limited'))
+      .mockRejectedValueOnce(new ApiError(429, '', 'limited'))
+      .mockImplementation(async (_, body) => ({ ...empty, marks: [{ ...body, reaction: 'dislike' }] }))
+    const w = reader()
+    await flushPromises()
+    await w.find('.comment-toggle').trigger('click')
+    await w.find('.segment textarea').setValue('Keep this')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(save).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(save).toHaveBeenCalledTimes(2)
+    expect((w.find('textarea').element as HTMLTextAreaElement).value).toBe('Keep this')
+    const leave = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(leave)
+    expect(leave.defaultPrevented).toBe(true)
+    await w.find('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(save.mock.calls[2][1].comment).toBe('Keep this')
+    expect(w.find('[role="alert"]').exists()).toBe(false)
+  })
   it('highlights actual aligned intervals on play, seek and pause; resets for episode changes', async () => {
     vi.spyOn(sharingApi, 'feedback').mockResolvedValue(empty)
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
@@ -95,7 +182,7 @@ describe('public feedback polish', () => {
     const input = w.find('.segment textarea')
     ;(input.element as HTMLTextAreaElement).value = 'This was confusing'
     await input.trigger('input') // No change, blur or questionnaire submit.
-    await vi.advanceTimersByTimeAsync(350)
+    await vi.advanceTimersByTimeAsync(1100)
     await flushPromises()
     expect(save.mock.calls.at(-1)![1].comment).toBe('This was confusing')
     expect(sheet).not.toHaveBeenCalled()
@@ -107,6 +194,7 @@ describe('public feedback polish', () => {
     expect((returned.find('textarea').element as HTMLTextAreaElement).value).toBe('This was confusing')
     await returned.find('[aria-label="Furchtbar"]').trigger('click')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(state.marks).toEqual([])
   })
 
@@ -130,6 +218,7 @@ describe('public feedback polish', () => {
     expect(save).toHaveBeenCalledTimes(1)
     first.resolve({ ...empty, marks: [{ episode: 1, ordinal: 0, reaction: 'dislike', slop: false, comment: null }] })
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls[1][1].comment).toBe('Draft while reaction saves')
     expect((input.element as HTMLTextAreaElement).value).toBe('Draft while reaction saves')
     const safeLeave = new Event('beforeunload', { cancelable: true })

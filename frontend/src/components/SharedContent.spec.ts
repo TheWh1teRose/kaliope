@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import SharedContent from './SharedContent.vue'
 import { rememberLabel, sharingApi, type FeedbackState, type SharedSnapshot } from '@/api/sharing'
 
@@ -20,7 +20,8 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 let cleanup: (() => void)[] = []
-afterEach(() => { cleanup.forEach(fn => fn()); cleanup = []; vi.restoreAllMocks(); rememberLabel('') })
+beforeEach(() => vi.useFakeTimers())
+afterEach(() => { cleanup.forEach(fn => fn()); cleanup = []; vi.useRealTimers(); vi.restoreAllMocks(); rememberLabel('') })
 function reader(sharedSnapshot: SharedSnapshot = snapshot) {
   const wrapper = mount(SharedContent, {
     props: { snapshot: sharedSnapshot, selected: 1, token: 'token' },
@@ -56,6 +57,7 @@ describe('feedback persistence', () => {
     expect(wrapper.findAll('[aria-label="Mag ich nicht"]')[1].attributes('aria-pressed')).toBe('true')
     await wrapper.findAll('[aria-label="Furchtbar"]')[1].trigger('click')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls[1][1]).toMatchObject({ ordinal: 1, reaction: 'horrible', slop: true, comment: 'Saved comment' })
   })
   it('keeps line writes disabled after feedback loading fails but leaves the questionnaire available', async () => {
@@ -83,6 +85,7 @@ describe('feedback persistence', () => {
     expect(wrapper.find('#share-label').exists()).toBe(false)
     await wrapper.find('.panel__foot .btn--primary').trigger('click')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls.map(call => call[1].label)).toEqual(['Lena', 'Lena'])
   })
   it.each(['reaction', 'comment', 'rollback'])('preserves input-only line drafts across a pending %s save', async action => {
@@ -106,6 +109,7 @@ describe('feedback persistence', () => {
     expect(save).toHaveBeenCalledTimes(1)
     await wrapper.find('.segment textarea').trigger('change')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls[1][1].comment).toBe('Unsent draft')
   })
   it('discards the old line draft when a reaction is explicitly cleared', async () => {
@@ -122,6 +126,7 @@ describe('feedback persistence', () => {
     await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
     await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls.at(-1)![1].comment).toBe(null)
   })
   it('retains a multi-page citation while navigating forward and back', async () => {
@@ -159,6 +164,7 @@ describe('feedback persistence', () => {
     expect((wrapper.find('#share-did-not').element as HTMLTextAreaElement).value).toBe('Other draft')
     await wrapper.find('.panel__foot .btn--primary').trigger('click')
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(sharingApi.saveSheet).toHaveBeenCalledWith('token', {
       label: null, stars: 4, worked: 'Draft', did_not: 'Other draft',
     })
@@ -183,6 +189,7 @@ describe('feedback persistence', () => {
     if (fail) first.reject(new Error('failed'))
     else first.resolve({ ...empty, marks: [{ episode: 1, ordinal: 0, reaction: 'impressed', slop: false, comment: null }] })
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(1100)
     expect(save).toHaveBeenCalledTimes(2)
     expect(save.mock.calls[1][1].reaction).toBe(null)
     expect(button.attributes('aria-pressed')).toBe('false')
