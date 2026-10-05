@@ -730,7 +730,7 @@ def test_line_reaction_toggles_without_taking_back_an_edit(
         json={"target_type": "segment", "target_id": segment["id"], "action": "undo"},
     )
     undone = state()
-    assert undone["edited"] is False and undone["text"] == original
+    assert undone["edited"] == segment["edited"] and undone["text"] == original
     assert undone["reaction"] == "dislike"
     signed_in.post(
         f"/api/runs/{run_id}/review/events",
