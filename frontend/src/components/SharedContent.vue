@@ -170,7 +170,6 @@ async function writeFeedback<T>(operation: () => Promise<T>): Promise<T> {
       if (!(exc instanceof ApiError) || exc.status !== 429) throw exc
       nextWriteAt = Date.now() + 60_000
       if (attempt) throw exc
-      saveError.value = t.sharing.saveError
     }
   }
 }
@@ -249,7 +248,10 @@ async function drainMarks(): Promise<void> {
             slop: next.slop, comment: next.comment.trim() || null,
           })
         } catch (exc) {
-          if (exc instanceof ApiError && exc.status === 429) nextWriteAt = Date.now() + 60_000
+          if (exc instanceof ApiError && exc.status === 429) {
+            nextWriteAt = Date.now() + 60_000
+            saveError.value = t.sharing.saveError
+          }
           if (dirtyMarks.get(id) !== entry) return
           throw exc
         }
