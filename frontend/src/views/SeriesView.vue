@@ -11,6 +11,7 @@ import NodeInspector from '@/components/NodeInspector.vue'
 import PipelineCanvas from '@/components/PipelineCanvas.vue'
 import SeriesAudio from '@/components/SeriesAudio.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import ReviewLinkButton from '@/components/ReviewLinkButton.vue'
 import { fill, t } from '@/i18n'
 import { seriesTitle } from '@/titles'
 import type { PlacedNode } from '@/series/canvas'
@@ -259,6 +260,7 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="row wrap">
+        <ReviewLinkButton kind="series" :target-id="series.id" :ready="series.status === 'completed'" />
         <span class="badge" :class="seriesTone(series.status)" data-series-status>
           <span v-if="moving" class="pulse" aria-hidden="true" />
           {{ t.series.status[series.status] }}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { t } from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -9,6 +9,7 @@ import { useCatalogueStore } from '@/stores/catalogue'
 const auth = useAuthStore()
 const catalogue = useCatalogueStore()
 const route = useRoute()
+const router = useRouter()
 
 const theme = ref<'light' | 'dark' | 'system'>(
   (localStorage.getItem('kalliope-theme') as 'light' | 'dark' | 'system') ?? 'system',
@@ -26,10 +27,15 @@ function cycleTheme(): void {
   applyTheme()
 }
 
-const chrome = computed(() => Boolean(auth.user) && route.name !== 'login')
+const chrome = computed(
+  () => Boolean(route.name) && Boolean(auth.user) && route.name !== 'login' && !route.meta.publicReader,
+)
 
 onMounted(async () => {
   applyTheme()
+  // The app mounts before the first asynchronous route has resolved.
+  await router.isReady()
+  if (route.meta.publicReader) return
   const user = await auth.refresh()
   if (user) await catalogue.load().catch(() => undefined)
 })

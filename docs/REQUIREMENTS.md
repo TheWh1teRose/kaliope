@@ -665,7 +665,9 @@ review_sessions(id, run_id, user_id, started_at, finished_at, summary_json)
 
 ## 11. API
 
-All under `/api`, JSON, session-cookie authenticated except login.
+Workspace endpoints are under `/api` and require session-cookie authentication
+except login. For the separate bearer-authenticated reader and its media access,
+see [Review links](../README.md#review-links).
 
 ```
 POST   /api/auth/login  ·  POST /api/auth/logout  ·  GET /api/auth/me

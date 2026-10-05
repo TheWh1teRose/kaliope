@@ -209,6 +209,58 @@ gcloud run services update kalliope --region europe-west1 --project=qlug-kalliop
 The experiment **Audio ausprobieren** runs the same tagging prompt and guard on a
 short script typed with any speakers, or on a beat loaded from a run.
 
+### Review links
+
+Finished runs and completed series have a **Review-Link** action. Choose the
+public titles and a completed full recording for each episode, inspect the
+preview, then create and copy the link. Samples, failed takes and unavailable
+mixes are excluded; a newer failed or pending take does not hide an older ready
+full recording. Series sharing requires every planned episode to be finished
+and includes the entire roster in plan order, without the hidden planning run.
+Empty scripts and missing selected resources cannot be shared.
+Sharing an episode without audio requires an explicit
+acknowledgement; it remains script-only even if audio is generated later.
+
+The link opens a separate reader without a login, for both signed-out and
+signed-in visitors. It exposes only the chosen titles, speaker/text segments,
+creation/expiry dates and the selected audio. Source documents, citations,
+workspace identifiers, voice settings, edit history and private review state
+are not included. Opening it does not start a review session or change a run's
+status. Comments and richer review workflows are deferred.
+
+Each link is a frozen snapshot: when choosing audio, its original recorded
+source script is captured together with the exact mix. An older recording is
+labelled in the owner selection. For series, the roster and order are frozen
+too. Subsequent edits, new recordings or replanning do not change the link.
+The snapshot references immutable private media in the artifact store rather
+than making a bucket or existing authenticated audio endpoints public.
+
+Anyone with the URL can read and listen, and can forward or save the content.
+Links expire after 30 days and can be revoked manually. Revocation is checked
+on every metadata/audio request, including byte ranges; it cannot recall bytes
+already received. One link can be active per run/series; a run link and its
+series link are independent. Replacing it requires
+confirmation and atomically revokes the previous link only after the new
+snapshot is validated. The full URL is returned once when created; management
+lists dates and status, never the bearer token. Losing it requires replacement.
+The database stores a SHA-256 token digest, not the token itself. Snapshot
+artifacts and pinned media retain the existing artifact-store lifetime; expiry
+or revocation removes access, not stored files.
+
+Creation is disabled until `REVIEW_PUBLIC_ORIGIN` is configured as the reviewed
+external HTTPS origin, with no credentials, path, query or fragment. Preview,
+status and revocation remain available without it. This is a release decision:
+the configured address must reach this application's reader, public metadata
+and token-scoped media endpoints without an ingress-level login. The existing
+deployment workflow assumes unauthenticated Cloud Run requests; that assumption
+does not verify actual ingress/IAM or establish a canonical production URL.
+Setting this variable alone cannot make a private/local service reachable. Keep
+owner authentication and private storage intact; review ingress and any upstream
+URL/access-log retention before enabling sharing. The app redacts bearer paths
+from Uvicorn access logs and sends `no-store`, `no-referrer` and `noindex` on
+sharing responses; upstream infrastructure may still record URLs. No deployment
+or infrastructure access change is part of configuring the feature locally.
+
 ### Series of episodes
 
 A run can also produce a **series**: several episodes from one document, each
@@ -448,7 +500,7 @@ backend/app/
 ├─ main.py config.py db.py security.py accounts.py errors.py events.py migrations.py worker.py cli.py
 ├─ models/       SQLAlchemy ORM
 ├─ schemas/      pydantic domain + API models, zone taxonomy, reason codes
-├─ api/          auth · folders · documents · runs · series · review · audio
+├─ api/          auth · folders · documents · runs · series · review · audio · sharing
 ├─ llm/          provider protocol, pricing and capability registry, three providers
 ├─ speech/       speech provider protocol, client (retries, cost), ElevenLabs
 ├─ lang/         detection, per-language resources, readability formulas

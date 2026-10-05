@@ -11,6 +11,7 @@ import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import ReviewLinkButton from '@/components/ReviewLinkButton.vue'
 import { fill, t } from '@/i18n'
 import { type ProgressLine, useRunsStore } from '@/stores/runs'
 import { runTitle } from '@/titles'
@@ -199,6 +200,7 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="row wrap">
+        <ReviewLinkButton kind="runs" :target-id="run.id" :ready="!!reviewable" />
         <StatusPill :status="run.status" />
         <button
           v-if="stoppable"
