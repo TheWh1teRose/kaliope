@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -557,3 +558,28 @@ class VoiceCastRow(Base):
     cast_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     updated_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReviewLink(Base):
+    """A revocable bearer grant over an immutable, sanitized share snapshot."""
+
+    __tablename__ = "review_links"
+    __table_args__ = (
+        Index(
+            "uq_review_link_active_target",
+            "target_kind",
+            "target_id",
+            unique=True,
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    target_kind: Mapped[str] = mapped_column(String(10))
+    target_id: Mapped[str] = mapped_column(String(32))
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    snapshot_hash: Mapped[str] = mapped_column(String(64))

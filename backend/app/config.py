@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,6 +50,8 @@ class Settings(BaseSettings):
     max_concurrent_runs: int = 2
     log_level: str = "INFO"
     session_ttl_days: int = 30
+    # Explicit external HTTPS origin for bearer links; empty disables creation.
+    review_public_origin: str = ""
     max_upload_mb: int = 50
 
     # Set by the test suite and by `cli.py` when it needs a throwaway database.
@@ -67,6 +70,32 @@ class Settings(BaseSettings):
         if mode not in JOURNAL_MODES:
             raise ValueError(f"must be one of {', '.join(JOURNAL_MODES)}")
         return mode
+
+    @field_validator("review_public_origin")
+    @classmethod
+    def _review_origin(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or "\\" in value
+            or "%" in parsed.netloc
+            or any(c.isspace() for c in value)
+        ):
+            raise ValueError(
+                "REVIEW_PUBLIC_ORIGIN must be an HTTPS origin without credentials/path"
+            )
+        # Also reject malformed ports rather than create unusable links.
+        _ = parsed.port
+        return value.rstrip("/")
 
     # ---- derived paths -------------------------------------------------
 

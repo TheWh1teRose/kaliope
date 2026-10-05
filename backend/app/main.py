@@ -33,6 +33,7 @@ from app.api import (
     review,
     runs,
     series,
+    sharing,
     users,
 )
 from app.config import Settings, get_settings
@@ -124,6 +125,10 @@ def create_app() -> FastAPI:
     app.add_exception_handler(HTTPException, http_exception_response)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_exception_response)
 
+    from app.sharing_privacy import SharingPrivacyMiddleware
+
+    app.add_middleware(SharingPrivacyMiddleware)
+    app.include_router(sharing.router)
     app.include_router(auth.router)
     app.include_router(audio.router)
     app.include_router(folders.router)

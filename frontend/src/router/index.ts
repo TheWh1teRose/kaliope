@@ -1,9 +1,21 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  type RouterHistory,
+  type RouteRecordRaw,
+} from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogueStore } from '@/stores/catalogue'
 
 export const routes: RouteRecordRaw[] = [
+  {
+    path: '/r/:token',
+    name: 'public-review',
+    component: () => import('@/views/PublicReviewView.vue'),
+    props: true,
+    meta: { publicReader: true },
+  },
   { path: '/', redirect: { name: 'documents' } },
   {
     path: '/login',
@@ -115,18 +127,25 @@ export const routes: RouteRecordRaw[] = [
   { path: '/:pathMatch(.*)*', redirect: { name: 'documents' } },
 ]
 
-export const router = createRouter({
-  history: createWebHistory(),
-  routes,
-})
+export function createAppRouter(history: RouterHistory = createWebHistory()) {
+  const router = createRouter({
+    history,
+    routes,
+  })
 
-router.beforeEach(async (to) => {
-  const auth = useAuthStore()
-  if (!auth.checked) await auth.refresh()
-  if (to.meta.public) {
-    return auth.user ? { name: 'documents' } : true
-  }
-  if (!auth.user) return { name: 'login', query: { next: to.fullPath } }
-  await useCatalogueStore().load().catch(() => undefined)
-  return true
-})
+  router.beforeEach(async (to) => {
+    if (to.meta.publicReader) return true
+    const auth = useAuthStore()
+    if (!auth.checked) await auth.refresh()
+    if (to.meta.public) {
+      return auth.user ? { name: 'documents' } : true
+    }
+    if (!auth.user) return { name: 'login', query: { next: to.fullPath } }
+    await useCatalogueStore().load().catch(() => undefined)
+    return true
+  })
+
+  return router
+}
+
+export const router = createAppRouter()
