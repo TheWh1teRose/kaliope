@@ -347,6 +347,9 @@ export interface SegmentOut {
   /** True when there is a review action an undo can take back. */
   undoable: boolean
   tags: string[]
+  reaction?: 'impressed' | 'dislike' | 'horrible' | null
+  slop?: boolean
+  reaction_comment?: string | null
   comments: SegmentComment[]
 }
 
@@ -511,6 +514,7 @@ export type EditAction =
   | 'undo'
   | 'tag'
   | 'untag'
+  | 'react'
 
 export interface EditEventIn {
   target_type: 'segment' | 'selection' | 'outline' | 'block_zone'

@@ -48,15 +48,23 @@ const completing = ref(false)
 const completeNote = ref('')
 const summary = ref<ReviewSummary | null>(null)
 
-/** Which segment has its tag input open, and what has been typed into it. */
-const tagging = ref<string | null>(null)
-const tagDraft = ref('')
 const showOriginal = ref<Set<string>>(new Set())
+const commentDraft = ref<Record<string, string>>({})
+const reactionError = ref('')
 
 const highlight = computed(() => activeAnchor.value?.rects ?? [])
 
+const reactions = [
+  { id: 'impressed', emoji: '👍', label: t.review.impressed, tone: 'pass' },
+  { id: 'dislike', emoji: '🤢', label: t.review.dislike, tone: 'warn' },
+  { id: 'horrible', emoji: '🤮', label: t.review.horrible, tone: 'fail' },
+] as const
+
 const reviewed = computed(
-  () => script.value?.segments.filter((s) => s.accepted || s.edited || s.flagged).length ?? 0,
+  () =>
+    script.value?.segments.filter(
+      (s) => s.reaction || s.accepted || s.edited || s.flagged,
+    ).length ?? 0,
 )
 const total = computed(() => script.value?.segments.length ?? 0)
 const percent = computed(() => (total.value ? Math.round((reviewed.value / total.value) * 100) : 0))
@@ -97,9 +105,90 @@ function showAnchor(segmentId: string, anchor: AnchorOut): void {
   activeAnchor.value = anchor
 }
 
-async function accept(segmentId: string): Promise<void> {
-  await review.record(props.id, { target_type: 'segment', target_id: segmentId, action: 'accept' })
-  syncFromStore()
+function draftReactionComment(segmentId: string, value: string): void {
+  commentDraft.value = { ...commentDraft.value, [segmentId]: value }
+}
+function reconcileClearedComment(segmentId: string, before: string | undefined): void {
+  if (segmentOf(segmentId)?.reaction || commentDraft.value[segmentId] !== before) return
+  const drafts = { ...commentDraft.value }
+  delete drafts[segmentId]
+  commentDraft.value = drafts
+}
+let reactionWrites: Promise<void> = Promise.resolve()
+function orderedReaction(operation: () => Promise<void>): Promise<void> {
+  reactionWrites = reactionWrites.then(operation).then(
+    () => { reactionError.value = '' },
+    () => { reactionError.value = t.review.saveError },
+  )
+  return reactionWrites
+}
+function react(segmentId: string, reaction: 'impressed' | 'dislike' | 'horrible'): Promise<void> {
+  return orderedReaction(() => recordReaction(segmentId, reaction))
+}
+function toggleSlop(segmentId: string): Promise<void> {
+  return orderedReaction(() => recordSlop(segmentId))
+}
+async function recordReaction(
+  segmentId: string,
+  reaction: 'impressed' | 'dislike' | 'horrible',
+): Promise<void> {
+  const segment = segmentOf(segmentId)
+  if (!segment) return
+  const before = commentDraft.value[segmentId]
+  const next = segment.reaction === reaction ? '' : reaction
+  const slop =
+    (next === 'dislike' || next === 'horrible') && segment.slop ? 'slop' : ''
+  busy.value = true
+  try {
+    await review.record(props.id, {
+      target_type: 'segment',
+      target_id: segmentId,
+      action: 'react',
+      text_after: next,
+      text_before: slop,
+      note: next ? before ?? segment.reaction_comment ?? null : null,
+    })
+    syncFromStore()
+    reconcileClearedComment(segmentId, before)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function recordSlop(segmentId: string): Promise<void> {
+  const segment = segmentOf(segmentId)
+  if (!segment?.reaction || segment.reaction === 'impressed') return
+  busy.value = true
+  try {
+    await review.record(props.id, {
+      target_type: 'segment',
+      target_id: segmentId,
+      action: 'react',
+      text_after: segment.reaction,
+      text_before: segment.slop ? '' : 'slop',
+      note: commentDraft.value[segmentId] ?? segment.reaction_comment ?? null,
+    })
+    syncFromStore()
+  } finally {
+    busy.value = false
+  }
+}
+
+function saveReactionComment(segmentId: string, value: string): void {
+  draftReactionComment(segmentId, value)
+  void orderedReaction(async () => {
+    const segment = segmentOf(segmentId)
+    if (!segment?.reaction) return
+    await review.record(props.id, {
+      target_type: 'segment',
+      target_id: segmentId,
+      action: 'react',
+      text_after: segment.reaction,
+      text_before: segment.slop ? 'slop' : '',
+      note: value.trim() || null,
+    })
+    syncFromStore()
+  })
 }
 
 /**
@@ -109,33 +198,19 @@ async function accept(segmentId: string): Promise<void> {
  * over the event stream that the export is also built from. Nothing is deleted:
  * the undo is itself an event.
  */
-async function undo(segmentId: string): Promise<void> {
+function undo(segmentId: string): Promise<void> {
+  return orderedReaction(() => recordUndo(segmentId))
+}
+async function recordUndo(segmentId: string): Promise<void> {
+  const before = commentDraft.value[segmentId]
   busy.value = true
   try {
     await review.undo(props.id, segmentId)
     syncFromStore()
+    reconcileClearedComment(segmentId, before)
   } finally {
     busy.value = false
   }
-}
-
-async function addTag(segmentId: string): Promise<void> {
-  const name = tagDraft.value.trim()
-  if (!name) return
-  await review.tag(props.id, segmentId, name)
-  tagDraft.value = ''
-  tagging.value = null
-  syncFromStore()
-}
-
-async function removeTag(segmentId: string, name: string): Promise<void> {
-  await review.untag(props.id, segmentId, name)
-  syncFromStore()
-}
-
-function openTagInput(segmentId: string): void {
-  tagging.value = tagging.value === segmentId ? null : segmentId
-  tagDraft.value = ''
 }
 
 function toggleOriginal(segmentId: string): void {
@@ -223,6 +298,8 @@ onMounted(async () => {
       </button>
     </header>
 
+    <p v-if="reactionError" class="notice notice--fail" role="alert">{{ reactionError }}</p>
+
     <SourceRegister
       :document-id="script?.document_id ?? null"
       :structure="structure"
@@ -263,35 +340,6 @@ onMounted(async () => {
             <p v-if="showOriginal.has(segment.id)" class="quote prose">
               {{ segment.original_text }}
             </p>
-          </div>
-
-          <div class="seg__tags">
-            <button
-              v-for="tag in segment.tags"
-              :key="tag"
-              class="tag"
-              :title="t.review.removeTag"
-              @click="removeTag(segment.id, tag)"
-            >
-              {{ tag }}<span class="tag__x" aria-hidden="true">×</span>
-            </button>
-
-            <button class="tag tag--add" @click="openTagInput(segment.id)">
-              + {{ t.review.addTag }}
-            </button>
-
-            <input
-              v-if="tagging === segment.id"
-              v-model="tagDraft"
-              class="input input--tag"
-              :placeholder="t.review.addTagPlaceholder"
-              :list="`tags-${segment.id}`"
-              @keydown.enter.prevent="addTag(segment.id)"
-              @keydown.esc="tagging = null"
-            />
-            <datalist v-if="tagging === segment.id" :id="`tags-${segment.id}`">
-              <option v-for="known in review.tags" :key="known" :value="known" />
-            </datalist>
           </div>
 
           <div v-if="segment.comments.length" class="seg__comments">
@@ -338,20 +386,21 @@ onMounted(async () => {
 
             <div class="acts">
               <button
-                class="btn btn--sm"
-                :disabled="segment.accepted"
-                @click="accept(segment.id)"
+                v-for="item in reactions"
+                :key="item.id"
+                type="button"
+                class="btn btn--sm react"
+                :class="[`react--${item.tone}`, { 'react--on': segment.reaction === item.id }]"
+                :aria-pressed="segment.reaction === item.id"
+                :aria-label="item.label"
+                :disabled="busy"
+                @click="react(segment.id, item.id)"
               >
-                ✓ {{ t.review.accept }}
+                <span aria-hidden="true">{{ item.emoji }}</span>
+                <span class="sr-only">{{ item.label }}</span>
               </button>
               <button class="btn btn--sm btn--ghost" @click="openDialog('edit', segment.id)">
                 ✎ {{ t.review.edit }}
-              </button>
-              <button
-                class="btn btn--sm btn--ghost btn--danger"
-                @click="openDialog('flag', segment.id)"
-              >
-                ⚑ {{ t.review.flag }}
               </button>
               <button class="btn btn--sm btn--ghost" @click="openDialog('comment', segment.id)">
                 ✎̶ {{ t.review.comment }}
@@ -364,6 +413,31 @@ onMounted(async () => {
               >
                 ↺ {{ t.review.undo }}
               </button>
+            </div>
+            <div v-if="segment.reaction" class="react-extra">
+              <button
+                v-if="segment.reaction !== 'impressed'"
+                type="button"
+                class="btn btn--sm"
+                :aria-pressed="segment.slop"
+                :disabled="busy"
+                @click="toggleSlop(segment.id)"
+              >
+                {{ t.review.slop }}
+              </button>
+              <label class="field">
+                <span class="meta">{{ t.review.markComment }}</span>
+                <textarea
+                  class="textarea"
+                  rows="2"
+                  maxlength="500"
+                  :value="commentDraft[segment.id] ?? segment.reaction_comment ?? ''"
+                  @input="draftReactionComment(segment.id, ($event.target as HTMLTextAreaElement).value)"
+                  @change="
+                    saveReactionComment(segment.id, ($event.target as HTMLTextAreaElement).value)
+                  "
+                />
+              </label>
             </div>
           </footer>
         </article>
@@ -744,6 +818,27 @@ onMounted(async () => {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.react--on.react--pass {
+  background: var(--pass-soft);
+  border-color: var(--pass);
+}
+
+.react--on.react--warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+}
+
+.react--on.react--fail {
+  background: var(--fail-soft);
+  border-color: var(--fail);
+}
+
+.react-extra {
+  flex-basis: 100%;
+  display: grid;
+  gap: var(--s2);
 }
 
 /* --------------------------------------------------------------- dialog */

@@ -114,18 +114,12 @@ def document_id(client: TestClient, tmp_path_factory: pytest.TempPathFactory) ->
     return identifier
 
 
-def _job_active(job_id: str) -> bool:
-    with worker._lock:
-        future = worker._futures.get(job_id)
-        return future is not None and not future.done()
-
-
 def _wait_run(client: TestClient, run_id: str, states: set[str]) -> dict[str, Any]:
     deadline = time.monotonic() + 180
     body: dict[str, Any] = {}
     while time.monotonic() < deadline:
         body = client.get(f"/api/runs/{run_id}").json()
-        if body["status"] in states and not _job_active(run_id):
+        if body["status"] in states and not body["active"]:
             return body
         time.sleep(0.05)
     raise AssertionError(f"run stayed {body.get('status')}: {body.get('error')}")

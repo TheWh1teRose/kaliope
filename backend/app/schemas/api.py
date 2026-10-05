@@ -281,6 +281,11 @@ class SegmentOut(BaseModel):
     #: True when there is a review action on this segment an undo can take back.
     undoable: bool = False
     tags: list[str] = Field(default_factory=list)
+    #: Current line reaction. Separate from accept/flag, which older events may
+    #: still carry. ``None`` means the line is unmarked.
+    reaction: Literal["impressed", "dislike", "horrible"] | None = None
+    slop: bool = False
+    reaction_comment: str | None = None
     comments: list[SegmentCommentOut] = Field(default_factory=list)
 
 

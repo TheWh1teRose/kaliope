@@ -1,8 +1,9 @@
 """Public review responses are uncacheable; bearer paths are redacted in app access logs.
 
 The original ASGI scope is used by uvicorn's access logger. Routing receives a
-copy with the original path, while the protocol's scope gets a redacted path.
-Upstream Cloud Run/proxy logs need their own release-time access/retention review.
+copy with the original path, while the protocol's scope gets a redacted path
+and no reviewer key. Upstream Cloud Run/proxy logs need their own release-time
+access/retention review.
 """
 
 from __future__ import annotations
@@ -33,6 +34,13 @@ class SharingPrivacyMiddleware:
             scope["path"] = prefix + "[redacted]"
             scope["raw_path"] = scope["path"].encode()
             scope["query_string"] = b""
+            if "headers" in scope:
+                routed["headers"] = list(scope["headers"])
+                scope["headers"] = [
+                    (name, value)
+                    for name, value in scope["headers"]
+                    if name.lower() != b"x-reviewer-key"
+                ]
 
         async def private_send(message: Message) -> None:
             if message["type"] == "http.response.start":

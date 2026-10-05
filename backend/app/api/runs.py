@@ -606,6 +606,9 @@ def get_script(
                 original_text=segment.text,
                 undoable=bool(state and state.undoable),
                 tags=list(state.tags) if state else [],
+                reaction=state.reaction if state and state.reaction else None,
+                slop=bool(state and state.slop),
+                reaction_comment=state.reaction_comment if state else None,
                 comments=[
                     SegmentCommentOut(
                         id=comment.id,

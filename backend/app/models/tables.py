@@ -583,3 +583,50 @@ class ReviewLink(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     token_digest: Mapped[str] = mapped_column(String(64), unique=True)
     snapshot_hash: Mapped[str] = mapped_column(String(64))
+
+
+class ReviewFeedback(Base):
+    """One browser's feedback on one frozen share.
+
+    The bearer token grants the write. ``key_hash`` is the SHA-256 of the
+    unguessable key that stays in that browser; the key itself is not stored.
+    A replacement link is a new row's parent, so marks are not carried over.
+    """
+
+    __tablename__ = "review_feedback"
+    __table_args__ = (
+        UniqueConstraint("review_link_id", "key_hash", name="uq_review_feedback_writer"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    review_link_id: Mapped[str] = mapped_column(
+        ForeignKey("review_links.id", ondelete="CASCADE"), index=True
+    )
+    snapshot_hash: Mapped[str] = mapped_column(String(64))
+    key_hash: Mapped[str] = mapped_column(String(64))
+    label: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    stars: Mapped[float | None] = mapped_column(Float, nullable=True)
+    worked: Mapped[str | None] = mapped_column(Text, nullable=True)
+    did_not: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReviewFeedbackMark(Base):
+    """A reaction on one frozen line, addressed by share-local ordinal."""
+
+    __tablename__ = "review_feedback_marks"
+    __table_args__ = (
+        UniqueConstraint("feedback_id", "episode_index", "ordinal", name="uq_review_feedback_mark"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    feedback_id: Mapped[str] = mapped_column(
+        ForeignKey("review_feedback.id", ondelete="CASCADE"), index=True
+    )
+    episode_index: Mapped[int] = mapped_column(Integer)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    #: ``impressed`` | ``dislike`` | ``horrible``.
+    reaction: Mapped[str] = mapped_column(String(16))
+    slop: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -72,6 +72,7 @@ watch(() => props.token, load)
       <SharedContent
         :snapshot="snapshot"
         :selected="selected"
+        :token="token"
         @select="select"
       />
     </template>

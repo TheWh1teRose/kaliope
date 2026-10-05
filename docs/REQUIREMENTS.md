@@ -590,8 +590,8 @@ citation markers, gate violations. Right: the rendered source page with the
 anchored rectangle highlighted. Clicking a citation MUST scroll to and highlight
 the exact rectangle — this is what §5.2's `char_map` exists for.
 
-Per segment: **Accept** (one click), **Edit** (inline; saving REQUIRES a reason
-code), **Flag without editing**, **Comment**.
+For current per-segment controls and undo semantics, see
+[The console](../README.md#the-console).
 
 ### 9.3 What is reviewable
 
@@ -654,10 +654,15 @@ llm_calls(id, run_id, node_name, model_id, tokens_in, tokens_out, cost_usd,
 gate_results(id, run_id, gate_id, status, violations_json)
 segments(id, run_id, ordinal, speaker, text, kind, anchors_json, beat_id)
 edit_events(id, run_id, target_type[segment|selection|outline|block_zone],
-            target_id, user_id, action[accept|edit|flag|comment|relabel],
+            target_id, user_id, action,
             reason_code, note, text_before, text_after, created_at)
 review_sessions(id, run_id, user_id, started_at, finished_at, summary_json)
 ```
+
+The authoritative event action values are in
+[`EditAction`](../backend/app/schemas/review.py); table definitions, including
+outside-reviewer feedback, are in
+[`models/tables.py`](../backend/app/models/tables.py).
 
 `PRAGMA journal_mode` from `SQLITE_JOURNAL_MODE` (default `WAL`), `foreign_keys=ON`. Alembic migrations.
 
@@ -666,7 +671,7 @@ review_sessions(id, run_id, user_id, started_at, finished_at, summary_json)
 ## 11. API
 
 Workspace endpoints are under `/api` and require session-cookie authentication
-except login. For the separate bearer-authenticated reader and its media access,
+except login. For bearer-authenticated reading, media access and feedback,
 see [Review links](../README.md#review-links).
 
 ```
