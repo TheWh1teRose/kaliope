@@ -104,7 +104,19 @@ function showAnchor(segmentId: string, anchor: AnchorOut): void {
   activeAnchor.value = anchor
 }
 
-async function react(
+let reactionWrites: Promise<void> = Promise.resolve()
+function orderedReaction(operation: () => Promise<void>): Promise<void> {
+  const result = reactionWrites.then(operation)
+  reactionWrites = result.catch(() => undefined)
+  return result
+}
+function react(segmentId: string, reaction: 'impressed' | 'dislike' | 'horrible'): Promise<void> {
+  return orderedReaction(() => recordReaction(segmentId, reaction))
+}
+function toggleSlop(segmentId: string): Promise<void> {
+  return orderedReaction(() => recordSlop(segmentId))
+}
+async function recordReaction(
   segmentId: string,
   reaction: 'impressed' | 'dislike' | 'horrible',
 ): Promise<void> {
@@ -129,7 +141,7 @@ async function react(
   }
 }
 
-async function toggleSlop(segmentId: string): Promise<void> {
+async function recordSlop(segmentId: string): Promise<void> {
   const segment = segmentOf(segmentId)
   if (!segment?.reaction || segment.reaction === 'impressed') return
   busy.value = true
@@ -149,11 +161,11 @@ async function toggleSlop(segmentId: string): Promise<void> {
 }
 
 function saveReactionComment(segmentId: string, value: string): void {
-  const segment = segmentOf(segmentId)
-  if (!segment?.reaction) return
   commentDraft.value = { ...commentDraft.value, [segmentId]: value }
-  void review
-    .record(props.id, {
+  void orderedReaction(async () => {
+    const segment = segmentOf(segmentId)
+    if (!segment?.reaction) return
+    await review.record(props.id, {
       target_type: 'segment',
       target_id: segmentId,
       action: 'react',
@@ -161,7 +173,8 @@ function saveReactionComment(segmentId: string, value: string): void {
       text_before: segment.slop ? 'slop' : '',
       note: value.trim() || null,
     })
-    .then(syncFromStore)
+    syncFromStore()
+  })
 }
 
 /**
@@ -171,7 +184,10 @@ function saveReactionComment(segmentId: string, value: string): void {
  * over the event stream that the export is also built from. Nothing is deleted:
  * the undo is itself an event.
  */
-async function undo(segmentId: string): Promise<void> {
+function undo(segmentId: string): Promise<void> {
+  return orderedReaction(() => recordUndo(segmentId))
+}
+async function recordUndo(segmentId: string): Promise<void> {
   busy.value = true
   try {
     await review.undo(props.id, segmentId)

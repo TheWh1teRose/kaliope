@@ -66,9 +66,6 @@ const sourcePage = computed(() => {
 const pagePos = computed(() =>
   pages.value.findIndex((page) => page.page === sourcePage.value?.page),
 )
-const lastAudio = computed(
-  () => [...props.snapshot.episodes].reverse().find((item) => item.audio)?.index ?? null,
-)
 const writable = computed(() => Boolean(props.token))
 const starsText = computed(() =>
   stars.value == null
@@ -104,7 +101,25 @@ function markAt(index: number): LocalMark {
     marks.value[lineKey(index)] ?? { reaction: null, slop: false, comment: '' }
   )
 }
-function applyState(data: FeedbackState): void {
+let writes: Promise<unknown> = Promise.resolve()
+let markVersion = 0
+const versions: Record<string, number> = {}
+let confirmed: Record<string, LocalMark> = {}
+function ordered<T>(operation: () => Promise<T>): Promise<T> {
+  const result = writes.then(operation)
+  writes = result.catch(() => undefined)
+  return result
+}
+function draft() {
+  return { label: label.value, stars: stars.value, worked: worked.value, didNot: didNot.value }
+}
+function applySheet(data: FeedbackState, before: ReturnType<typeof draft>): void {
+  if (label.value === before.label) label.value = data.label ?? rememberedLabel()
+  if (stars.value === before.stars) stars.value = data.stars
+  if (worked.value === before.worked) worked.value = data.worked ?? ''
+  if (didNot.value === before.didNot) didNot.value = data.did_not ?? ''
+}
+function stateMarks(data: FeedbackState): Record<string, LocalMark> {
   const next: Record<string, LocalMark> = {}
   for (const mark of data.marks) {
     next[`${mark.episode}:${mark.ordinal}`] = {
@@ -113,16 +128,19 @@ function applyState(data: FeedbackState): void {
       comment: mark.comment ?? '',
     }
   }
-  marks.value = next
-  label.value = data.label ?? rememberedLabel()
-  stars.value = data.stars
-  worked.value = data.worked ?? ''
-  didNot.value = data.did_not ?? ''
+  return next
 }
 async function loadFeedback(): Promise<void> {
   if (!props.token) return
+  const token = props.token
+  const version = markVersion
+  const before = draft()
   try {
-    applyState(await sharingApi.feedback(props.token))
+    const data = await ordered(() => sharingApi.feedback(token))
+    if (props.token !== token) return
+    confirmed = stateMarks(data)
+    if (version === markVersion) marks.value = { ...confirmed }
+    applySheet(data, before)
   } catch {
     label.value = label.value || rememberedLabel()
   }
@@ -131,20 +149,32 @@ async function persist(index: number, next: LocalMark): Promise<void> {
   const episodeIndex = episode.value?.index
   if (!props.token || episodeIndex == null) return
   const id = lineKey(index)
-  const previous = marks.value[id]
+  const token = props.token
+  const ordinal = ordinalOf(index)
+  const version = ++markVersion
+  versions[id] = version
   marks.value = { ...marks.value, [id]: next }
   saveError.value = ''
   try {
-    applyState(
-      await sharingApi.saveMark(props.token, {
+    const saved = await ordered(() => sharingApi.saveMark(token, {
         episode: episodeIndex,
-        ordinal: ordinalOf(index),
+        ordinal,
         reaction: next.reaction,
         slop: next.slop,
         comment: next.comment.trim() || null,
-      }),
-    )
+      }))
+    if (props.token !== token) return
+    const stored = stateMarks(saved)[id]
+    if (stored) confirmed[id] = stored
+    else delete confirmed[id]
+    if (versions[id] !== version) return
+    const copy = { ...marks.value }
+    if (stored) copy[id] = stored
+    else delete copy[id]
+    marks.value = copy
   } catch {
+    if (props.token !== token || versions[id] !== version) return
+    const previous = confirmed[id]
     if (previous) marks.value = { ...marks.value, [id]: previous }
     else {
       const copy = { ...marks.value }
@@ -185,15 +215,13 @@ function stepPage(delta: number): void {
   const next = pages.value[pagePos.value + delta]
   if (!next) return
   activePage.value = next.page
-  activeRects.value = activeRects.value.filter((rect) => rect.page === next.page)
-  activeCite.value = ''
 }
 function retry(): void {
   audioFailed.value = false
   player.value?.load()
 }
 function onEnded(): void {
-  if (!writable.value || episode.value?.index !== lastAudio.value) return
+  if (!writable.value) return
   endedOffer.value = true
   sheetSent.value = false
   sheetOpen.value = true
@@ -218,14 +246,18 @@ async function sendSheet(): Promise<void> {
   if (!props.token || sheetBusy.value) return
   sheetBusy.value = true
   sheetError.value = ''
+  const token = props.token
+  const before = draft()
+  const payload = {
+      label: before.label.trim() || null,
+      stars: before.stars,
+      worked: before.worked.trim() || null,
+      did_not: before.didNot.trim() || null,
+  }
   try {
-    const saved = await sharingApi.saveSheet(props.token, {
-      label: label.value.trim() || null,
-      stars: stars.value,
-      worked: worked.value.trim() || null,
-      did_not: didNot.value.trim() || null,
-    })
-    applyState(saved)
+    const saved = await ordered(() => sharingApi.saveSheet(token, payload))
+    if (props.token !== token) return
+    applySheet(saved, before)
     rememberLabel(saved.label ?? '')
     sheetSent.value = true
   } catch {

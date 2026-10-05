@@ -537,6 +537,34 @@ def test_marks_toggle_comments_and_slop_stay_on_the_frozen_line(owner: TestClien
     )
 
 
+@pytest.mark.parametrize("existing_writer", [False, True])
+@pytest.mark.parametrize("endpoint", ["marks", "sheet"])
+def test_concurrent_feedback_creation(
+    owner: TestClient, existing_writer: bool, endpoint: str
+) -> None:
+    created = share(owner, run(), choice())
+    path = public_path(created) + "/feedback"
+    owner.cookies.clear()
+    if existing_writer:
+        assert owner.put(path + "/sheet", headers=_reviewer(), json={"label": "Reviewer"}).status_code == 200
+    payload = (
+        {"episode": 1, "ordinal": 0, "reaction": "dislike"}
+        if endpoint == "marks" else {"stars": 3.5}
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(
+            lambda _: owner.put(path + "/" + endpoint, headers=_reviewer(), json=payload),
+            range(2),
+        ))
+    assert [response.status_code for response in responses] == [200, 200]
+    saved = owner.get(path, headers=_reviewer()).json()
+    if endpoint == "marks":
+        assert len(saved["marks"]) == 1
+        assert saved["marks"][0]["reaction"] == "dislike"
+    else:
+        assert saved["stars"] == 3.5
+
+
 def test_sheet_half_stars_and_separate_browsers(
     owner: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -751,6 +779,18 @@ def test_cited_page_is_frozen_without_private_ids(owner: TestClient) -> None:
                 artifact_hash=store().put("script", script_row).hash,
             )
         )
+        db.add(
+            RunNode(
+                run_id=row.id,
+                node_name="ingest",
+                node_version="0",
+                cache_key=uuid4().hex * 2,
+                artifact_hash=document.parsed_artifact_hash,
+            )
+        )
+        parsed.parse_version = 2
+        parsed.blocks[0].bboxes = [(0, (100.0, 200.0, 180.0, 240.0))]
+        document.parsed_artifact_hash = store().put("parsed", parsed).hash
         run_id = row.id
         private_id = document.id
     created = share(owner, run_id, choice())
@@ -768,7 +808,9 @@ def test_cited_page_is_frozen_without_private_ids(owner: TestClient) -> None:
     assert private_id not in text
     segment = body.json()["episodes"][0]["segments"][0]
     assert segment["ordinal"] == 0
-    assert segment["citations"][0]["rects"][0]["page"] == 0
+    assert segment["citations"][0]["rects"][0] == {
+        "page": 0, "bbox": [10.0, 20.0, 80.0, 40.0]
+    }
     page = body.json()["episodes"][0]["pages"][0]
     image = owner.get(page["url"])
     assert image.status_code == 200 and image.content.startswith(b"\x89PNG")

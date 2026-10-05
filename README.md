@@ -235,7 +235,7 @@ The same mark again clears it. A comment is optional and only on a marked
 line. After 🤢 or 🤮, an optional “Klingt nach KI-Slop” tag can be added;
 dislike and suspected AI slop stay separate, and nothing classifies slop
 automatically. A short questionnaire is always available and is offered again
-when playback of the last episode that has audio ends: optional stars in half
+when playback of any recording ends: optional stars in half
 steps, what worked, and what did not. Playback ending is not evidence that
 someone listened. The reviewer is remembered in that browser by an unguessable
 key sent as a header, with an optional short label, and does not need an

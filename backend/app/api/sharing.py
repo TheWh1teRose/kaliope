@@ -24,7 +24,7 @@ from app.db import get_db
 from app.errors import ProblemException, problem
 from app.ingestion import anchors as anchor_tools
 from app.ingestion.extract import page_size, render_page_png
-from app.models import AudioTake, Document, ReviewLink, Run, Series, User
+from app.models import AudioTake, Document, ReviewLink, Run, RunNode, Series, User
 from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import Script
@@ -182,11 +182,20 @@ def _content(db: Session, kind: Kind, target_id: str, payload: ShareSelection) -
 def _parsed(db: Session, run: Run, script: Script) -> ParsedDocument | None:
     if not any(segment.anchors for segment in script.segments):
         return None
-    document = db.get(Document, run.document_id)
-    if document is None or not document.parsed_artifact_hash:
+    ingest = db.scalars(
+        select(RunNode).where(RunNode.run_id == run.id, RunNode.node_name == "ingest")
+    ).first()
+    if ingest is None or not ingest.artifact_hash:
         raise problem(409, "Quelle fehlt", "Die belegten Seiten können nicht eingefroren werden.")
     try:
-        return ParsedDocument.model_validate(_store().get_raw(document.parsed_artifact_hash))
+        parsed = ParsedDocument.model_validate(_store().get_raw(ingest.artifact_hash))
+        if parsed.document_id != run.document_id or any(
+            not anchor_tools.anchor_is_valid(parsed, anchor)[0]
+            for segment in script.segments
+            for anchor in segment.anchors
+        ):
+            raise ValueError("Mismatched citation")
+        return parsed
     except (KeyError, ValueError, TypeError, OSError):
         raise problem(
             409, "Quelle fehlt", "Die belegten Seiten können nicht eingefroren werden."
@@ -205,7 +214,9 @@ def _freeze(
             for anchor in segment.anchors:
                 outcome = anchor_tools.resolve(parsed, anchor)
                 if not outcome.resolved or not outcome.rects:
-                    continue
+                    raise problem(
+                        409, "Quelle fehlt", "Die belegten Seiten können nicht eingefroren werden."
+                    )
                 rects = [
                     {"page": rect.page, "bbox": [float(value) for value in rect.bbox]}
                     for rect in outcome.rects
@@ -596,6 +607,7 @@ def read_feedback(token: str, request: Request, db: Session = Depends(get_db)) -
 def write_mark(
     token: str, payload: MarkIn, request: Request, db: Session = Depends(get_db)
 ) -> FeedbackState:
+    db.execute(text("BEGIN IMMEDIATE"))
     row = _grant(db, token, request)
     limit_writes(request)
     key = key_from(request)
@@ -611,6 +623,7 @@ def write_mark(
 def write_sheet(
     token: str, payload: SheetIn, request: Request, db: Session = Depends(get_db)
 ) -> FeedbackState:
+    db.execute(text("BEGIN IMMEDIATE"))
     row = _grant(db, token, request)
     limit_writes(request)
     key = key_from(request)

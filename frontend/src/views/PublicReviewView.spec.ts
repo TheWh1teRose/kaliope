@@ -196,7 +196,7 @@ describe('link-only reader through real app routing', () => {
     expect(wrapper.text()).toContain('Kein Skript verfügbar')
     expect(wrapper.find('audio').exists()).toBe(false)
   })
-  it('toggles a line mark and offers the sheet when the last recording ends', async () => {
+  it('toggles a line mark and offers the sheet when every recording ends', async () => {
     const marks: {
       episode: number
       ordinal: number
@@ -254,9 +254,12 @@ describe('link-only reader through real app routing', () => {
     await flushPromises()
     expect(marks).toEqual([])
     await wrapper.find('audio').trigger('ended')
-    expect(document.body.textContent).not.toContain(
+    await flushPromises()
+    expect(document.body.textContent).toContain(
       'Das zeigt nicht, dass jemand zugehört hat',
     )
+    document.querySelector<HTMLButtonElement>('.panel__head button')!.click()
+    await flushPromises()
     await wrapper.findAll('.reading footer button')[1].trigger('click')
     await flushPromises()
     await wrapper.findAll('.reading footer button')[1].trigger('click')
