@@ -214,9 +214,7 @@ short script typed with any speakers, or on a beat loaded from a run.
 Finished runs have a **Feedback** menu containing link creation and received
 feedback; existing links show their status and revocation action on reload,
 without creating a replacement. With an existing link the creation options are
-collapsed initially. The bearer URL can only be copied/opened in the creation
-session: the server retains its digest, not a recoverable token. Completed series
-also have a **Review-Link** action. Choose the public
+collapsed initially. Completed series also have a **Review-Link** action. Choose the public
 titles and a completed full recording for each episode, then create and copy the
 link. Snapshot validation happens internally, without a preview step. Samples,
 failed takes and unavailable mixes are excluded; a newer failed or pending take
@@ -230,12 +228,16 @@ The link opens a separate reader without a login, for both signed-out and
 signed-in visitors. It exposes the chosen titles, speaker/text segments,
 creation/expiry dates, the selected audio, and only the source pages a shared
 line actually cites. Those pages are frozen as images with the snapshot, and a
-citation highlights that passage. Playback and seeking center the active script
-line using the recording's saved alignment. Each new line selects its first citation
-and centers the highlighted source region, if its frozen page is available. Untimed
-or uncited lines do not invent alignment or evidence; source exploration remains
-manual while paused. Script and source panes have matching, independent scroll
-viewports. Workspace identifiers, voice settings, edit
+citation highlights that passage. Playback centers each newly active script line
+using the recording's saved alignment and selects its first citation, centering
+the highlighted source region if its frozen page is available. Resuming or seeking
+recenters both panes even within the same line; ordinary time updates within a
+line do not reset manual scrolling. While paused, source exploration stays manual,
+including when a pending source image finishes loading; explicit citation clicks
+and seeks still center the selected evidence. Untimed or uncited lines do not
+invent alignment or evidence. Script and source panes have matching, independent
+scroll viewports; the “Aktuelle Passage finden” button centers the script highlight
+on request. Workspace identifiers, voice settings, edit
 history and the internal review session are not included. Opening the page
 does not start a review session or change a run's status. The public page
 cannot edit the script.
@@ -261,7 +263,7 @@ key's SHA-256. Feedback is bound to that link and its frozen snapshot, addressed
 by a share-local line ordinal.
 Replacing the link does not carry marks onto the new text. Writes use the same
 expiry and revocation check as reads. The owner summary on the share screen
-lists reactions, stars, answers and marked lines. Each link admits
+lists reactions, stars, answers and lines with reactions or comments. Each link admits
 at most 20 browser identities for feedback; clearing feedback does not release
 a slot. Already admitted browsers can continue updating their feedback.
 
@@ -274,10 +276,7 @@ Each link is a frozen snapshot: when choosing audio, its original recorded
 source script is captured together with the exact mix. An older recording is
 labelled in the owner selection. Available recorded line timings are frozen as
 well: playback highlights the actual current segment, including after seeking
-or pausing. The wider reader lets the script scroll separately from the player
-and cited source. Playback preserves manual scrolling; the “Aktuelle Passage
-finden” button scrolls to the highlight on request.
-Recordings or existing links without alignment remain readable without invented
+or pausing. Recordings or existing links without alignment remain readable without invented
 highlights. For series, the roster and order are frozen
 too. Subsequent edits, new recordings or replanning do not change the link.
 The snapshot references immutable private media in the artifact store rather
