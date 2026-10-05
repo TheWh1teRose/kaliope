@@ -235,7 +235,7 @@ The same mark again clears it. A comment is optional and only on a marked
 line. After 🤢 or 🤮, an optional “Klingt nach KI-Slop” tag can be added;
 dislike and suspected AI slop stay separate, and nothing classifies slop
 automatically. A short questionnaire is always available and is offered again
-when playback of any recording ends: optional stars in half
+when playback of any recording ends: optional stars from 0.5 to 5 in half
 steps, what worked, and what did not. Playback ending is not evidence that
 someone listened. The reviewer is remembered in that browser by an unguessable
 key sent as a header, with an optional short label, and does not need an
@@ -243,12 +243,13 @@ account. The server stores only the key's SHA-256. Feedback is bound to that
 link and its frozen snapshot, addressed by a share-local line ordinal.
 Replacing the link does not carry marks onto the new text. Writes use the same
 expiry and revocation check as reads. The owner summary on the share screen
-lists reactions, slop tags, stars, answers and marked lines.
+lists reactions, slop tags, stars, answers and marked lines. Each link admits
+at most 20 browser identities for feedback; clearing feedback does not release
+a slot. Already admitted browsers can continue updating their feedback.
 
-In Redaktion, the same three emoji replace Übernehmen, Markieren and
-Schlagwörter. Bearbeiten, Kommentieren and undo stay. The public page does not
-load third-party scripts. Comment text is not written beside the bearer token
-in the application's access log; the reviewer key header is removed from that
+For internal editor controls, see [The console](#the-console).
+The public page does not load third-party scripts. Comment text is not written
+beside the bearer token in the application's access log; the reviewer key header is removed from that
 log as well.
 
 Each link is a frozen snapshot: when choosing audio, its original recorded
@@ -398,14 +399,17 @@ the rendered source page on the right. Clicking a citation puts them in
 register — the page scrolls to the anchored rectangle, a registration crosshair
 parks on it, and a tie line is drawn across the gutter.
 
-Per segment: accept in one click, edit inline, flag without editing, comment,
-tag, and **undo**. **Saving an edit requires a reason code** — the eleven codes
+Per segment: the same reactions, optional slop tag and marked-line comment as
+[Review links](#review-links), plus edit inline, general comment, and **undo**.
+These reactions replace the accept, flag and tag controls; older events remain
+in the event stream. Reactions are separate from the edit undo stack.
+**Saving an edit requires a reason code** — the eleven codes
 are one shared definition consumed by both backend and frontend, and `OTHER`
 additionally requires a note. Selection, outline and **block zone labels** are
 all reviewable; a zone correction is stored as an `EditEvent` and is how the
 system adapts to an unfamiliar document family without anyone writing template
-code. Comments and tags are shown in the editor against the segment they are
-about, so a reviewer coming back to a script sees what was already said about it.
+code. Comments and saved reactions are shown against their segment, so a
+reviewer coming back to a script sees what was already said about it.
 
 **Undo deletes nothing.** Segment state is a fold over the event stream rather
 than a stored flag, so an undo is itself an event that pops the last accept,
