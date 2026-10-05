@@ -86,7 +86,7 @@ async function preview(wrapper: ReturnType<typeof mount>) {
   await flushPromises()
 }
 describe('owner review links', () => {
-  it('requires missing-audio acknowledgement and a preview before creating', async () => {
+  it('requires missing-audio acknowledgement and validates internally without a visible preview', async () => {
     const w = await show()
     expect(w.text()).toContain('älteren Skriptstand')
     expect(w.find('form button').attributes('disabled')).toBeDefined()
@@ -99,12 +99,8 @@ describe('owner review links', () => {
       ],
       acknowledge_missing_audio: true,
     })
-    expect(w.text()).toContain('Recorded preview')
-    const create = w
-      .findAll('button')
-      .find((b) => b.text() === 'Link erstellen')!
-    await create.trigger('click')
-    await flushPromises()
+    expect(w.text()).not.toContain('Recorded preview')
+    expect(w.find('.preview').exists()).toBe(false)
     expect(sharingApi.create).toHaveBeenCalledWith(
       'series',
       'series-one',
@@ -125,10 +121,6 @@ describe('owner review links', () => {
     })
     const w = await show()
     await preview(w)
-    await w
-      .findAll('button')
-      .find((b) => b.text() === 'Neuen Link erstellen')!
-      .trigger('click')
     expect(sharingApi.create).not.toHaveBeenCalled()
     await w
       .findAll('button')
@@ -143,6 +135,9 @@ describe('owner review links', () => {
       'link-one',
     )
     await w.find('#share-title').setValue('Changed')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(sharingApi.preview).toHaveBeenCalledTimes(2)
     expect(w.find('.preview').exists()).toBe(false)
   })
   it('does not report revoke success on failure and allows a retry', async () => {

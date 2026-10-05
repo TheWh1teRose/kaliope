@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ApiError } from '@/api/client'
 import {
   sharingApi,
@@ -11,7 +11,6 @@ import {
   type ShareSelection,
 } from '@/api/sharing'
 import ModalDialog from '@/components/ModalDialog.vue'
-import SharedContent from '@/components/SharedContent.vue'
 
 import { fill, t } from '@/i18n'
 
@@ -19,6 +18,7 @@ const props = defineProps<{
   kind: 'runs' | 'series'
   targetId: string
   ready: boolean
+  inline?: boolean
 }>()
 const open = ref(false)
 const busy = ref(false)
@@ -33,7 +33,6 @@ const draft = ref<ShareSelection>({
   acknowledge_missing_audio: false,
 })
 const preview = ref<SharePreview | null>(null)
-const previewEpisode = ref(1)
 const url = ref('')
 const copyState = ref('')
 const replaceConfirmation = ref(false)
@@ -96,7 +95,6 @@ async function show(): Promise<void> {
         take_id: e.takes[0]?.id ?? null,
       })),
     }
-    previewEpisode.value = draft.value.episodes[0]?.index ?? 1
   } else readinessError.value = message(results[1].reason)
   loading.value = false
 }
@@ -106,8 +104,9 @@ function close(): void {
   url.value = ''
   preview.value = null
 }
-async function inspect(): Promise<void> {
-  if (!valid.value || busy.value) return
+onMounted(() => { if (props.inline) void show() })
+async function inspect(): Promise<boolean> {
+  if (!valid.value || busy.value) return false
   const current = generation
   busy.value = true
   error.value = ''
@@ -117,15 +116,20 @@ async function inspect(): Promise<void> {
       props.targetId,
       draft.value,
     )
-    if (current === generation) preview.value = result
+    if (current !== generation) return false
+    preview.value = result
+    return true
   } catch (exc) {
     if (current === generation) error.value = message(exc)
+    return false
   } finally {
     if (current === generation) busy.value = false
   }
 }
 async function create(confirmed = false): Promise<void> {
-  if (!preview.value || !valid.value || busy.value) return
+  if (!valid.value || busy.value) return
+  if (!preview.value && !(await inspect())) return
+  if (!preview.value) return
   if (active.value && !confirmed) {
     replaceConfirmation.value = true
     return
@@ -193,8 +197,9 @@ const statusLabel = t.sharing.status
 </script>
 
 <template>
-  <button class="btn" type="button" @click="show">{{ t.sharing.link }}</button>
-  <ModalDialog
+  <button v-if="!inline" class="btn" type="button" @click="show">{{ t.sharing.link }}</button>
+  <component
+    :is="inline ? 'section' : ModalDialog"
     :open="open"
     :title="t.sharing.ownerTitle"
     :lead="t.sharing.ownerLead"
@@ -211,7 +216,7 @@ const statusLabel = t.sharing.status
         {{ t.sharing.notConfigured }}
       </p>
       <p v-if="readinessError" class="notice">{{ readinessError }}</p>
-      <form v-if="options" @submit.prevent="inspect">
+      <form v-if="options" @submit.prevent="create()">
         <div class="field">
           <label for="share-title">{{ t.sharing.publicTitle }}</label
           ><input
@@ -283,27 +288,10 @@ const statusLabel = t.sharing.status
           /><span>{{ t.sharing.acknowledge }}</span></label
         >
         <p class="notice">{{ t.sharing.validity }}</p>
-        <button class="btn" :disabled="!valid || busy" type="submit">
-          {{ t.sharing.inspect }}
-        </button>
-      </form>
-      <section v-if="preview" class="preview">
-        <h3 class="eyebrow">{{ t.sharing.previewTitle }}</h3>
-        <SharedContent
-          :snapshot="preview.snapshot"
-          :selected="previewEpisode"
-          @select="previewEpisode = $event"
-        />
-      </section>
-      <div v-if="preview && !replaceConfirmation" class="actions">
-        <button
-          class="btn btn--primary"
-          :disabled="busy || !management.configured"
-          @click="create()"
-        >
+        <button class="btn btn--primary" :disabled="!valid || busy || !management.configured" type="submit">
           {{ active ? t.sharing.newLink : t.sharing.createLink }}
         </button>
-      </div>
+      </form>
       <div
         v-if="replaceConfirmation"
         class="notice"
@@ -340,12 +328,6 @@ const statusLabel = t.sharing.status
         /></label>
         <div class="actions">
           <button class="btn" @click="copy">{{ t.sharing.copy }}</button
-          ><a
-            class="btn"
-            :href="url"
-            target="_blank"
-            rel="noopener noreferrer"
-            >{{ t.sharing.openPreview }}</a
           >
         </div>
         <p role="status" class="hint">{{ copyState }}</p>
@@ -376,8 +358,7 @@ const statusLabel = t.sharing.status
               <template v-else>
                 <p class="meta">
                   👍 {{ link.feedback.impressed }} · 🤢 {{ link.feedback.dislike }} · 🤮
-                  {{ link.feedback.horrible }} · {{ t.sharing.slopCount }}
-                  {{ link.feedback.slop }}
+                  {{ link.feedback.horrible }}
                 </p>
                 <article
                   v-for="response in link.feedback.responses"
@@ -388,10 +369,6 @@ const statusLabel = t.sharing.status
                     <b>{{
                       fill(t.sharing.responseLabel, { n: response.index })
                     }}</b>
-                    <span v-if="response.label">
-                      · {{ response.label }}
-                      <span class="meta">({{ t.sharing.unverified }})</span>
-                    </span>
                   </p>
                   <p v-if="response.stars != null" class="meta">
                     {{
@@ -423,7 +400,6 @@ const statusLabel = t.sharing.status
                             ? '🤢'
                             : '🤮'
                       }}
-                      <span v-if="line.slop">· {{ t.sharing.slop }}</span>
                       · {{ fill(t.sharing.responseLabel, { n: line.response }) }}
                     </p>
                     <p v-if="line.speaker || line.text">
@@ -461,7 +437,7 @@ const statusLabel = t.sharing.status
         </div>
       </div>
     </template>
-  </ModalDialog>
+  </component>
 </template>
 
 <style scoped>

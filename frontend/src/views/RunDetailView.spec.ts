@@ -3,6 +3,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@/api/client'
+import { sharingApi } from '@/api/sharing'
 import type { RunOut, RunStatus } from '@/api/types'
 import { t } from '@/i18n'
 
@@ -70,6 +71,27 @@ describe('run detail', () => {
     store.get.mockImplementation(async () => run('running'))
     store.stop.mockClear()
     store.watch.mockClear()
+  })
+
+  it('puts sharing and received feedback under the Feedback menu without replacing run controls or routes', async () => {
+    vi.spyOn(sharingApi, 'links').mockResolvedValue({ configured: true, links: [] })
+    vi.spyOn(sharingApi, 'options').mockResolvedValue({ title: 'Review', episodes: [] })
+    const navigation = router()
+    const wrapper = mount(RunDetailView, { props: { id: 'r1' }, attachTo: document.body, global: { plugins: [navigation] } })
+    await flushPromises()
+    expect(wrapper.find('[data-feedback-tab]').exists()).toBe(false)
+    expect(wrapper.find('.head').text()).not.toContain('Review-Link')
+    await wrapper.findAll('nav button')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-feedback-tab] form').exists()).toBe(true)
+    expect(wrapper.find('[data-run-tab]').isVisible()).toBe(false)
+    expect(wrapper.find('[data-stop]').exists()).toBe(true)
+    expect(sharingApi.links).toHaveBeenCalledWith('runs', 'r1')
+    await wrapper.findAll('nav button')[0].trigger('click')
+    expect(wrapper.find('[data-run-tab]').isVisible()).toBe(true)
+    expect(wrapper.find('[data-feedback-tab]').exists()).toBe(false)
+    wrapper.unmount()
+    vi.restoreAllMocks()
   })
 
   it('asks in the page before stopping a running run', async () => {

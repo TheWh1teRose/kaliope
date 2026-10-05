@@ -12,6 +12,8 @@ export interface SharedPage {
   url: string
 }
 export interface SharedSegment {
+  start_s?: number | null
+  end_s?: number | null
   ordinal?: number
   speaker: string
   text: string
@@ -217,6 +219,7 @@ async function publicJson<T>(
       headers,
       credentials: 'omit',
       cache: 'no-store',
+      keepalive: Boolean(init.body),
     },
   )
   if (!response.ok) throw new ApiError(response.status, '', '')

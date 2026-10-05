@@ -21,6 +21,7 @@ const props = defineProps<{ id: string }>()
 const runs = useRunsStore()
 const run = ref<RunOut | null>(null)
 const graph = ref<RunGraphOut | null>(null)
+const activeTab = ref<'run' | 'feedback'>('run')
 const inspected = ref<string | null>(null)
 const io = ref<NodeIOOut | null>(null)
 const ioLoading = ref(false)
@@ -200,7 +201,6 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="row wrap">
-        <ReviewLinkButton kind="runs" :target-id="run.id" :ready="!!reviewable" />
         <StatusPill :status="run.status" />
         <button
           v-if="stoppable"
@@ -231,6 +231,15 @@ onUnmounted(() => {
       </div>
     </header>
 
+    <nav class="row" :aria-label="t.run.title">
+      <button class="btn" :aria-pressed="activeTab === 'run'" @click="activeTab = 'run'">{{ t.run.title }}</button>
+      <button class="btn" :aria-pressed="activeTab === 'feedback'" @click="activeTab = 'feedback'">{{ t.sharing.feedback }}</button>
+    </nav>
+    <section v-if="activeTab === 'feedback'" class="sheet" data-feedback-tab>
+      <h2 class="h-section">{{ t.sharing.feedback }}</h2>
+      <ReviewLinkButton inline kind="runs" :target-id="run.id" :ready="!!reviewable" />
+    </section>
+    <div v-show="activeTab === 'run'" data-run-tab>
     <p v-if="run.verdict === 'insufficient'" class="notice notice--fail">
       {{ t.run.verdictInsufficient }}
     </p>
@@ -346,6 +355,7 @@ onUnmounted(() => {
     </div>
 
     <AudioPanel v-if="reviewable" :run-id="run.id" :format-id="run.format_spec?.id ?? null" />
+    </div>
 
     <Teleport to="body">
       <div v-if="notesOpen && awaitingNotes" class="notes-overlay">

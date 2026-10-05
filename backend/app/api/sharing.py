@@ -168,7 +168,11 @@ def _take_content(take: AudioTake, run: Run) -> tuple[Script, dict[str, Any]]:
     script = Script.model_validate(store.get_raw(take.script_hash))
     if not script.segments or not any(s.text.strip() for s in script.segments):
         raise problem(409, "Leeres Skript", "Die Aufnahme hat kein lesbares Skript.")
-    return script, {"blob": mix.blob, "duration_s": mix.duration_s}
+    return script, {
+        "blob": mix.blob,
+        "duration_s": mix.duration_s,
+        "lines": [line.model_dump() for line in mix.lines],
+    }
 
 
 def _content(db: Session, kind: Kind, target_id: str, payload: ShareSelection) -> dict[str, Any]:
@@ -194,6 +198,17 @@ def _content(db: Session, kind: Kind, target_id: str, payload: ShareSelection) -
                 )
             script = _script(db, run)
         segments, pages = _freeze(db, run, script)
+        if audio:
+            timings = {line["segment_id"]: line for line in audio.pop("lines")}
+            for source, frozen in zip(script.segments, segments, strict=True):
+                timing = timings.get(source.id)
+                if timing and (
+                    math.isfinite(timing["start_s"])
+                    and math.isfinite(timing["end_s"])
+                    and 0 <= timing["start_s"] < timing["end_s"] <= audio["duration_s"]
+                ):
+                    frozen["start_s"] = timing["start_s"]
+                    frozen["end_s"] = timing["end_s"]
         episodes.append(
             {
                 "index": index,

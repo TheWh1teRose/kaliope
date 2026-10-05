@@ -183,6 +183,8 @@ def test_audio_share_uses_recorded_script_and_allowlists_output(owner: TestClien
             "speaker": "Host",
             "text": "Original recorded text",
             "citations": [],
+            "start_s": None,
+            "end_s": None,
         }
     ]
     assert set(episode["audio"]) == {"url", "duration_s"}
@@ -604,6 +606,49 @@ def _reviewer(n: int = 1) -> dict[str, str]:
     return {"X-Reviewer-Key": f"{n:064x}"}
 
 
+def test_recorded_alignment_is_frozen_without_private_segment_ids(owner: TestClient) -> None:
+    rid = run()
+    tid, blob = take(rid)
+    with session_scope() as db:
+        recording = db.get(AudioTake, tid)
+        assert recording
+        mix = AudioMix(
+            blob=blob, duration_s=12, gap_s=0.3, loudness_lufs=-16, chunk_offsets_s=[0],
+            lines=[{"segment_id": "seg-private", "start_s": 2.3, "end_s": 9.1}],
+        )
+        recording.manifest_json = {"bag_hashes": {"audio_mix": store().put("audio_mix", mix).hash}}
+    created = share(owner, rid, choice(tid))
+    response = owner.get(public_path(created))
+    assert response.status_code == 200
+    segment = response.json()["episodes"][0]["segments"][0]
+    assert segment["start_s"] == 2.3
+    assert segment["end_s"] == 9.1
+    assert "seg-private" not in response.text
+
+
+def test_marks_and_comments_persist_without_questionnaire_and_clear_survives_return(
+    owner: TestClient,
+) -> None:
+    rid = run()
+    created = share(owner, rid, choice())
+    path = public_path(created) + "/feedback"
+    payload = {"episode": 1, "ordinal": 0, "reaction": "horrible", "comment": "Unclear"}
+    assert owner.put(path + "/marks", headers=_reviewer(), json=payload).status_code == 200
+    # A fresh read, not the PUT response: the unfinished sheet is never submitted.
+    returned = owner.get(path, headers=_reviewer()).json()
+    assert returned["marks"][0]["comment"] == "Unclear"
+    assert returned["stars"] is None
+    assert returned["worked"] is None
+    summary = owner.get(f"/api/runs/{rid}/review-link").json()["links"][0]["feedback"]
+    assert summary["horrible"] == 1
+    assert summary["lines"][0]["comment"] == "Unclear"
+    assert owner.get(path, headers=_reviewer(2)).json()["marks"] == []
+    assert owner.put(
+        path + "/marks", headers=_reviewer(), json={**payload, "reaction": None}
+    ).status_code == 200
+    assert owner.get(path, headers=_reviewer()).json()["marks"] == []
+
+
 def test_marks_toggle_comments_and_slop_stay_on_the_frozen_line(owner: TestClient) -> None:
     rid = run()
     created = share(owner, rid, choice())
@@ -974,6 +1019,9 @@ def test_old_snapshot_without_ordinals_still_reads(owner: TestClient) -> None:
     owner.cookies.clear()
     body = owner.get(f"/api/public/review-links/{token}").json()
     assert body["episodes"][0]["segments"] == [
-        {"ordinal": 0, "speaker": "Host", "text": "Old line", "citations": []}
+        {
+            "ordinal": 0, "speaker": "Host", "text": "Old line", "citations": [],
+            "start_s": None, "end_s": None,
+        }
     ]
     assert body["episodes"][0]["pages"] == []
