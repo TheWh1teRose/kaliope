@@ -319,7 +319,7 @@ function showCite(index: number, citeIndex: number, citation: SharedCitation): v
     return
   }
   activePage.value = page
-  activeRects.value = citation.rects
+  activeRects.value = [...citation.rects]
   activeCite.value = `${lineKey(index)}:${citeIndex}`
 }
 function stepPage(delta: number): void {

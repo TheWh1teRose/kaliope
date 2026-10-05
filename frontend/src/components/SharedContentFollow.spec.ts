@@ -87,6 +87,28 @@ describe('recorded playback follow', () => {
     await clock(10, 'play')
     expect(wrapper.find('.source img').attributes('src')).toBe('/frozen-page-5.png')
   })
+  it.each([
+    { event: 'play', paused: true, name: 'resume' },
+    { event: 'seeked', paused: true, name: 'paused same-segment seek' },
+    { event: 'seeked', paused: false, name: 'playing same-segment seek' },
+  ])('recenters unchanged evidence on $name without resetting ordinary ticks', async ({ event, paused }) => {
+    const source = wrapper.find('.source').element as HTMLElement
+    await clock(10, 'play')
+    await wrapper.find('.source img').trigger('load')
+    await flushPromises()
+    expect(source.scrollTop).toBeCloseTo(505)
+    if (paused) await clock(10, 'pause')
+    source.scrollTop = 100
+    await clock(11)
+    expect(source.scrollTop).toBe(100)
+    expect(wrapper.find('.source .mark').attributes('y')).toBe('698.5')
+    await clock(12, event)
+    expect(source.scrollTop).toBeCloseTo(505)
+    expect(wrapper.find('.source img').attributes('src')).toBe('/frozen-page-5.png')
+    source.scrollTop = 150
+    await clock(13)
+    expect(source.scrollTop).toBe(150)
+  })
   it('does not fabricate evidence or alignment for uncited, missing-page or untimed content; resets episodes', async () => {
     await clock(10, 'play')
     await clock(20)
