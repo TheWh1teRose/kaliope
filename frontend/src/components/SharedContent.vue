@@ -808,6 +808,7 @@ audio {
   min-width: 0;
 }
 .script {
+  position: relative;
   padding-right: var(--s4);
   height: 70vh;
   overflow-y: auto;
