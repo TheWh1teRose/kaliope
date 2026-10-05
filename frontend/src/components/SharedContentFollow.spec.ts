@@ -109,6 +109,49 @@ describe('recorded playback follow', () => {
     await clock(13)
     expect(source.scrollTop).toBe(150)
   })
+  it.each(['after pause', 'before pause'])('preserves paused exploration when a delayed load arrives $0', async (arrival) => {
+    const source = wrapper.find('.source').element as HTMLElement
+    await clock(10, 'play')
+    expect(source.scrollTop).toBeCloseTo(505)
+    const image = wrapper.find('.source img').element
+    const audio = wrapper.find('audio').element
+    if (arrival === 'before pause') image.dispatchEvent(new Event('load'))
+    audio.dispatchEvent(new Event('pause'))
+    source.scrollTop = 100
+    if (arrival === 'after pause') image.dispatchEvent(new Event('load'))
+    await flushPromises()
+    expect(source.scrollTop).toBe(100)
+    await wrapper.findAll('.segment')[1].findAll('.cites button')[0].trigger('click')
+    await flushPromises()
+    expect(source.scrollTop).toBeCloseTo(505)
+    source.scrollTop = 150
+    await wrapper.find('.source img').trigger('load')
+    await flushPromises()
+    expect(source.scrollTop).toBe(150)
+    await clock(12, 'seeked')
+    expect(source.scrollTop).toBeCloseTo(505)
+    await clock(12, 'play')
+    source.scrollTop = 100
+    await wrapper.find('.source img').trigger('load')
+    await flushPromises()
+    expect(source.scrollTop).toBeCloseTo(505)
+    source.scrollTop = 150
+    await clock(13)
+    expect(source.scrollTop).toBe(150)
+  })
+  it('cancels a pending selection anchor when playback pauses before rendering', async () => {
+    const source = wrapper.find('.source').element as HTMLElement
+    await clock(10, 'play')
+    await clock(10, 'pause')
+    source.scrollTop = 100
+    const audio = wrapper.find('audio').element
+    audio.dispatchEvent(new Event('play'))
+    audio.dispatchEvent(new Event('pause'))
+    await flushPromises()
+    expect(source.scrollTop).toBe(100)
+    await clock(10, 'play')
+    expect(source.scrollTop).toBeCloseTo(505)
+  })
   it('does not fabricate evidence or alignment for uncited, missing-page or untimed content; resets episodes', async () => {
     await clock(10, 'play')
     await clock(20)

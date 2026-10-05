@@ -51,23 +51,27 @@ const currentSegment = computed(() => clock.value == null ? -1 :
   (episode.value?.segments.findIndex(segment => segment.start_s != null && segment.end_s != null &&
     clock.value! >= segment.start_s && clock.value! < segment.end_s) ?? -1))
 function updateClock(): void { clock.value = player.value?.currentTime ?? null }
-function onPlay(): void { updateClock(); void followSegment() }
-function onPause(): void { updateClock() }
-async function followSegment(): Promise<void> {
-  await nextTick()
-  findPlaying()
+const playing = ref(false)
+let pendingEvidence = false
+function onPlay(): void { playing.value = true; updateClock(); followSegment() }
+function onPause(): void { playing.value = false; pendingEvidence = false; updateClock() }
+function followSegment(): void {
+  void nextTick(findPlaying)
   const index = currentSegment.value
   const first = episode.value?.segments[index]?.citations?.[0]
   if (first) showCite(index, 0, first)
   else {
+    pendingEvidence = false
     activeRects.value = []
     activeCite.value = ''
   }
 }
-watch(currentSegment, () => { void followSegment() })
+watch(currentSegment, () => { if (playing.value) followSegment() })
 const script = ref<HTMLElement | null>(null)
 const source = ref<HTMLElement | null>(null)
-function scrollEvidence(anchor: SVGGraphicsElement): void {
+function scrollEvidence(anchor: SVGGraphicsElement, loaded: boolean): void {
+  if (loaded ? !playing.value : !pendingEvidence) return
+  if (!loaded) pendingEvidence = false
   const container = source.value
   if (!container) return
   const barHeight = container.querySelector('.source-bar')?.getBoundingClientRect().height ?? 0
@@ -118,6 +122,8 @@ const starsText = computed(() =>
 watch(episode, () => {
   flushComments()
   clock.value = null
+  playing.value = false
+  pendingEvidence = false
   player.value?.pause()
   audioFailed.value = false
   activePage.value = null
@@ -314,10 +320,12 @@ function toggle(index: number, reaction: LineReaction): void {
 function showCite(index: number, citeIndex: number, citation: SharedCitation): void {
   const page = citation.rects[0]?.page
   if (page == null || !pages.value.some(item => item.page === page)) {
+    pendingEvidence = false
     activeRects.value = []
     activeCite.value = ''
     return
   }
+  pendingEvidence = true
   activePage.value = page
   activeRects.value = [...citation.rects]
   activeCite.value = `${lineKey(index)}:${citeIndex}`
@@ -325,6 +333,7 @@ function showCite(index: number, citeIndex: number, citation: SharedCitation): v
 function stepPage(delta: number): void {
   const next = pages.value[pagePos.value + delta]
   if (!next) return
+  pendingEvidence = true
   activePage.value = next.page
 }
 function retry(): void {
@@ -332,6 +341,8 @@ function retry(): void {
   player.value?.load()
 }
 function onEnded(): void {
+  playing.value = false
+  pendingEvidence = false
   if (!writable.value) return
   endedOffer.value = true
   sheetSent.value = false

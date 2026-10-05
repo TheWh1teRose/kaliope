@@ -13,12 +13,14 @@ const props = defineProps<{
   page: number
 }>()
 
-const emit = defineEmits<{ (e: 'anchor', anchor: SVGGraphicsElement): void }>()
+const emit = defineEmits<{ (e: 'anchor', anchor: SVGGraphicsElement, loaded: boolean): void }>()
 const overlay = ref<SVGSVGElement | null>(null)
-async function locateAnchor(): Promise<void> {
+async function locateAnchor(loaded = false): Promise<void> {
+  const highlight = props.highlight
   await nextTick()
+  if (highlight !== props.highlight) return
   const anchor = overlay.value?.querySelector<SVGGraphicsElement>('.mark')
-  if (anchor) emit('anchor', anchor)
+  if (anchor) emit('anchor', anchor, loaded)
 }
 onMounted(() => { void locateAnchor() })
 watch(() => [props.highlight, props.page, props.url], () => { void locateAnchor() })
@@ -35,7 +37,7 @@ const crosshair = computed(() => {
 <template>
   <div class="canvas">
     <div class="frame" :style="{ aspectRatio: `${width || 595} / ${height || 842}` }">
-      <img :src="url" alt="" @load="locateAnchor" />
+      <img :src="url" alt="" @load="locateAnchor(true)" />
       <svg
         ref="overlay"
         class="overlay"
