@@ -546,16 +546,22 @@ def test_concurrent_feedback_creation(
     path = public_path(created) + "/feedback"
     owner.cookies.clear()
     if existing_writer:
-        assert owner.put(path + "/sheet", headers=_reviewer(), json={"label": "Reviewer"}).status_code == 200
+        assert (
+            owner.put(path + "/sheet", headers=_reviewer(), json={"label": "Reviewer"}).status_code
+            == 200
+        )
     payload = (
         {"episode": 1, "ordinal": 0, "reaction": "dislike"}
-        if endpoint == "marks" else {"stars": 3.5}
+        if endpoint == "marks"
+        else {"stars": 3.5}
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(
-            lambda _: owner.put(path + "/" + endpoint, headers=_reviewer(), json=payload),
-            range(2),
-        ))
+        responses = list(
+            pool.map(
+                lambda _: owner.put(path + "/" + endpoint, headers=_reviewer(), json=payload),
+                range(2),
+            )
+        )
     assert [response.status_code for response in responses] == [200, 200]
     saved = owner.get(path, headers=_reviewer()).json()
     if endpoint == "marks":
@@ -599,9 +605,7 @@ def test_sheet_half_stars_and_separate_browsers(
 def _login(owner: TestClient) -> None:
     with session_scope() as db:
         email = db.scalars(select(User.email).order_by(User.created_at.desc())).first()
-    logged_in = owner.post(
-        "/api/auth/login", json={"email": email, "password": "test-password"}
-    )
+    logged_in = owner.post("/api/auth/login", json={"email": email, "password": "test-password"})
     assert logged_in.status_code == 200
 
 
@@ -808,9 +812,7 @@ def test_cited_page_is_frozen_without_private_ids(owner: TestClient) -> None:
     assert private_id not in text
     segment = body.json()["episodes"][0]["segments"][0]
     assert segment["ordinal"] == 0
-    assert segment["citations"][0]["rects"][0] == {
-        "page": 0, "bbox": [10.0, 20.0, 80.0, 40.0]
-    }
+    assert segment["citations"][0]["rects"][0] == {"page": 0, "bbox": [10.0, 20.0, 80.0, 40.0]}
     page = body.json()["episodes"][0]["pages"][0]
     image = owner.get(page["url"])
     assert image.status_code == 200 and image.content.startswith(b"\x89PNG")

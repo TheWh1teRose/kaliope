@@ -55,7 +55,9 @@ def upgrade() -> None:
             "feedback_id", "episode_index", "ordinal", name="uq_review_feedback_mark"
         ),
     )
-    op.create_index("ix_review_feedback_marks_feedback_id", "review_feedback_marks", ["feedback_id"])
+    op.create_index(
+        "ix_review_feedback_marks_feedback_id", "review_feedback_marks", ["feedback_id"]
+    )
 
 
 def downgrade() -> None:
