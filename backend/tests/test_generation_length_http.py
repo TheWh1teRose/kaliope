@@ -32,8 +32,12 @@ from tests.test_script_context import PASSAGES, _block, _input
 
 @pytest.mark.parametrize(
     "cap, provider_cutoff, expected_status",
-    [(64_000, False, "failed"), (0, False, "completed"),
-     (0, True, "completed"), (64_000, True, "completed")],
+    [
+        (64_000, False, "failed"),
+        (0, False, "completed"),
+        (0, True, "completed"),
+        (64_000, True, "completed"),
+    ],
 )
 def test_episode_length_through_http(
     monkeypatch: pytest.MonkeyPatch,
@@ -68,15 +72,23 @@ def test_episode_length_through_http(
                 text = '{"segments": ['
             output_tokens = min(needed, payload.get("max_completion_tokens", needed))
             response = {
-                "id": f"local-{len(requests)}", "object": "chat.completion", "created": 0,
+                "id": f"local-{len(requests)}",
+                "object": "chat.completion",
+                "created": 0,
                 "model": payload["model"],
-                "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                             "finish_reason": "length" if stopped else "stop"}],
-                "usage": {"prompt_tokens": 200, "completion_tokens": output_tokens,
-                          "total_tokens": 200 + output_tokens,
-                          "completion_tokens_details": {
-                              "reasoning_tokens": max(0, output_tokens - 1000)
-                          }},
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": text},
+                        "finish_reason": "length" if stopped else "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 200,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": 200 + output_tokens,
+                    "completion_tokens_details": {"reasoning_tokens": max(0, output_tokens - 1000)},
+                },
             }
             body = json.dumps(response).encode()
             self.send_response(200)
@@ -110,22 +122,38 @@ def test_episode_length_through_http(
         with httpx.Client(base_url=f"http://127.0.0.1:{app_port}", timeout=15) as client:
             email = f"length-{cap}-{int(provider_cutoff)}@kalliope.test"
             with session_scope() as session:
-                session.add(User(email=email, name="Length test", role="admin",
-                                 password_hash=hash_password("local-test-password")))
-            login = client.post("/api/auth/login", json={"email": email,
-                                                        "password": "local-test-password"})
+                session.add(
+                    User(
+                        email=email,
+                        name="Length test",
+                        role="admin",
+                        password_hash=hash_password("local-test-password"),
+                    )
+                )
+            login = client.post(
+                "/api/auth/login", json={"email": email, "password": "local-test-password"}
+            )
             assert login.status_code == 200, login.text
 
             # Seed a parsed document with enough actual source words for the
             # content-budget floor; every generation node runs normally.
-            parsed = _input().parsed.model_copy(update={
-                "blocks": [_block(i, (passage + " ") * 12) for i, passage in enumerate(PASSAGES)]
-            })
+            parsed = _input().parsed.model_copy(
+                update={
+                    "blocks": [
+                        _block(i, (passage + " ") * 12) for i, passage in enumerate(PASSAGES)
+                    ]
+                }
+            )
             store = ArtifactStore(get_settings().artifacts_dir)
             digest = store.put("parsed", parsed).hash
             with session_scope() as session:
-                document = Document(filename="length.pdf", sha256=digest, parse_status="parsed",
-                                    parse_version=1, parsed_artifact_hash=digest)
+                document = Document(
+                    filename="length.pdf",
+                    sha256=digest,
+                    parse_status="parsed",
+                    parse_version=1,
+                    parsed_artifact_hash=digest,
+                )
                 session.add(document)
                 session.flush()
                 document_id = document.id
@@ -140,8 +168,15 @@ def test_episode_length_through_http(
             saved = client.put("/api/pipelines/baseline_v0", json=definition)
             assert saved.status_code == 200, saved.text
             try:
-                created = client.post("/api/runs", json={"document_id": document_id,
-                                      "flow_id": "baseline_v0", "target_minutes": 5, "force": True})
+                created = client.post(
+                    "/api/runs",
+                    json={
+                        "document_id": document_id,
+                        "flow_id": "baseline_v0",
+                        "target_minutes": 5,
+                        "force": True,
+                    },
+                )
                 assert created.status_code == 201, created.text
                 run_id = created.json()["id"]
                 deadline = time.monotonic() + 15

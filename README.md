@@ -340,9 +340,8 @@ specifications — speakers, register, target length, opening and closing guidan
 The script node's **App-Längenlimit ausschalten** switch saves `max_tokens: 0`
 to remove the app's output cap per beat. OpenAI requests omit the optional cap;
 providers requiring a cap use the model's catalogue limit. Model and context
-limits still apply: Sol 6.1 supports at most 128,000 output tokens, including
-reasoning ([model limits](https://developers.openai.com/api/docs/models/gpt-6.1-sol),
-[token accounting](https://developers.openai.com/api/docs/guides/token-counting)).
+limits still apply, including reasoning tokens; output limits come from the
+[model catalogue](backend/app/llm/registry.py).
 A length stop emits a progress warning that output may be incomplete; usable
 JSON is parsed as before. There is no automatic continuation. Existing numeric
 settings and saved revisions stay intact.

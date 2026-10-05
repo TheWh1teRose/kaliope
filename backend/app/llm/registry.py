@@ -8,7 +8,9 @@ request and records a warning rather than letting a node crash on a 400.
 
 An unknown model id is usable — the provider is inferred from its prefix and
 the cost is recorded as 0 with a loud warning — so that adding a model is a
-config change, not a code change.
+config change, not a code change. Providers requiring an output cap need an
+explicit positive ``max_tokens`` for unknown models, since no catalogue limit
+is available when the app cap is disabled.
 """
 
 from __future__ import annotations
