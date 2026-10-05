@@ -72,7 +72,14 @@ def reason_code_catalogue() -> list[dict[str, object]]:
 
 
 TargetType = Literal["segment", "selection", "outline", "block_zone"]
-EditAction = Literal["accept", "edit", "flag", "comment", "relabel", "undo", "tag", "untag"]
+EditAction = Literal[
+    "accept", "edit", "flag", "comment", "relabel", "undo", "tag", "untag", "react"
+]
+
+#: A line reaction in Redaktion. ``text_after`` is the mark, or empty to clear
+#: it. ``text_before`` is ``slop`` only after a negative mark. The comment, if
+#: any, is ``note``. Reactions toggle; they do not join the edit undo stack.
+REACTIONS = frozenset({"impressed", "dislike", "horrible"})
 
 #: Actions that record a reviewer judgement about *why* something was wrong.
 #: ``accept`` and ``comment`` carry no defect claim, so they need no code, and
@@ -116,6 +123,23 @@ class EditEventIn(BaseModel):
             raise ValueError(f"action '{self.action}' requires a tag in text_after")
         if self.action == "comment" and not (self.note or "").strip():
             raise ValueError("action 'comment' requires a non-empty note")
+        if self.action == "react":
+            reaction = (self.text_after or "").strip()
+            slop = (self.text_before or "").strip()
+            comment = (self.note or "").strip()
+            if reaction not in {"", *REACTIONS}:
+                raise ValueError("action 'react' requires a known reaction in text_after")
+            if slop not in {"", "slop"}:
+                raise ValueError("action 'react' records slop only as text_before='slop'")
+            if slop == "slop" and reaction not in {"dislike", "horrible"}:
+                raise ValueError("slop is only allowed on a negative reaction")
+            if len(comment) > 500:
+                raise ValueError("reaction comment is longer than 500 characters")
+            if not reaction and comment:
+                raise ValueError("a comment needs a reaction")
+            self.text_after = reaction
+            self.text_before = slop
+            self.note = comment or None
         return self
 
 

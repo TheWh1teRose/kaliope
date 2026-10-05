@@ -78,6 +78,38 @@ def test_bearer_path_routes_intact_but_uvicorn_access_log_is_redacted(prefix: st
     assert headers[b"referrer-policy"] == b"no-referrer"
 
 
+def test_reviewer_key_stays_out_of_the_logged_scope() -> None:
+    token = "b" * 43
+    secret = "c" * 64
+    path = f"/api/public/review-links/{token}/feedback/marks"
+    scope: Scope = {
+        "type": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(b"x-reviewer-key", secret.encode()), (b"content-type", b"application/json")],
+    }
+
+    async def app(routed: Scope, receive: Receive, send: Send) -> None:
+        routed_headers = dict(routed["headers"])
+        assert routed_headers[b"x-reviewer-key"] == secret.encode()
+        assert routed["path"] == path
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b'{"comment":"nicht loggen"}'}
+
+    async def send(message: Message) -> None:
+        del message
+
+    asyncio.run(SharingPrivacyMiddleware(app)(scope, receive, send))
+    logged = get_path_with_query_string(scope)
+    logged_headers = dict(scope["headers"])
+    assert token not in logged
+    assert secret.encode() not in logged_headers.values()
+    assert b"nicht loggen" not in logged.encode()
+
+
 def test_review_link_migration_preserves_existing_data_and_enforces_single_active(
     tmp_path: Path,
 ) -> None:

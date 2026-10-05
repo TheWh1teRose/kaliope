@@ -674,6 +674,76 @@ def test_undo_takes_back_one_review_action_at_a_time(
     assert "Umformuliert." not in signed_in.get(f"/api/runs/{run_id}/export").text
 
 
+def test_line_reaction_toggles_without_taking_back_an_edit(
+    signed_in: TestClient, reviewed_run: tuple[str, str]
+) -> None:
+    _, run_id = reviewed_run
+    script = signed_in.get(f"/api/runs/{run_id}/script").json()
+    segment = script["segments"][0]
+    original = segment["text"]
+
+    def state() -> dict[str, object]:
+        body = signed_in.get(f"/api/runs/{run_id}/script").json()
+        return next(item for item in body["segments"] if item["id"] == segment["id"])
+
+    signed_in.post(
+        f"/api/runs/{run_id}/review/events",
+        json={
+            "target_type": "segment",
+            "target_id": segment["id"],
+            "action": "edit",
+            "reason_code": "CLUMSY_LANGUAGE",
+            "text_after": "Kürzer.",
+        },
+    )
+    marked = signed_in.post(
+        f"/api/runs/{run_id}/review/events",
+        json={
+            "target_type": "segment",
+            "target_id": segment["id"],
+            "action": "react",
+            "text_after": "dislike",
+            "text_before": "slop",
+            "note": "hohl",
+        },
+    )
+    assert marked.status_code == 201
+    assert (
+        signed_in.post(
+            f"/api/runs/{run_id}/review/events",
+            json={
+                "target_type": "segment",
+                "target_id": segment["id"],
+                "action": "react",
+                "text_after": "impressed",
+                "text_before": "slop",
+            },
+        ).status_code
+        == 422
+    )
+    after = state()
+    assert after["reaction"] == "dislike" and after["slop"] is True
+    assert after["reaction_comment"] == "hohl"
+    assert after["text"] == "Kürzer." and after["edited"] is True
+    signed_in.post(
+        f"/api/runs/{run_id}/review/events",
+        json={"target_type": "segment", "target_id": segment["id"], "action": "undo"},
+    )
+    undone = state()
+    assert undone["edited"] is False and undone["text"] == original
+    assert undone["reaction"] == "dislike"
+    signed_in.post(
+        f"/api/runs/{run_id}/review/events",
+        json={
+            "target_type": "segment",
+            "target_id": segment["id"],
+            "action": "react",
+            "text_after": "",
+        },
+    )
+    assert state()["reaction"] is None and state()["slop"] is False
+
+
 def test_segments_carry_their_tags_and_comments(
     signed_in: TestClient, reviewed_run: tuple[str, str]
 ) -> None:

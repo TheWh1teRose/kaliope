@@ -96,15 +96,18 @@ describe('link-only reader through real app routing', () => {
     release()
     await router.isReady()
     await flushPromises()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/public/review-links/token')
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/api/public/review-links/token/feedback',
+    )
     expect(wrapper.find('.rail').exists()).toBe(false)
   })
   it.each([false, true])(
     'skips private bootstrap and chrome (signed in %s)',
     async (signedIn) => {
       const { wrapper } = await reader('/r/token', signedIn)
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
       expect(fetchMock).toHaveBeenCalledWith('/api/public/review-links/token', {
         credentials: 'omit',
         cache: 'no-store',
@@ -134,7 +137,7 @@ describe('link-only reader through real app routing', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Third script')
     expect(wrapper.find('audio').exists()).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
   it('opens a series deep link and falls back for an invalid ordinal', async () => {
     const { wrapper, router } = await reader('/r/token?episode=2')
@@ -192,5 +195,77 @@ describe('link-only reader through real app routing', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Kein Skript verfügbar')
     expect(wrapper.find('audio').exists()).toBe(false)
+  })
+  it('toggles a line mark and offers the sheet when the last recording ends', async () => {
+    const marks: {
+      episode: number
+      ordinal: number
+      reaction: string
+      slop: boolean
+      comment: string | null
+    }[] = []
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const target = String(url)
+      if (target.endsWith('/feedback/marks')) {
+        const body = JSON.parse(String(init?.body))
+        marks.splice(0, marks.length)
+        if (body.reaction) marks.push(body)
+        return new Response(
+          JSON.stringify({
+            label: null,
+            stars: null,
+            worked: null,
+            did_not: null,
+            marks,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (target.endsWith('/feedback')) {
+        return new Response(
+          JSON.stringify({
+            label: null,
+            stars: null,
+            worked: null,
+            did_not: null,
+            marks,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response(JSON.stringify(snapshot), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    const { wrapper } = await reader('/r/token?episode=1')
+    const impressed = wrapper
+      .findAll('button')
+      .find((button) => button.attributes('aria-label') === 'Beeindruckt')!
+    await impressed.trigger('click')
+    await flushPromises()
+    expect(marks[0]?.reaction).toBe('impressed')
+    expect(impressed.attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('.segment textarea').exists()).toBe(true)
+    expect(
+      wrapper.findAll('button').some((button) => button.text() === 'Klingt nach KI-Slop'),
+    ).toBe(false)
+    await impressed.trigger('click')
+    await flushPromises()
+    expect(marks).toEqual([])
+    await wrapper.find('audio').trigger('ended')
+    expect(document.body.textContent).not.toContain(
+      'Das zeigt nicht, dass jemand zugehört hat',
+    )
+    await wrapper.findAll('.reading footer button')[1].trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.reading footer button')[1].trigger('click')
+    await flushPromises()
+    await wrapper.find('audio').trigger('ended')
+    await flushPromises()
+    expect(document.body.textContent).toContain(
+      'Das zeigt nicht, dass jemand zugehört hat',
+    )
+    expect(wrapper.find('.segment textarea').exists()).toBe(false)
   })
 })

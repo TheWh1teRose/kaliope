@@ -222,11 +222,34 @@ Sharing an episode without audio requires an explicit
 acknowledgement; it remains script-only even if audio is generated later.
 
 The link opens a separate reader without a login, for both signed-out and
-signed-in visitors. It exposes only the chosen titles, speaker/text segments,
-creation/expiry dates and the selected audio. Source documents, citations,
-workspace identifiers, voice settings, edit history and private review state
-are not included. Opening it does not start a review session or change a run's
-status. Comments and richer review workflows are deferred.
+signed-in visitors. It exposes the chosen titles, speaker/text segments,
+creation/expiry dates, the selected audio, and only the source pages a shared
+line actually cites. Those pages are frozen as images with the snapshot, and a
+citation highlights that passage. Workspace identifiers, voice settings, edit
+history and the internal review session are not included. Opening the page
+does not start a review session or change a run's status. The public page
+cannot edit the script.
+
+On each line the reviewer can mark 👍 impressed, 🤢 not good, or 🤮 horrible.
+The same mark again clears it. A comment is optional and only on a marked
+line. After 🤢 or 🤮, an optional “Klingt nach KI-Slop” tag can be added;
+dislike and suspected AI slop stay separate, and nothing classifies slop
+automatically. A short questionnaire is always available and is offered again
+when playback of the last episode that has audio ends: optional stars in half
+steps, what worked, and what did not. Playback ending is not evidence that
+someone listened. The reviewer is remembered in that browser by an unguessable
+key sent as a header, with an optional short label, and does not need an
+account. The server stores only the key's SHA-256. Feedback is bound to that
+link and its frozen snapshot, addressed by a share-local line ordinal.
+Replacing the link does not carry marks onto the new text. Writes use the same
+expiry and revocation check as reads. The owner summary on the share screen
+lists reactions, slop tags, stars, answers and marked lines.
+
+In Redaktion, the same three emoji replace Übernehmen, Markieren and
+Schlagwörter. Bearbeiten, Kommentieren and undo stay. The public page does not
+load third-party scripts. Comment text is not written beside the bearer token
+in the application's access log; the reviewer key header is removed from that
+log as well.
 
 Each link is a frozen snapshot: when choosing audio, its original recorded
 source script is captured together with the exact mix. An older recording is

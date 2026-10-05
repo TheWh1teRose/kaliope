@@ -12,7 +12,7 @@ import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -56,6 +56,9 @@ class SegmentState:
     history: list[EditEvent] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     comments: list[EditEvent] = field(default_factory=list)
+    reaction: Literal["impressed", "dislike", "horrible"] | None = None
+    slop: bool = False
+    reaction_comment: str | None = None
 
     @property
     def accepted(self) -> bool:
@@ -113,6 +116,26 @@ def segment_states(db: Session, run_id: str) -> dict[str, SegmentState]:
                 state.tags.remove(tag)
         elif event.action == "comment":
             state.comments.append(event)
+        elif event.action == "react":
+            reaction = (event.text_after or "").strip()
+            comment = (event.note or "").strip() or None
+            slop = (event.text_before or "") == "slop"
+            if reaction == "impressed":
+                state.reaction = "impressed"
+                state.slop = False
+                state.reaction_comment = comment
+            elif reaction == "dislike":
+                state.reaction = "dislike"
+                state.slop = slop
+                state.reaction_comment = comment
+            elif reaction == "horrible":
+                state.reaction = "horrible"
+                state.slop = slop
+                state.reaction_comment = comment
+            else:
+                state.reaction = None
+                state.slop = False
+                state.reaction_comment = None
     return states
 
 

@@ -368,6 +368,72 @@ const statusLabel = t.sharing.status
                 })
               }}
             </p>
+            <div v-if="link.feedback" class="feedback">
+              <p class="eyebrow">{{ t.sharing.ownerFeedback }}</p>
+              <p v-if="!link.feedback.responses.length" class="meta">
+                {{ t.sharing.noFeedback }}
+              </p>
+              <template v-else>
+                <p class="meta">
+                  👍 {{ link.feedback.impressed }} · 🤢 {{ link.feedback.dislike }} · 🤮
+                  {{ link.feedback.horrible }} · {{ t.sharing.slopCount }}
+                  {{ link.feedback.slop }}
+                </p>
+                <article
+                  v-for="response in link.feedback.responses"
+                  :key="response.index"
+                  class="response"
+                >
+                  <p>
+                    <b>{{
+                      fill(t.sharing.responseLabel, { n: response.index })
+                    }}</b>
+                    <span v-if="response.label">
+                      · {{ response.label }}
+                      <span class="meta">({{ t.sharing.unverified }})</span>
+                    </span>
+                  </p>
+                  <p v-if="response.stars != null" class="meta">
+                    {{
+                      fill(t.sharing.starsValue, {
+                        n: response.stars.toLocaleString('de-DE'),
+                      })
+                    }}
+                  </p>
+                  <p v-if="response.worked" class="meta">
+                    {{ t.sharing.worked }} {{ response.worked }}
+                  </p>
+                  <p v-if="response.did_not" class="meta">
+                    {{ t.sharing.didNot }} {{ response.did_not }}
+                  </p>
+                </article>
+                <div v-if="link.feedback.lines.length">
+                  <p class="eyebrow">{{ t.sharing.markedLines }}</p>
+                  <article
+                    v-for="line in link.feedback.lines"
+                    :key="`${line.response}-${line.key}`"
+                    class="marked"
+                  >
+                    <p class="meta">
+                      {{ line.key }} ·
+                      {{
+                        line.reaction === 'impressed'
+                          ? '👍'
+                          : line.reaction === 'dislike'
+                            ? '🤢'
+                            : '🤮'
+                      }}
+                      <span v-if="line.slop">· {{ t.sharing.slop }}</span>
+                      · {{ fill(t.sharing.responseLabel, { n: line.response }) }}
+                    </p>
+                    <p v-if="line.speaker || line.text">
+                      <b>{{ line.speaker }}</b> {{ line.text }}
+                    </p>
+                    <p v-if="line.comment" class="meta">{{ line.comment }}</p>
+                  </article>
+                </div>
+              </template>
+            </div>
           </div>
           <button
             v-if="link.status === 'active'"
@@ -452,7 +518,7 @@ const statusLabel = t.sharing.status
 }
 .link-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--s3);
   padding: var(--s3) 0;
@@ -462,5 +528,15 @@ const statusLabel = t.sharing.status
 .link-row .meta {
   overflow-wrap: anywhere;
   margin-top: var(--s2);
+}
+.feedback,
+.response,
+.marked {
+  margin-top: var(--s3);
+}
+.response p,
+.marked p {
+  margin: 0 0 var(--s2);
+  overflow-wrap: anywhere;
 }
 </style>

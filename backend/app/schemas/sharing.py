@@ -7,9 +7,29 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class ReaderRect(BaseModel):
+    page: int
+    bbox: tuple[float, float, float, float]
+
+
+class ReaderCitation(BaseModel):
+    """A highlight on a frozen page. No workspace block id."""
+
+    rects: list[ReaderRect] = Field(default_factory=list)
+
+
 class ReaderSegment(BaseModel):
+    ordinal: int = 0
     speaker: str
     text: str
+    citations: list[ReaderCitation] = Field(default_factory=list)
+
+
+class ReaderPage(BaseModel):
+    page: int
+    width: float
+    height: float
+    url: str
 
 
 class ReaderAudio(BaseModel):
@@ -22,6 +42,7 @@ class ReaderEpisode(BaseModel):
     title: str
     segments: list[ReaderSegment]
     audio: ReaderAudio | None = None
+    pages: list[ReaderPage] = Field(default_factory=list)
 
 
 class ReaderSnapshot(BaseModel):
@@ -48,11 +69,78 @@ class CreateShare(ShareSelection):
     replace_link_id: str | None = None
 
 
+ReactionName = Literal["impressed", "dislike", "horrible"]
+
+
+class MarkIn(BaseModel):
+    episode: int
+    ordinal: int = Field(ge=0)
+    reaction: ReactionName | None = None
+    slop: bool = False
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class MarkState(BaseModel):
+    episode: int
+    ordinal: int
+    reaction: ReactionName
+    slop: bool = False
+    comment: str | None = None
+
+
+class FeedbackState(BaseModel):
+    label: str | None = None
+    stars: float | None = None
+    worked: str | None = None
+    did_not: str | None = None
+    marks: list[MarkState] = Field(default_factory=list)
+
+
+class SheetIn(BaseModel):
+    label: str | None = Field(default=None, max_length=40)
+    stars: float | None = None
+    worked: str | None = Field(default=None, max_length=2000)
+    did_not: str | None = Field(default=None, max_length=2000)
+
+
+class MarkedLine(BaseModel):
+    response: int
+    label: str | None = None
+    key: str
+    speaker: str
+    text: str
+    reaction: ReactionName
+    slop: bool
+    comment: str | None = None
+
+
+class ResponseSummary(BaseModel):
+    index: int
+    label: str | None = None
+    stars: float | None = None
+    worked: str | None = None
+    did_not: str | None = None
+    impressed: int = 0
+    dislike: int = 0
+    horrible: int = 0
+    slop: int = 0
+
+
+class FeedbackSummary(BaseModel):
+    responses: list[ResponseSummary] = Field(default_factory=list)
+    impressed: int = 0
+    dislike: int = 0
+    horrible: int = 0
+    slop: int = 0
+    lines: list[MarkedLine] = Field(default_factory=list)
+
+
 class LinkMetadata(BaseModel):
     id: str
     created_at: str
     expires_at: str
     status: Literal["active", "expired", "revoked"]
+    feedback: FeedbackSummary = Field(default_factory=FeedbackSummary)
 
 
 class OwnerLinks(BaseModel):
