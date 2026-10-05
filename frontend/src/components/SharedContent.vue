@@ -35,6 +35,7 @@ interface LocalMark {
   comment: string
 }
 const marks = ref<Record<string, LocalMark>>({})
+const commentDraft = ref<Record<string, string>>({})
 const player = ref<HTMLAudioElement | null>(null)
 const audioFailed = ref(false)
 const saveError = ref('')
@@ -43,7 +44,7 @@ const sheetOpen = ref(false)
 const endedOffer = ref(false)
 const sheetSent = ref(false)
 const sheetBusy = ref(false)
-const label = ref('')
+const label = ref(rememberedLabel())
 const stars = ref<number | null>(null)
 const worked = ref('')
 const didNot = ref('')
@@ -93,6 +94,12 @@ function lineKey(index: number): string {
   const ordinal = current.segments[index]?.ordinal ?? index
   return `${current.index}:${ordinal}`
 }
+function commentAt(index: number): string {
+  return commentDraft.value[lineKey(index)] ?? markAt(index).comment
+}
+function draftComment(index: number, value: string): void {
+  commentDraft.value = { ...commentDraft.value, [lineKey(index)]: value }
+}
 function ordinalOf(index: number): number {
   return episode.value?.segments[index]?.ordinal ?? index
 }
@@ -114,7 +121,7 @@ function draft() {
   return { label: label.value, stars: stars.value, worked: worked.value, didNot: didNot.value }
 }
 function applySheet(data: FeedbackState, before: ReturnType<typeof draft>): void {
-  if (label.value === before.label) label.value = data.label ?? rememberedLabel()
+  if (label.value === before.label) label.value = data.label ?? ''
   if (stars.value === before.stars) stars.value = data.stars
   if (worked.value === before.worked) worked.value = data.worked ?? ''
   if (didNot.value === before.didNot) didNot.value = data.did_not ?? ''
@@ -140,9 +147,9 @@ async function loadFeedback(): Promise<void> {
     if (props.token !== token) return
     confirmed = stateMarks(data)
     if (version === markVersion) marks.value = { ...confirmed }
-    applySheet(data, before)
+    applySheet({ ...data, label: data.label ?? rememberedLabel() }, before)
   } catch {
-    label.value = label.value || rememberedLabel()
+    return
   }
 }
 async function persist(index: number, next: LocalMark): Promise<void> {
@@ -153,6 +160,12 @@ async function persist(index: number, next: LocalMark): Promise<void> {
   const ordinal = ordinalOf(index)
   const version = ++markVersion
   versions[id] = version
+  const previousDraft = commentDraft.value[id]
+  if (!next.reaction) {
+    const drafts = { ...commentDraft.value }
+    delete drafts[id]
+    commentDraft.value = drafts
+  }
   marks.value = { ...marks.value, [id]: next }
   saveError.value = ''
   try {
@@ -174,6 +187,9 @@ async function persist(index: number, next: LocalMark): Promise<void> {
     marks.value = copy
   } catch {
     if (props.token !== token || versions[id] !== version) return
+    if (previousDraft !== undefined && commentDraft.value[id] === undefined) {
+      commentDraft.value = { ...commentDraft.value, [id]: previousDraft }
+    }
     const previous = confirmed[id]
     if (previous) marks.value = { ...marks.value, [id]: previous }
     else {
@@ -191,13 +207,13 @@ function toggle(index: number, reaction: LineReaction): void {
   void persist(index, {
     reaction: next,
     slop: next === 'dislike' || next === 'horrible' ? current.slop : false,
-    comment: next ? current.comment : '',
+    comment: next ? commentAt(index) : '',
   })
 }
 function toggleSlop(index: number): void {
   const current = markAt(index)
   if (current.reaction !== 'dislike' && current.reaction !== 'horrible') return
-  void persist(index, { ...current, slop: !current.slop })
+  void persist(index, { ...current, slop: !current.slop, comment: commentAt(index) })
 }
 function saveComment(index: number, value: string): void {
   const current = markAt(index)
@@ -420,7 +436,8 @@ async function sendSheet(): Promise<void> {
                     class="textarea"
                     rows="2"
                     maxlength="500"
-                    :value="markAt(index).comment"
+                    :value="commentAt(index)"
+                    @input="draftComment(index, ($event.target as HTMLTextAreaElement).value)"
                     :disabled="!writable"
                     @change="saveComment(index, ($event.target as HTMLTextAreaElement).value)"
                   />

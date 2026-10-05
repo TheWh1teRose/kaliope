@@ -104,6 +104,15 @@ function showAnchor(segmentId: string, anchor: AnchorOut): void {
   activeAnchor.value = anchor
 }
 
+function draftReactionComment(segmentId: string, value: string): void {
+  commentDraft.value = { ...commentDraft.value, [segmentId]: value }
+}
+function reconcileClearedComment(segmentId: string, before: string | undefined): void {
+  if (segmentOf(segmentId)?.reaction || commentDraft.value[segmentId] !== before) return
+  const drafts = { ...commentDraft.value }
+  delete drafts[segmentId]
+  commentDraft.value = drafts
+}
 let reactionWrites: Promise<void> = Promise.resolve()
 function orderedReaction(operation: () => Promise<void>): Promise<void> {
   const result = reactionWrites.then(operation)
@@ -122,6 +131,7 @@ async function recordReaction(
 ): Promise<void> {
   const segment = segmentOf(segmentId)
   if (!segment) return
+  const before = commentDraft.value[segmentId]
   const next = segment.reaction === reaction ? '' : reaction
   const slop =
     (next === 'dislike' || next === 'horrible') && segment.slop ? 'slop' : ''
@@ -133,9 +143,10 @@ async function recordReaction(
       action: 'react',
       text_after: next,
       text_before: slop,
-      note: next ? commentDraft.value[segmentId] ?? segment.reaction_comment ?? null : null,
+      note: next ? before ?? segment.reaction_comment ?? null : null,
     })
     syncFromStore()
+    reconcileClearedComment(segmentId, before)
   } finally {
     busy.value = false
   }
@@ -161,7 +172,7 @@ async function recordSlop(segmentId: string): Promise<void> {
 }
 
 function saveReactionComment(segmentId: string, value: string): void {
-  commentDraft.value = { ...commentDraft.value, [segmentId]: value }
+  draftReactionComment(segmentId, value)
   void orderedReaction(async () => {
     const segment = segmentOf(segmentId)
     if (!segment?.reaction) return
@@ -188,10 +199,12 @@ function undo(segmentId: string): Promise<void> {
   return orderedReaction(() => recordUndo(segmentId))
 }
 async function recordUndo(segmentId: string): Promise<void> {
+  const before = commentDraft.value[segmentId]
   busy.value = true
   try {
     await review.undo(props.id, segmentId)
     syncFromStore()
+    reconcileClearedComment(segmentId, before)
   } finally {
     busy.value = false
   }
@@ -414,6 +427,7 @@ onMounted(async () => {
                   rows="2"
                   maxlength="500"
                   :value="commentDraft[segment.id] ?? segment.reaction_comment ?? ''"
+                  @input="draftReactionComment(segment.id, ($event.target as HTMLTextAreaElement).value)"
                   @change="
                     saveReactionComment(segment.id, ($event.target as HTMLTextAreaElement).value)
                   "
