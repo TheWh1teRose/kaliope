@@ -8,7 +8,9 @@ request and records a warning rather than letting a node crash on a 400.
 
 An unknown model id is usable — the provider is inferred from its prefix and
 the cost is recorded as 0 with a loud warning — so that adding a model is a
-config change, not a code change.
+config change, not a code change. Providers requiring an output cap need an
+explicit positive ``max_tokens`` for unknown models, since no catalogue limit
+is available when the app cap is disabled.
 """
 
 from __future__ import annotations
@@ -464,6 +466,12 @@ def cost_usd(model_id: str, usage: Usage) -> float:
 
 def max_output_for(model_id: str, requested: int) -> int:
     spec = MODELS.get(model_id)
+    if requested == 0:
+        if spec is None:
+            raise LLMError(
+                f"no documented output limit for '{model_id}'; set max_tokens explicitly"
+            )
+        return spec.max_output_tokens
     if spec is None:
         return requested
     return min(requested, spec.max_output_tokens)

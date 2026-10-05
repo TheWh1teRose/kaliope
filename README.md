@@ -367,6 +367,15 @@ parameters, and the **system prompt of each generation node**. Format
 specifications — speakers, register, target length, opening and closing guidance
 — are edited the same way.
 
+The script node's **App-Längenlimit ausschalten** switch saves `max_tokens: 0`
+to remove the app's output cap per beat. OpenAI requests omit the optional cap;
+providers requiring a cap use the model's catalogue limit. Model and context
+limits still apply, including reasoning tokens; output limits come from the
+[model catalogue](backend/app/llm/registry.py).
+A length stop emits a progress warning that output may be incomplete; usable
+JSON is parsed as before. There is no automatic continuation. Existing numeric
+settings and saved revisions stay intact.
+
 Every save appends a **revision**; nothing is ever overwritten, and restoring an
 old revision writes a new one carrying the old content. A run records the flow
 revision it used, so a script from last month stays explainable. Archiving takes

@@ -8,7 +8,7 @@
  * definition at all — that is what keeps the artifact cache valid across a save
  * that changed nothing.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { NodeParam } from '@/api/types'
 import { t } from '@/i18n'
@@ -35,6 +35,18 @@ const defaultText = computed(() =>
 const text = computed(() => (isSet.value ? String(props.value) : ''))
 
 const checked = computed(() => (isSet.value ? Boolean(props.value) : Boolean(props.param.default)))
+const canDisableCap = computed(() => props.param.key === 'max_tokens' && props.param.minimum === 0)
+const capDisabled = computed(() => canDisableCap.value && props.value === 0)
+const previousCap = ref<number | null>(null)
+
+function onCapToggle(event: Event): void {
+  if ((event.target as HTMLInputElement).checked) {
+    previousCap.value = typeof props.value === 'number' && props.value > 0 ? props.value : null
+    emit('update', 0)
+  } else {
+    emit('update', previousCap.value ?? props.param.default)
+  }
+}
 
 function onText(event: Event): void {
   emit('update', (event.target as HTMLInputElement | HTMLTextAreaElement).value)
@@ -67,6 +79,12 @@ function reset(): void {
     </div>
 
     <p v-if="param.description" class="param__hint">{{ param.description }}</p>
+
+    <label v-if="canDisableCap" class="switch">
+      <input type="checkbox" :checked="capDisabled" data-disable-cap @change="onCapToggle" />
+      <span>{{ t.modelSettings.disableOutputCap }}</span>
+    </label>
+    <p v-if="canDisableCap" class="param__hint">{{ t.modelSettings.providerLimitHint }}</p>
 
     <textarea
       v-if="param.type === 'prompt'"
@@ -123,6 +141,7 @@ function reset(): void {
       :step="param.type === 'int' ? 1 : 0.05"
       :min="param.minimum ?? undefined"
       :max="param.maximum ?? undefined"
+      :disabled="capDisabled"
       :value="text"
       :placeholder="defaultText"
       @input="onNumber"

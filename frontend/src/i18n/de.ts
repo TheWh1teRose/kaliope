@@ -1133,6 +1133,9 @@ export default {
     audioSummary: '{lines} Zeilen · {tags} Tags · {fallbacks} ohne Tags',
   },
   modelSettings: {
+    disableOutputCap: 'App-Längenlimit ausschalten',
+    providerLimitHint:
+      'Das Modelllimit gilt weiter, auch für Denk-Tokens. Antworten können am Modelllimit weiterhin abgeschnitten werden.',
     provider: 'Anbieter',
     model: 'Modell',
     price: 'Preis',

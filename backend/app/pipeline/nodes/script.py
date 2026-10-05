@@ -135,7 +135,7 @@ class ScriptInput(BaseModel):
 class ScriptNode:
     name = "script"
     title = "Skript schreiben"
-    version = "2.0"
+    version = "2.1"
     Input: type[BaseModel] = ScriptInput
     Output: type[BaseModel] = Script
     produces = "script"
@@ -227,8 +227,12 @@ class ScriptNode:
             label="Max output tokens per beat",
             type="int",
             default=8000,
-            minimum=1000,
+            minimum=0,
             maximum=64000,
+            description=(
+                "0 disables the app's output cap. Provider limits still apply, including "
+                "reasoning tokens. Output may still be cut off at the provider limit."
+            ),
             advanced=True,
         ),
     ]
@@ -314,7 +318,7 @@ class ScriptNode:
         blocks = {b.id: b for b in inp.parsed.blocks}
         speaker_names = inp.format_spec.speaker_names()
         content, breaks = _beat_message(inp, position, beat_blocks, written)
-        data = ctx.llm.complete(
+        completion = ctx.llm.complete(
             CompletionRequest(
                 model=model,
                 system=str(ctx.get("system_prompt") or _SYSTEM),
@@ -325,7 +329,13 @@ class ScriptNode:
                 json_schema=_SCHEMA,
                 cache_system=True,
             )
-        ).json_payload()
+        )
+        if completion.stop_reason in {"max_tokens", "length", "MAX_TOKENS"}:
+            ctx.progress(
+                f"model response was cut off for beat '{beat.id}' (output token limit, "
+                "including reasoning); parsed output may be incomplete"
+            )
+        data = completion.json_payload()
 
         segments: list[Segment] = []
         unlocated = 0

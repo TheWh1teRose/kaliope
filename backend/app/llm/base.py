@@ -49,7 +49,8 @@ class CompletionRequest(BaseModel):
     model: str
     messages: list[Message]
     system: str | None = None
-    max_tokens: int = 8192
+    #: Zero removes the app cap; provider/model limits still apply.
+    max_tokens: int = Field(default=8192, ge=0)
     #: Requested sampling temperature. Dropped, with a warning, for models whose
     #: API rejects sampling parameters (§ registry ``supports_sampling``).
     temperature: float | None = None
