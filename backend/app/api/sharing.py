@@ -74,11 +74,14 @@ def _mutation(request: Request, user: User = Depends(require_admin)) -> User:
     site = request.headers.get("sec-fetch-site")
     own = urlsplit(str(request.base_url))
     allowed = f"{own.scheme}://{own.netloc}"
-    # Vite's dev proxy rewrites Host to the API (changeOrigin) and forwards the
-    # page Origin. The browser still marks that fetch same-origin. A foreign
-    # Origin, and any cross-site fetch, stay refused.
+    configured = get_settings().review_public_origin
+    # The dev proxy rewrites Host and forwards the page Origin. A deployed
+    # service can likewise report an internal base while the browser sends the
+    # configured public origin. A foreign Origin, and any cross-site fetch, stay refused.
     proxied_page = site == "same-origin" and bool(origin) and _loopback_origin(origin)
-    if site == "cross-site" or (origin and origin != allowed and not proxied_page):
+    public_page = bool(configured) and origin == configured
+    mismatched = bool(origin) and origin != allowed and not proxied_page and not public_page
+    if site == "cross-site" or mismatched:
         raise problem(403, "Forbidden", "Use the application to manage review links.")
     return user
 

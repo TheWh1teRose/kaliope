@@ -305,6 +305,57 @@ def test_proxied_application_can_preview_create_and_revoke(
     assert owner.get(base).json()["links"][0]["status"] == "revoked"
 
 
+def test_configured_public_origin_is_accepted_when_the_service_host_differs(
+    owner: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The browser sends REVIEW_PUBLIC_ORIGIN while the service reports another base."""
+    rid = run()
+    base = f"/api/runs/{rid}/review-link"
+    public = {
+        "Host": "127.0.0.1:8000",
+        "Origin": "https://review.example.test",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    preview = owner.post(base + "/preview", json=choice(), headers=public)
+    assert preview.status_code == 200, preview.text
+    created = owner.post(
+        base, json={**choice(), "preview_key": preview.json()["key"]}, headers=public
+    )
+    assert created.status_code == 201, created.text
+    revoked = owner.delete("/api/review-links/" + created.json()["link"]["id"], headers=public)
+    assert revoked.status_code == 204
+    assert owner.get(base).json()["links"][0]["status"] == "revoked"
+
+    monkeypatch.setattr(get_settings(), "review_public_origin", "")
+    refused = owner.post(base + "/preview", json=choice(), headers=public)
+    assert refused.status_code == 403
+    assert refused.json()["detail"] == "Use the application to manage review links."
+    still = owner.post(base + "/preview", json=choice())
+    assert still.status_code == 200, still.text
+    blocked = owner.post(base, json={**choice(), "preview_key": still.json()["key"]})
+    assert blocked.status_code == 409
+    assert (
+        blocked.json()["detail"]
+        == "Eine geprüfte öffentliche HTTPS-Adresse muss zuerst konfiguriert werden."
+    )
+
+    monkeypatch.setattr(get_settings(), "review_public_origin", "https://review.example.test")
+    foreign = owner.post(
+        base + "/preview",
+        json=choice(),
+        headers={**public, "Origin": "https://evil.test"},
+    )
+    assert foreign.status_code == 403
+    assert foreign.json()["detail"] == "Use the application to manage review links."
+    cross_site = owner.post(
+        base + "/preview",
+        json=choice(),
+        headers={**public, "Sec-Fetch-Site": "cross-site"},
+    )
+    assert cross_site.status_code == 403
+    assert cross_site.json()["detail"] == "Use the application to manage review links."
+
+
 def test_shared_address_accepts_its_own_origin_and_refuses_other_sites(owner: TestClient) -> None:
     rid = run()
     url = f"/api/runs/{rid}/review-link/preview"
