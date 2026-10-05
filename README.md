@@ -249,9 +249,15 @@ or revocation removes access, not stored files.
 
 Creation is disabled until `REVIEW_PUBLIC_ORIGIN` is configured as the reviewed
 external HTTPS origin, with no credentials, path, query or fragment. Preview,
-status and revocation remain available without it. This is a release decision:
-the configured address must reach this application's reader, public metadata
-and token-scoped media endpoints without an ingress-level login. The existing
+status and revocation remain available without it. Owner preview, creation and
+revocation accept the configured public origin even when a proxy makes the API
+report a different base address. Local development proxies also accept HTTP(S)
+origins on `localhost`, `127.0.0.1` or `::1` when `Sec-Fetch-Site` is `same-origin`.
+Other origins must match the API's base origin; `Sec-Fetch-Site: cross-site` is
+always refused. These checks do not replace owner authentication.
+This is a release decision: the configured address must reach this application's
+reader, public metadata and token-scoped media endpoints without an ingress-level
+login. The existing
 deployment workflow assumes unauthenticated Cloud Run requests; that assumption
 does not verify actual ingress/IAM or establish a canonical production URL.
 Setting this variable alone cannot make a private/local service reachable. Keep
