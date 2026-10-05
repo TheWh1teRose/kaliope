@@ -55,6 +55,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup.forEach((fn) => fn())
   cleanup = []
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -197,6 +198,7 @@ describe('link-only reader through real app routing', () => {
     expect(wrapper.find('audio').exists()).toBe(false)
   })
   it('toggles a line mark and offers the sheet when every recording ends', async () => {
+    vi.useFakeTimers()
     const marks: {
       episode: number
       ordinal: number
@@ -250,6 +252,9 @@ describe('link-only reader through real app routing', () => {
     await wrapper.find('.comment-toggle').trigger('click')
     await wrapper.find('.segment textarea').setValue('Independent comment')
     await flushPromises()
+    expect(marks[0]?.comment).toBeNull()
+    await vi.advanceTimersByTimeAsync(1100)
+    await flushPromises()
     expect(marks[0]?.comment).toBe('Independent comment')
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/feedback/sheet'))).toBe(false)
     const returned = await reader('/r/token?episode=1')
@@ -261,6 +266,10 @@ describe('link-only reader through real app routing', () => {
       wrapper.findAll('button').some((button) => button.text() === 'Klingt nach KI-Slop'),
     ).toBe(false)
     await impressed.trigger('click')
+    await flushPromises()
+    expect(impressed.attributes('aria-pressed')).toBe('false')
+    expect(marks[0]?.reaction).toBe('impressed')
+    await vi.advanceTimersByTimeAsync(1100)
     await flushPromises()
     expect(marks).toEqual([])
     await wrapper.find('audio').trigger('ended')
