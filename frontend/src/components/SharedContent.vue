@@ -455,7 +455,6 @@ async function sendSheet(): Promise<void> {
         </p>
         <h2 class="h-section">{{ episode.title }}</h2>
         <div class="playback-bar">
-          <button class="btn btn--primary" type="button" @click="openSheet">{{ t.sharing.feedback }}</button>
         <div v-if="episode.audio" class="audio">
           <div class="row wrap">
             <span class="badge badge--pass">{{ t.sharing.fullEpisode }}</span
