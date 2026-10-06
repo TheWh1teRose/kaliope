@@ -5,6 +5,9 @@ import type { AudioTakeOut, ExperimentRun, ExperimentSource, ExperimentSourceMet
 import SourceLoader from '@/components/experiments/SourceLoader.vue'
 import { getExperiment, listRuns, startRun, waitForRun } from '@/experiments/api'
 
+import { t } from '@/i18n'
+
+const labels = t.experiments.audioGeneration
 const KEY = 'audio_generation'
 const DRAFT_KEY = `kalliope-exp:${KEY}`
 interface Setup { artifact_hash: string; voice_cast: VoiceCast }
@@ -78,7 +81,7 @@ onMounted(async () => {
     const status = await audioApi.status()
     rates.value = status.usd_per_1k_characters ?? {}
     if (status.configured) voices.value = await audioApi.voices()
-    else error.value = status.message ?? 'ElevenLabs nicht eingerichtet'
+    else error.value = status.message ?? labels.notConfigured
     await refresh()
     let draft: Draft | null = null
     try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as Draft | null } catch { /* ignore malformed drafts */ }
@@ -91,33 +94,33 @@ onUnmounted(() => { gone = true; clearTimeout(timer) })
 
 <template>
   <section class="stack">
-    <h1>ElevenLabs ausprobieren</h1>
-    <p>Vorbereitete Skripte und Tags bleiben unverändert. Nur „Audio generieren“ verbraucht Credits. Keine LLM-Generierung.</p>
-    <p v-if="loading" role="status">Laden …</p>
+    <h1>{{ labels.title }}</h1>
+    <p>{{ labels.lead }}</p>
+    <p v-if="loading" role="status">{{ t.common.loading }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
-    <SourceLoader :experiment-key="KEY" :source="source" lead="Lauf und bereits vorbereiteten Audio-Take auswählen. Ohne vorbereitetes Artefakt ist kein Import möglich." selection-label="Vorbereiteten Audio-Take wählen" reset-label="Quelle zurücksetzen" hide-word-budget sample-label="Noch kein vorbereitetes Skript geladen" @loaded="loaded" @error="fail" @sample="source = null; lines = []; setup.artifact_hash = ''" />
+    <SourceLoader :experiment-key="KEY" :source="source" :lead="labels.sourceLead" :selection-label="labels.selection" :reset-label="labels.reset" hide-word-budget :sample-label="labels.noSource" @loaded="loaded" @error="fail" @sample="source = null; lines = []; setup.artifact_hash = ''" />
     <div v-if="lines.length">
-      <h2>ElevenLabs-Eingabe (unverändert)</h2>
+      <h2>{{ labels.input }}</h2>
       <p v-for="line in lines" :key="line.segment_id"><strong>{{ line.speaker }}:</strong> {{ line.tagged }}</p>
       <label v-for="choice in setup.voice_cast.voices" :key="choice.speaker">{{ choice.speaker }}
-        <select v-model="choice.voice_id"><option value="">Stimme wählen</option><option v-for="voice in voices" :key="voice.voice_id" :value="voice.voice_id">{{ voice.name }}</option></select>
+        <select v-model="choice.voice_id"><option value="">{{ labels.voice }}</option><option v-for="voice in voices" :key="voice.voice_id" :value="voice.voice_id">{{ voice.name }}</option></select>
       </label>
-      <label>Modell <select v-model="setup.voice_cast.model_id"><option v-for="model in models" :key="model">{{ model }}</option></select></label>
-      <label>Stabilität <select v-model.number="setup.voice_cast.stability"><option :value="0">Kreativ (0)</option><option :value="0.5">Natürlich (0.5)</option><option :value="1">Robust (1)</option></select></label>
-      <label>Seed (optional) <input :value="setup.voice_cast.seed ?? ''" type="number" min="0" max="4294967295" @input="setup.voice_cast.seed = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)" /></label>
-      <p>Ganzes vorbereitetes Skript · Kostenschätzung: ${{ estimate.toFixed(4) }} vor Cache-Wiederverwendung.</p>
-      <button class="btn btn--primary" :disabled="!valid || busy" @click="generate">{{ busy ? 'Starten …' : 'Audio generieren (Credits)' }}</button>
+      <label>{{ labels.model }} <select v-model="setup.voice_cast.model_id"><option v-for="model in models" :key="model">{{ model }}</option></select></label>
+      <label>{{ labels.stability }} <select v-model.number="setup.voice_cast.stability"><option :value="0">{{ labels.creative }}</option><option :value="0.5">{{ labels.natural }}</option><option :value="1">{{ labels.robust }}</option></select></label>
+      <label>{{ labels.seed }} <input :value="setup.voice_cast.seed ?? ''" type="number" min="0" max="4294967295" @input="setup.voice_cast.seed = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)" /></label>
+      <p>{{ labels.estimate }} ${{ estimate.toFixed(4) }} {{ labels.beforeCache }}</p>
+      <button class="btn btn--primary" :disabled="!valid || busy" @click="generate">{{ busy ? labels.starting : labels.generate }}</button>
     </div>
-    <h2>Gespeicherte Versuche</h2>
+    <h2>{{ labels.attempts }}</h2>
     <article v-for="run in runs" :key="run.id">
       <p>{{ run.created_at }} · {{ run.setup.voice_cast.model_id }} · {{ run.status }}</p>
       <p v-if="run.error" role="alert">{{ run.error }}</p>
-      <button class="btn" @click="restore(run).catch(fail)">Gleiches Skript und Einstellungen laden</button>
+      <button class="btn" @click="restore(run).catch(fail)">{{ labels.restore }}</button>
       <template v-for="take in takes.filter(take => take.id === run.output?.take_id)" :key="take.id">
-        <p>{{ take.status }} · ${{ take.total_cost_usd }} · {{ take.plan.filter(chunk => chunk.status === 'done').length }}/{{ take.plan.length }} Chunks</p>
+        <p>{{ take.status }} · ${{ take.total_cost_usd }} · {{ take.plan.filter(chunk => chunk.status === 'done').length }}/{{ take.plan.length }} {{ labels.chunks }}</p>
         <p v-if="take.error" role="alert">{{ take.error }}</p>
-        <button v-if="takeActive(take.status)" class="btn" @click="stop(take)">Stoppen</button>
-        <button v-if="take.resumable" class="btn" @click="resume(take)">Fortsetzen (Credits)</button>
+        <button v-if="takeActive(take.status)" class="btn" @click="stop(take)">{{ t.audio.stop }}</button>
+        <button v-if="take.resumable" class="btn" @click="resume(take)">{{ labels.resume }}</button>
         <audio v-if="take.mix" controls :src="take.mix.url" />
         <audio v-for="chunk in take.mix ? [] : take.chunks" :key="chunk.index" controls :src="chunk.url" />
       </template>
