@@ -298,7 +298,11 @@ def create_run(
             errors=exc.errors(include_context=False, include_url=False),
         ) from exc
     if key == "audio_generation":
-        from app.experiments.audio_generation import SynthesisSetup, prepared_source
+        from app.experiments.audio_generation import (
+            SynthesisSetup,
+            prepared_source,
+            selected_script,
+        )
         from app.schemas.audio import AudioScript
 
         assert isinstance(setup, SynthesisSetup)
@@ -311,10 +315,10 @@ def create_run(
         if loaded.source["artifact_hash"] != setup.artifact_hash:
             raise problem(422, "Source changed", "Reload the prepared source.")
         script = AudioScript.model_validate(_store().get_raw(setup.artifact_hash))
-        if not script.lines or any(
-            not setup.voice_cast.voice_for(line.speaker) for line in script.lines
-        ):
-            raise problem(422, "Voices missing", "Assign a voice to every prepared speaker.")
+        try:
+            selected_script(script, setup)
+        except ValueError as exc:
+            raise problem(422, "Invalid single-request selection", str(exc)) from exc
         payload.source_meta = loaded.source
     _check_model(getattr(setup, "settings", None))
     from app.speech.base import SpeechError
