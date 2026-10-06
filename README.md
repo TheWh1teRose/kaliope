@@ -174,6 +174,20 @@ never pays twice; on Eleven v4 each chunk continues from the previous ones by
 request id. Chunks an earlier take already spoke with the same voices are
 reused and left out of the price.
 
+**Experimentieren → ElevenLabs ausprobieren** imports a retained prepared
+`audio_script` from a run's audio take, including its tags, spoken forms and
+speaker structure. Choose the run and prepared take with the existing source
+chooser. A raw script is not accepted or regenerated: if there is no prepared
+artifact, prepare an audio take in the run view first. The experiment stores the
+source take, immutable artifact hash, pipeline version and chosen configuration
+with each attempt. Select available account voices per speaker, a supported
+dialogue model, stability (0, 0.5 or 1) and an optional seed. Loading a source or
+changing settings never synthesizes audio. **Audio generieren (Credits)** is the
+explicit go-ahead to synthesize the whole prepared script without tagging again
+or going through a review pipeline. Attempts reuse the existing chunk cache,
+progress, error, stop/resume and authenticated playback interfaces. Saved
+attempts can reload the same script and settings for another test.
+
 A take is a **one-minute sample** (whole lines up to about 1,000 characters,
 about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,
 about $1.15). A take that fails part-way keeps its approval and **resumes** at

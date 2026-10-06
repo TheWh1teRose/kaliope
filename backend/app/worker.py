@@ -237,6 +237,7 @@ class Worker:
             key = row.experiment_key
             setup_raw = dict(row.setup_json or {})
             source_raw = row.source_json
+            created_by = row.created_by
 
         llm = self._build_llm(run_id=None)
         try:
@@ -250,6 +251,7 @@ class Worker:
                 source=source,
                 store=ArtifactStore(get_settings().artifacts_dir),
                 session_scope=session_scope,
+                created_by=created_by,
             )
             result = experiment.run(setup, llm, ctx)
         except Exception as exc:  # noqa: BLE001 - recorded on the run, shown on the page
@@ -1281,6 +1283,9 @@ class Worker:
             cast = VoiceCast.model_validate(take.voice_cast_json)
             request = AudioRequest.model_validate(take.request_json)
             previous = dict(take.manifest_json or {})
+            prepared_audio_hash = (take.request_json or {}).get("prepared_audio_hash")
+            prepared_approved_by = take.created_by
+            prepared_approved_at = take.created_at.isoformat()
             resume = resume_outputs(previous)
             ingest = session.scalars(
                 sa_select(RunNode).where(RunNode.run_id == run.id, RunNode.node_name == "ingest")
@@ -1315,6 +1320,29 @@ class Worker:
             }
             if parsed_hash and store.exists(parsed_hash):
                 seeds["parsed"] = ParsedDocument.model_validate(store.get_raw(parsed_hash))
+            if prepared_audio_hash:
+                # Imported synthesis sessions bypass tagging and approval: the experiment
+                # button is the explicit go-ahead. Production takes remain unchanged.
+                from app.schemas.audio import AudioApproval, AudioScript
+                from app.speech.base import cost_usd
+
+                prepared_script = AudioScript.model_validate(store.get_raw(prepared_audio_hash))
+                seeds["audio_approval"] = AudioApproval(
+                    approved_by=prepared_approved_by,
+                    approved_at=prepared_approved_at,
+                    characters=prepared_script.character_count(),
+                    estimate_usd=cost_usd(cast.model_id, prepared_script.character_count()),
+                )
+                seeds["audio_script"] = prepared_script
+                flow = flow.model_copy(
+                    update={
+                        "nodes": [
+                            node
+                            for node in flow.nodes
+                            if node.node in {"audio_render", "audio_join"}
+                        ]
+                    }
+                )
             result = runner.execute(flow, take_id, seeds, resume_outputs=resume)
         except Exception as exc:  # noqa: BLE001 - recorded on the take
             logger.exception("audio take %s failed", take_id)
@@ -1325,6 +1353,8 @@ class Worker:
         manifest["bag_hashes"] = dict(result.artifact_hashes)
         manifest["llm_traces"] = list(llm.traces)
         manifest["speech_traces"] = list(speech.traces) if speech is not None else []
+        if prepared_audio_hash:
+            manifest["bag_hashes"]["audio_script"] = prepared_audio_hash
         if result.status == "paused":
             manifest = write_pause(
                 manifest,

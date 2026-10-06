@@ -22,6 +22,9 @@ const props = defineProps<{
   /** Overrides the beat-shaped wording for experiments that load a whole run. */
   lead?: string
   sampleLabel?: string
+  selectionLabel?: string
+  resetLabel?: string
+  hideWordBudget?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'loaded', value: ExperimentSource): void
@@ -95,7 +98,7 @@ async function applyPicked(): Promise<void> {
     <div class="row wrap">
       <button class="btn btn--sm" @click="openPicker">{{ labels.loadFromRun }}</button>
       <button v-if="source" class="btn btn--ghost btn--sm" @click="emit('sample')">
-        {{ labels.sample }}
+        {{ resetLabel ?? labels.sample }}
       </button>
     </div>
   </div>
@@ -121,7 +124,7 @@ async function applyPicked(): Promise<void> {
       </li>
     </ul>
     <template v-if="pickedSource?.beats.length">
-      <p class="eyebrow pick__label">{{ labels.pickBeat }}</p>
+      <p class="eyebrow pick__label">{{ selectionLabel ?? labels.pickBeat }}</p>
       <ul class="pick">
         <li v-for="beat in pickedSource.beats" :key="beat.id">
           <button
@@ -130,7 +133,7 @@ async function applyPicked(): Promise<void> {
             @click="pickedBeat = beat.id"
           >
             <span>{{ beat.title }}</span>
-            <span class="meta">{{ beat.word_budget }} {{ t.common.words }}</span>
+            <span v-if="!hideWordBudget" class="meta">{{ beat.word_budget }} {{ t.common.words }}</span>
           </button>
         </li>
       </ul>

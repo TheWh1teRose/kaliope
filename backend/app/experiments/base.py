@@ -173,6 +173,7 @@ class ExperimentContext:
     store: ArtifactStore
     #: Short database reads; never held open across a model call.
     session_scope: Callable[[], AbstractContextManager[Session]]
+    created_by: str | None = None
 
 
 # ------------------------------------------------------------------- result
