@@ -628,16 +628,6 @@ def _plan(
     """Every request of the take, and whether its audio exists yet."""
     if script is None:
         return []
-    if (take.request_json or {}).get("experiment_single_request"):
-        audio = _audio(take, store)
-        return [
-            ChunkStatusOut(
-                index=0,
-                characters=script.character_count(),
-                segment_ids=[line.segment_id for line in script.lines],
-                status="done" if audio else "waiting",
-            )
-        ]
     cast = VoiceCast.model_validate(take.voice_cast_json)
     request = AudioRequest.model_validate(take.request_json or {})
     planned = plan_requests(select_lines(script, request), cast)
