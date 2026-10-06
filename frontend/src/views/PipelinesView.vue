@@ -206,7 +206,7 @@ onMounted(load)
       </button>
     </header>
 
-    <div class="tabs">
+    <div class="tabs pipeline-tabs">
       <button class="tab" :class="{ 'tab--on': tab === 'pipelines' }" @click="selectTab('pipelines')">
         {{ t.pipelines.tabPipelines }}
         <span class="tab__count num">{{ store.pipelines.length }}</span>
@@ -473,43 +473,6 @@ onMounted(load)
   margin-top: 6px;
   font-size: var(--t-sm);
   max-width: 82ch;
-}
-
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  border-bottom: 1px solid var(--rule);
-  padding-bottom: var(--s2);
-}
-
-.tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
-  border: 0;
-  border-radius: var(--r-md);
-  background: transparent;
-  color: var(--ink-3);
-  font-size: var(--t-sm);
-  cursor: pointer;
-}
-
-.tab:hover {
-  background: var(--chrome);
-  color: var(--ink);
-}
-
-.tab--on {
-  background: var(--ink);
-  color: var(--chrome);
-}
-
-.tab__count {
-  font-family: var(--mono);
-  font-size: var(--t-xs);
-  opacity: 0.72;
 }
 
 .toggle {

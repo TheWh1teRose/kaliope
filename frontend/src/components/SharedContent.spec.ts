@@ -50,7 +50,7 @@ describe('feedback persistence', () => {
     expect(first.attributes('disabled')).toBeUndefined()
     expect(wrapper.findAll('[aria-label="Mag ich nicht"]')[1].attributes('aria-pressed')).toBe('true')
     expect(wrapper.find('.segment textarea').exists()).toBe(false)
-    await wrapper.find('.comment-toggle').trigger('click')
+    await wrapper.findAll('.comment-toggle')[1].trigger('click')
     expect((wrapper.find('.segment textarea').element as HTMLTextAreaElement).value).toBe('Saved comment')
     await first.trigger('click')
     await flushPromises()
@@ -112,7 +112,7 @@ describe('feedback persistence', () => {
     await vi.advanceTimersByTimeAsync(1100)
     expect(save.mock.calls[1][1].comment).toBe('Unsent draft')
   })
-  it('discards the old line draft when a reaction is explicitly cleared', async () => {
+  it('preserves the line comment draft when a reaction is explicitly cleared', async () => {
     const marked: FeedbackState = { ...empty, marks: [{ episode: 1, ordinal: 0,
       reaction: 'impressed', slop: false, comment: 'Saved' }] }
     vi.spyOn(sharingApi, 'feedback').mockResolvedValue(marked)
@@ -127,7 +127,7 @@ describe('feedback persistence', () => {
     await wrapper.find('[aria-label="Beeindruckt"]').trigger('click')
     await flushPromises()
     await vi.advanceTimersByTimeAsync(1100)
-    expect(save.mock.calls.at(-1)![1].comment).toBe(null)
+    expect(save.mock.calls.at(-1)![1].comment).toBe('Old draft')
   })
   it('retains a multi-page citation while navigating forward and back', async () => {
     vi.spyOn(sharingApi, 'feedback').mockResolvedValue(empty)

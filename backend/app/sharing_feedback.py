@@ -152,7 +152,7 @@ def save_mark(
     if segments is None or payload.ordinal >= len(segments):
         raise problem(422, "Zeile unbekannt", "Diese Zeile gehört nicht zu diesem Stand.")
     comment = _blank(payload.comment)
-    if payload.reaction is None:
+    if payload.reaction is None and not comment:
         row = db.scalars(
             select(ReviewFeedback).where(
                 ReviewFeedback.review_link_id == link.id,
@@ -172,7 +172,7 @@ def save_mark(
             db.delete(mark)
             _touch(row)
         return
-    if payload.slop and payload.reaction == "impressed":
+    if payload.slop and payload.reaction not in {"dislike", "horrible"}:
         raise problem(422, "Slop passt nicht", "KI-Slop gibt es nur zu einer negativen Markierung.")
     if comment and len(comment) > 500:
         raise problem(422, "Kommentar zu lang", "Ein Kommentar hat höchstens 500 Zeichen.")
@@ -189,11 +189,13 @@ def save_mark(
             feedback_id=row.id,
             episode_index=payload.episode,
             ordinal=payload.ordinal,
-            reaction=payload.reaction,
+            reaction=payload.reaction or "",
         )
         db.add(mark)
-    mark.reaction = payload.reaction
-    mark.slop = payload.slop if payload.reaction != "impressed" else False
+    # Empty string is an unrated comment in the existing non-null column.
+    # Public responses expose null; legacy saved reactions remain unchanged.
+    mark.reaction = payload.reaction or ""
+    mark.slop = payload.slop if payload.reaction in {"dislike", "horrible"} else False
     mark.comment = comment
     _touch(row)
 
@@ -244,7 +246,7 @@ def state(db: Session, link: ReviewLink, key_hash: str) -> FeedbackState:
             MarkState(
                 episode=mark.episode_index,
                 ordinal=mark.ordinal,
-                reaction=mark.reaction,  # type: ignore[arg-type]
+                reaction=mark.reaction or None,  # type: ignore[arg-type]
                 slop=mark.slop,
                 comment=mark.comment,
             )
@@ -303,7 +305,7 @@ def summary(db: Session, link: ReviewLink, content: dict[str, Any] | None) -> Fe
                     key=f"e{mark.episode_index}-s{mark.ordinal:02d}",
                     speaker=speaker,
                     text=text,
-                    reaction=mark.reaction,  # type: ignore[arg-type]
+                    reaction=mark.reaction or None,  # type: ignore[arg-type]
                     slop=mark.slop,
                     comment=mark.comment,
                 )

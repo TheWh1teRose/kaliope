@@ -202,7 +202,7 @@ describe('link-only reader through real app routing', () => {
     const marks: {
       episode: number
       ordinal: number
-      reaction: string
+      reaction: string | null
       slop: boolean
       comment: string | null
     }[] = []
@@ -211,7 +211,7 @@ describe('link-only reader through real app routing', () => {
       if (target.endsWith('/feedback/marks')) {
         const body = JSON.parse(String(init?.body))
         marks.splice(0, marks.length)
-        if (body.reaction) marks.push(body)
+        if (body.reaction || body.comment) marks.push(body)
         return new Response(
           JSON.stringify({
             label: null,
@@ -241,10 +241,21 @@ describe('link-only reader through real app routing', () => {
       })
     })
     const { wrapper } = await reader('/r/token?episode=1')
+    await wrapper.find('.comment-toggle').trigger('click')
+    await wrapper.find('.segment textarea').setValue('Comment without rating')
+    await vi.advanceTimersByTimeAsync(350)
+    await flushPromises()
+    expect(marks[0]).toMatchObject({ reaction: null, comment: 'Comment without rating' })
+    const commentOnlyReturn = await reader('/r/token?episode=1')
+    await commentOnlyReturn.wrapper.find('.comment-toggle').trigger('click')
+    expect((commentOnlyReturn.wrapper.find('.segment textarea').element as HTMLTextAreaElement).value).toBe('Comment without rating')
+    commentOnlyReturn.wrapper.unmount()
+    await wrapper.find('.comment-toggle').trigger('click')
     const impressed = wrapper
       .findAll('button')
       .find((button) => button.attributes('aria-label') === 'Beeindruckt')!
     await impressed.trigger('click')
+    await vi.advanceTimersByTimeAsync(1100)
     await flushPromises()
     expect(marks[0]?.reaction).toBe('impressed')
     expect(impressed.attributes('aria-pressed')).toBe('true')
@@ -252,7 +263,7 @@ describe('link-only reader through real app routing', () => {
     await wrapper.find('.comment-toggle').trigger('click')
     await wrapper.find('.segment textarea').setValue('Independent comment')
     await flushPromises()
-    expect(marks[0]?.comment).toBeNull()
+    expect(marks[0]?.comment).toBe('Comment without rating')
     await vi.advanceTimersByTimeAsync(1100)
     await flushPromises()
     expect(marks[0]?.comment).toBe('Independent comment')
@@ -271,7 +282,17 @@ describe('link-only reader through real app routing', () => {
     expect(marks[0]?.reaction).toBe('impressed')
     await vi.advanceTimersByTimeAsync(1100)
     await flushPromises()
-    expect(marks).toEqual([])
+    expect(marks[0]).toMatchObject({ reaction: null, comment: 'Independent comment' })
+    const clearedReturn = await reader('/r/token?episode=1')
+    expect(clearedReturn.wrapper.find('[aria-label="Beeindruckt"]').attributes('aria-pressed')).toBe('false')
+    await clearedReturn.wrapper.find('.comment-toggle').trigger('click')
+    expect((clearedReturn.wrapper.find('.segment textarea').element as HTMLTextAreaElement).value).toBe('Independent comment')
+    clearedReturn.wrapper.unmount()
+    await wrapper.find('.playback-bar .btn--primary').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('Was hat funktioniert?')
+    document.querySelector<HTMLButtonElement>('.panel__head button')!.click()
+    await flushPromises()
     await wrapper.find('audio').trigger('ended')
     await flushPromises()
     expect(document.body.textContent).toContain(

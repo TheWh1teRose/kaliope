@@ -653,7 +653,49 @@ def test_marks_and_comments_persist_without_questionnaire_and_clear_survives_ret
         ).status_code
         == 200
     )
+    returned = owner.get(path, headers=_reviewer()).json()["marks"]
+    assert returned[0]["reaction"] is None
+    assert returned[0]["comment"] == "Unclear"
+    assert (
+        owner.put(
+            path + "/marks",
+            headers=_reviewer(),
+            json={**payload, "reaction": None, "comment": None},
+        ).status_code
+        == 200
+    )
     assert owner.get(path, headers=_reviewer()).json()["marks"] == []
+
+
+def test_comment_only_feedback_survives_reload_and_rating_changes(owner: TestClient) -> None:
+    rid = run()
+    created = share(owner, rid, choice())
+    path = public_path(created) + "/feedback"
+    payload = {"episode": 1, "ordinal": 0, "reaction": None, "comment": "Evidence unclear"}
+    for reaction in (None, "impressed", "dislike", None):
+        saved = owner.put(
+            path + "/marks", headers=_reviewer(), json={**payload, "reaction": reaction}
+        )
+        assert saved.status_code == 200
+        fresh = owner.get(path, headers=_reviewer()).json()
+        assert fresh["marks"][0]["reaction"] == reaction
+        assert fresh["marks"][0]["comment"] == "Evidence unclear"
+        assert fresh["stars"] is None
+        assert fresh["worked"] is None
+    summary = owner.get(f"/api/runs/{rid}/review-link").json()["links"][0]["feedback"]
+    assert summary["lines"][0]["reaction"] is None
+    assert summary["lines"][0]["comment"] == "Evidence unclear"
+    assert summary["impressed"] == summary["dislike"] == summary["horrible"] == 0
+    assert (
+        owner.put(path + "/marks", headers=_reviewer(), json={**payload, "slop": True}).status_code
+        == 422
+    )
+    assert (
+        owner.put(
+            path + "/marks", headers=_reviewer(), json={**payload, "comment": "x" * 501}
+        ).status_code
+        == 422
+    )
 
 
 def test_marks_toggle_comments_and_slop_stay_on_the_frozen_line(owner: TestClient) -> None:

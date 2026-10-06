@@ -231,9 +231,9 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <nav class="row" :aria-label="t.run.title">
-      <button class="btn" :aria-pressed="activeTab === 'run'" @click="activeTab = 'run'">{{ t.run.title }}</button>
-      <button class="btn" :aria-pressed="activeTab === 'feedback'" @click="activeTab = 'feedback'">{{ t.sharing.feedback }}</button>
+    <nav class="tabs pipeline-tabs" :aria-label="t.run.title">
+      <button class="tab" :class="{ 'tab--on': activeTab === 'run' }" :aria-pressed="activeTab === 'run'" @click="activeTab = 'run'">{{ t.run.title }}</button>
+      <button class="tab" :class="{ 'tab--on': activeTab === 'feedback' }" :aria-pressed="activeTab === 'feedback'" @click="activeTab = 'feedback'">{{ t.sharing.feedback }}</button>
     </nav>
     <section v-if="activeTab === 'feedback'" class="sheet" data-feedback-tab>
       <h2 class="h-section">{{ t.sharing.feedback }}</h2>

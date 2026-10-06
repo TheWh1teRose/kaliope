@@ -85,7 +85,7 @@ class MarkIn(BaseModel):
 class MarkState(BaseModel):
     episode: int
     ordinal: int
-    reaction: ReactionName
+    reaction: ReactionName | None
     slop: bool = False
     comment: str | None = None
 
@@ -111,7 +111,7 @@ class MarkedLine(BaseModel):
     key: str
     speaker: str
     text: str
-    reaction: ReactionName
+    reaction: ReactionName | None
     slop: bool
     comment: str | None = None
 
