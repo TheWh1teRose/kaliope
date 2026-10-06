@@ -32,7 +32,7 @@ const limit = computed(() => limits.value[setup.value.voice_cast.model_id])
 const selected = computed(() => lines.value.slice(0, setup.value.line_count ?? 0))
 const textAt = (index: number) => setup.value.edited_text?.[index] ?? lines.value[index]?.tagged ?? ''
 const characters = computed(() => selected.value.reduce((sum, _, index) => sum + [...textAt(index)].length, 0))
-const selectionError = computed(() => !limit.value ? 'Für dieses Modell ist kein Anfrage-Limit bekannt.' : !selected.value.length ? 'Die erste Äußerung passt nicht. Bitte kürzen und auswählen.' : characters.value > limit.value ? 'Auswahl ist zu lang. Bitte kürzen oder weniger Äußerungen auswählen; Änderungen werden nie abgeschnitten.' : selected.value.some((_, index) => !textAt(index).trim()) ? 'Ausgewählte Äußerungen dürfen nicht leer sein.' : '')
+const selectionError = computed(() => !limit.value ? labels.unknownLimit : !selected.value.length ? labels.emptySelection : characters.value > limit.value ? labels.overLimit : selected.value.some((_, index) => !textAt(index).trim()) ? labels.emptyUtterance : '')
 const estimate = computed(() => characters.value / 1000 * (rates.value[setup.value.voice_cast.model_id] ?? 0))
 function initialCount() {
   let size = 0, count = 0
@@ -125,19 +125,19 @@ onUnmounted(() => { gone = true; clearTimeout(timer) })
     <SourceLoader :experiment-key="KEY" :source="source" :lead="labels.sourceLead" :selection-label="labels.selection" :reset-label="labels.reset" hide-word-budget :sample-label="labels.noSource" @loaded="loaded" @error="fail" @sample="source = null; lines = []; setup.artifact_hash = ''" />
     <div v-if="lines.length">
       <h2>{{ labels.input }}</h2>
-      <p class="meta">Quelle: {{ source?.run_id }} · Take {{ source?.beat_id }} · {{ setup.artifact_hash }}</p>
-      <p class="muted">Nur dieser Entwurf wird bearbeitet. Original, Sprecher und Reihenfolge bleiben erhalten. Tags in eckigen Klammern werden genau wie eingegeben gesendet.</p>
-      <label>Umfang: erste Äußerungen
-        <select v-model.number="setup.line_count" class="select" aria-label="Anzahl Äußerungen">
-          <option :value="0" disabled>Bitte auswählen</option>
-          <option v-for="(_, index) in lines" :key="index" :value="index + 1">{{ index + 1 }} von {{ lines.length }}</option>
+      <p class="meta">{{ labels.provenance }} {{ source?.run_id }} · Take {{ source?.beat_id }} · {{ setup.artifact_hash }}</p>
+      <p class="muted">{{ labels.draftHint }}</p>
+      <label>{{ labels.extent }}
+        <select v-model.number="setup.line_count" class="select" :aria-label="labels.utteranceCount">
+          <option :value="0" disabled>{{ labels.chooseExtent }}</option>
+          <option v-for="(_, index) in lines" :key="index" :value="index + 1">{{ index + 1 }} {{ labels.of }} {{ lines.length }}</option>
         </select>
       </label>
-      <p class="meta">{{ characters }} / {{ limit ?? '?' }} Zeichen (inkl. Tags) · eine Anfrage, kein Zusammenfügen</p>
-      <p class="muted">Dokumentierte Grenze für zuverlässige Generierung, kein garantiertes Ausgabevolumen. <a v-if="limitSource" :href="limitSource" target="_blank" rel="noopener noreferrer">ElevenLabs API</a></p>
+      <p class="meta">{{ characters }} / {{ limit ?? '?' }} {{ labels.budgetHint }}</p>
+      <p class="muted">{{ labels.limitHint }} <a v-if="limitSource" :href="limitSource" target="_blank" rel="noopener noreferrer">{{ labels.limitSource }}</a></p>
       <p v-if="selectionError" role="alert">{{ selectionError }}</p>
       <div v-for="(line, index) in lines" :key="line.segment_id" class="utterance" :class="{ excluded: index >= (setup.line_count ?? 0) }">
-        <label :for="`utterance-${index}`">{{ index + 1 }} · {{ line.speaker }} · {{ index < (setup.line_count ?? 0) ? 'wird gesendet' : 'nicht ausgewählt' }}</label>
+        <label :for="`utterance-${index}`">{{ index + 1 }} · {{ line.speaker }} · {{ index < (setup.line_count ?? 0) ? labels.selected : labels.excluded }}</label>
         <textarea v-if="setup.edited_text" :id="`utterance-${index}`" v-model="setup.edited_text[index]" class="input" rows="3" />
       </div>
       <label v-for="choice in setup.voice_cast.voices" :key="choice.speaker">{{ choice.speaker }}
@@ -160,7 +160,7 @@ onUnmounted(() => { gone = true; clearTimeout(timer) })
       <p v-if="run.error" role="alert">{{ run.error }}</p>
       <button class="btn" @click="restore(run).catch(fail)">{{ labels.restore }}</button>
       <template v-for="take in takes.filter(take => take.id === run.output?.take_id)" :key="take.id">
-        <p>{{ take.status }} · ${{ take.total_cost_usd }} · eine Anfrage</p>
+        <p>{{ take.status }} · ${{ take.total_cost_usd }} · {{ labels.oneRequest }}</p>
         <p v-if="take.error" role="alert">{{ take.error }}</p>
         <button v-if="takeActive(take.status)" class="btn" @click="stop(take)">{{ t.audio.stop }}</button>
         <button v-if="take.resumable" class="btn" @click="resume(take)">{{ labels.resume }}</button>
