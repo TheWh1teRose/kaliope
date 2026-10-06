@@ -182,11 +182,28 @@ artifact, prepare an audio take in the run view first. The experiment stores the
 source take, immutable artifact hash, pipeline version and chosen configuration
 with each attempt. Select available account voices per speaker, a supported
 dialogue model, stability (0, 0.5 or 1) and an optional seed. Loading a source or
-changing settings never synthesizes audio. **Audio generieren (Credits)** is the
-explicit go-ahead to synthesize the whole prepared script without tagging again
-or going through a review pipeline. Attempts reuse the existing chunk cache,
-progress, error, stop/resume and authenticated playback interfaces. Saved
-attempts can reload the same script and settings for another test.
+changing settings never synthesizes audio. Edit each utterance's tagged text in
+the session draft; the original artifact, speaker identities and order remain
+unchanged. Drafts and saved attempts retain these edits. Choose how many initial
+whole utterances to send; loading defaults to the longest contiguous prefix that
+fits one request. **Audio generieren (Credits)** sends exactly that edited
+selection, with no LLM regeneration, chunking, stitching, normalisation, cache
+reuse or automatic retries. Over-limit or empty selections are rejected before
+synthesis; edits are never silently truncated. Audio uses authenticated take
+playback. Failed attempts show an error and can be restored for an explicit new
+attempt, not resumed through the production chunk worker.
+
+The experiment caps both offered dialogue models at **2,000 tagged characters**
+(total `inputs[].text`, counted as Unicode code points) and **10 unique voices**, per
+[ElevenLabs' timestamped dialogue API reference](https://elevenlabs.io/docs/api-reference/text-to-dialogue/convert-with-timestamps)
+(read 2026-10-06). This is the documented *reliable-generation ceiling*, not a
+claim that every longer request is rejected or that the provider guarantees the
+whole output. The source and ceiling are displayed beside the selection. A first
+utterance above the ceiling must be edited shorter; it is never split mid-tag.
+Selected account voices expose their provider-supplied preview assets through an
+opt-in player (no autoplay or paid preview synthesis); missing or failed previews
+are shown explicitly. Provider credentials remain server-side. Production takes
+still use the chunk/cache/stitch/join behavior described above and below.
 
 A take is a **one-minute sample** (whole lines up to about 1,000 characters,
 about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,

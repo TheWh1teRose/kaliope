@@ -2,6 +2,7 @@
 
 import json
 import time
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,7 +60,15 @@ def test_import_and_explicit_synthesis(client, run_id, provider):  # noqa: F811
             ],
         },
     }
+    setup["edited_text"] = [line["tagged"] for line in prepared["lines"]]
+    setup["edited_text"][0] = "[curious] Edited  words [short pause] 🌻"
+    setup["line_count"] = 1
     payload = {"setup": setup, "source": {"run_id": run_id, "beat_id": original["id"]}}
+    oversized = json.loads(json.dumps(payload))
+    oversized["setup"]["edited_text"][0] = "x" * 2001
+    rejected = client.post("/api/experiments/audio_generation/runs", json=oversized)
+    assert rejected.status_code == 422 and "2000" in rejected.text
+    assert not speech.requests
     for field, value in [("model_id", "unsupported"), ("stability", 0.4)]:
         invalid = json.loads(json.dumps(payload))
         invalid["setup"]["voice_cast"][field] = value
@@ -97,38 +106,41 @@ def test_import_and_explicit_synthesis(client, run_id, provider):  # noqa: F811
     }
     take = _take(client, run_id, {"completed", "failed"})
     assert take["status"] == "completed", take["error"]
-    assert take["audio_script"] == prepared
+    expected = json.loads(json.dumps(prepared))
+    expected["lines"] = expected["lines"][:1]
+    expected["lines"][0]["tagged"] = setup["edited_text"][0]
+    assert take["audio_script"] == expected
+    retained = client.post(
+        "/api/experiments/audio_generation/source",
+        json={"run_id": run_id, "beat_id": original["id"]},
+    ).json()
+    assert json.loads(retained["fields"]["audio_script"]) == prepared
     assert len(provider.calls) == llm_calls
-    assert take["mix"] and client.get(take["mix"]["url"]).status_code == 200
-    from app.pipeline.audio_chunks import plan_requests
-    from app.schemas.audio import AudioScript, VoiceCast
-
-    planned = plan_requests(
-        AudioScript.model_validate(prepared).lines, VoiceCast.model_validate(setup["voice_cast"])
-    )
-    # Identical planned requests are synthesized once and reused from the cache.
-    unique = {plan.key: plan for plan in planned}
-    assert [req.inputs for req in speech.requests] == [plan.inputs for plan in unique.values()]
-    assert len(take["chunks"]) == len(planned)
-    assert len(speech.requests) < len(planned)  # this fixture contains repeated lines
+    assert take["mix"] is None  # no join/normalisation pass
+    assert client.get(take["chunks"][0]["url"]).status_code == 200
+    assert len(speech.requests) == 1
+    assert speech.requests[0].inputs[0].text == setup["edited_text"][0]
+    assert speech.requests[0].inputs[0].voice_id == "v-mod"
+    assert speech.requests[0].previous_request_ids == []
+    assert len(take["chunks"]) == 1 and take["plan"][0]["status"] == "done"
     assert all(
         req.model_id == "eleven_v3" and req.stability == 1 and req.seed == 42
         for req in speech.requests
     )
-    # A second configuration stays linked to the same prepared text on provider failure.
+    # Retryable provider errors must not trigger a second paid request.
     from app.speech.base import SpeechError
 
-    speech.fail_with = SpeechError("Too few credits", status=402)
+    speech.fail_with = SpeechError("Rate limited", status=429, retryable=True)
+    speech.dialogue = Mock(wraps=speech.dialogue)
     payload["setup"]["voice_cast"]["seed"] = 43
     failed = client.post("/api/experiments/audio_generation/runs", json=payload)
     assert failed.status_code == 201
-    take = _take(client, run_id, {"failed"})
-    assert "Too few credits" in take["error"]
-    assert take["audio_script"] == prepared and take["resumable"]
-    assert take["voice_cast"]["seed"] == 43
+    for _ in range(300):
+        experiment = client.get(f"/api/experiments/runs/{failed.json()['id']}").json()
+        if experiment["status"] == "failed":
+            break
+        time.sleep(0.02)
+    assert experiment["status"] == "failed" and "Rate limited" in experiment["error"]
+    assert speech.dialogue.call_count == 1
     speech.fail_with = None
-    resumed = client.post(f"/api/audio/takes/{take['id']}/resume")
-    assert resumed.status_code == 200
-    take = _take(client, run_id, {"completed"})
-    assert take["mix"]
     speech_registry.reset_provider()
