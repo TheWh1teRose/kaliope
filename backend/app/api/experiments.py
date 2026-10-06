@@ -297,8 +297,32 @@ def create_run(
             f"{location}: {first.get('msg')}",
             errors=exc.errors(include_context=False, include_url=False),
         ) from exc
+    if key == "audio_generation":
+        from app.experiments.audio_generation import SynthesisSetup, prepared_source
+        from app.schemas.audio import AudioScript
+
+        assert isinstance(setup, SynthesisSetup)
+        if payload.source is None:
+            raise problem(422, "Source required", "Load a prepared audio take first.")
+        try:
+            loaded = prepared_source(db, _store(), payload.source)
+        except LookupError as exc:
+            raise problem(422, "Prepared source unavailable", str(exc)) from exc
+        if loaded.source["artifact_hash"] != setup.artifact_hash:
+            raise problem(422, "Source changed", "Reload the prepared source.")
+        script = AudioScript.model_validate(_store().get_raw(setup.artifact_hash))
+        if not script.lines or any(
+            not setup.voice_cast.voice_for(line.speaker) for line in script.lines
+        ):
+            raise problem(422, "Voices missing", "Assign a voice to every prepared speaker.")
+        payload.source_meta = loaded.source
     _check_model(getattr(setup, "settings", None))
-    problems = experiment.validate_setup(setup)
+    from app.speech.base import SpeechError
+
+    try:
+        problems = experiment.validate_setup(setup)
+    except SpeechError as exc:
+        raise problem(502, "Voices unavailable", str(exc)) from exc
     if problems:
         raise problem(422, "This setup cannot run", problems[0], errors=problems)
 

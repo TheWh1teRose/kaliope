@@ -610,7 +610,9 @@ def _download_name(db: Session, run: Run | None, take: AudioTake) -> str:
 
 def _resumable(take: AudioTake) -> bool:
     pause = pause_from_manifest(take.manifest_json) or {}
-    return take.status == "failed" and bool(pause.get("submitted_hash"))
+    return take.status == "failed" and bool(
+        pause.get("submitted_hash") or (take.request_json or {}).get("prepared_audio_hash")
+    )
 
 
 def _mix(take: AudioTake, store: ArtifactStore) -> AudioMix | None:

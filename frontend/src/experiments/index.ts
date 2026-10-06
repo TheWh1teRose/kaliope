@@ -8,6 +8,7 @@
 import type { Component } from 'vue'
 
 export const experimentViews: Record<string, () => Promise<Component>> = {
+  audio_generation: () => import('@/experiments/audio_generation/AudioGenerationView.vue'),
   audio_tags: () => import('@/experiments/audio_tags/AudioTagsView.vue'),
   direct_style: () => import('@/experiments/direct_style/DirectStyleView.vue'),
   outline: () => import('@/experiments/outline/OutlineView.vue'),
