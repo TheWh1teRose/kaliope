@@ -241,6 +241,7 @@ _ANTHROPIC_PRICES: dict[str, tuple[float, float, int]] = {
     "claude-sonnet-5-5": (2.0, 10.0, 1_000_000),
     "claude-sonnet-5": (2.0, 10.0, 1_000_000),
     "claude-sonnet-4-6": (3.0, 15.0, 1_000_000),
+    "claude-haiku-5-5": (0.10, 0.50, 1_000_000),
     "claude-haiku-4-5": (1.0, 5.0, 200_000),
     "claude-haiku-4-5-20251001": (1.0, 5.0, 200_000),
 }
@@ -270,6 +271,7 @@ _NO_SAMPLING = {
     "claude-opus-4-7",
     "claude-sonnet-5-5",
     "claude-sonnet-5",
+    "claude-haiku-5-5",
 }
 
 
@@ -284,7 +286,9 @@ def test_every_model_has_a_price_and_context_window() -> None:
         assert spec.input_usd_per_mtok == input_rate
         assert spec.output_usd_per_mtok == output_rate
         assert spec.context_window == window
-        assert spec.max_output_tokens == (32_000 if spec.small else 128_000)
+        assert spec.max_output_tokens == (
+            32_000 if model_id.startswith("claude-haiku-4-5") else 128_000
+        )
     for model_id, (input_rate, cached, output_rate, window, max_out) in _OPENAI_PRICES.items():
         spec = MODELS[model_id]
         assert spec.provider == "openai"
@@ -305,7 +309,8 @@ def test_cost_is_computed_from_the_pricing_table() -> None:
     assert cost_usd("claude-fable-5-1", cached) == pytest.approx(0.25)
     assert cost_usd("claude-fable-5", cached) == pytest.approx(1.00)
     assert cost_usd("claude-opus-5-5", cached) == pytest.approx(0.20)
-    assert cost_usd("claude-sonnet-5-5", cached) == pytest.approx(0.20)
+    assert cost_usd("claude-sonnet-5-5", cached) == pytest.approx(0.10)
+    assert cost_usd("claude-sonnet-5", cached) == pytest.approx(0.20)
     assert cost_usd("gpt-6-astra", usage) == pytest.approx(60.0)
     assert cost_usd("gpt-5.6-terra", usage) == pytest.approx(14.0)
     assert cost_usd("gpt-6.1-sol", cached) == pytest.approx(0.10)

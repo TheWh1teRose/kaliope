@@ -360,6 +360,7 @@ def _usage_delta(before: Usage, after: Usage) -> Usage:
         output_tokens=after.output_tokens - before.output_tokens,
         cache_read_tokens=after.cache_read_tokens - before.cache_read_tokens,
         cache_write_tokens=after.cache_write_tokens - before.cache_write_tokens,
+        cache_write_1h_tokens=after.cache_write_1h_tokens - before.cache_write_1h_tokens,
     )
 
 

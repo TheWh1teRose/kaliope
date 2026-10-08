@@ -175,9 +175,11 @@ def _usage(response: Any) -> Usage:
     raw = getattr(response, "usage", None)
     if raw is None:
         return Usage()
+    creation = getattr(raw, "cache_creation", None)
     return Usage(
         input_tokens=int(getattr(raw, "input_tokens", 0) or 0),
         output_tokens=int(getattr(raw, "output_tokens", 0) or 0),
         cache_read_tokens=int(getattr(raw, "cache_read_input_tokens", 0) or 0),
         cache_write_tokens=int(getattr(raw, "cache_creation_input_tokens", 0) or 0),
+        cache_write_1h_tokens=int(getattr(creation, "ephemeral_1h_input_tokens", 0) or 0),
     )
