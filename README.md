@@ -80,6 +80,12 @@ document at runtime by statistical, geometric or model-based means.
 Language-level resources — a stopword list, a readability formula, a speaking
 rate — are permitted and live in `app/lang/`.
 
+Zone classification uses the fallback model declared by `DEFAULT_SMALL_MODEL` in
+[the model registry](backend/app/llm/registry.py). Set `ZONE_MODEL` to override it;
+the ingest node's `zone_model` setting takes precedence over that environment
+variable. For sampling adaptation and classification caching, see
+[the classifier contract](docs/REQUIREMENTS.md#56-zone-classification--model-based-generic-taxonomy).
+
 Two design decisions carry the rest:
 
 **The `TextRun` primitive.** Normalization is never string manipulation over

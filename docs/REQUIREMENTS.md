@@ -288,7 +288,11 @@ model call over a fixed, publisher-neutral, language-neutral taxonomy.
 **Input to the classifier**, per block: index, truncated text, font size relative
 to the page's body median, bold flag, `in_filled_rect`, bbox, page position, and
 the enclosing section title if known. Batched at ~8 pages per call using a cheap
-model (`ZONE_MODEL`, default a small fast model, temperature 0).
+model (`ZONE_MODEL`; see `.env.example` for configuration and
+`app/llm/registry.py` for the fallback model). The classifier requests
+temperature 0; the provider drops it with a warning when the model does not
+accept sampling parameters. Repeatability comes from the classification cache, not a
+sampling guarantee.
 
 **Output**: `{block_index, zone, confidence}` for every block. Classification MUST
 be total — an unlabelled block is a bug, not a state.
@@ -774,7 +778,7 @@ proved only that two therapy PDFs still parsed. This section replaces that.
 | **INV-4** | Anchor round-trip: for 200 sampled `(block, start, end)` triples, resolving to `(page, rect)` and re-extracting returns the same string modulo whitespace, ≥99.5% of the time. |
 | **INV-5** | Zone labelling is total; every label is in the §5.6 taxonomy; every block has a salience value. |
 | **INV-6** | Normalization is idempotent: `normalize(normalize(x)) == normalize(x)`. |
-| **INV-7** | Determinism: two parses of the same file produce identical `ParsedDocument` hashes (zone classification cached, temperature 0). |
+| **INV-7** | Determinism: two parses of the same file produce identical `ParsedDocument` hashes (zone classification cached; see §5.6). |
 | **INV-8** | Blocks are strictly ordered, non-overlapping, non-empty; every section's block IDs exist; every block belongs to ≤1 section. |
 | **INV-9** | `IngestionReport` is fully populated, and `ingestion_confidence` is consistent with its inputs. |
 | **INV-10** | No unhandled degradation: a document with no outline, no tables, no objectives and no detectable boilerplate still parses and yields a usable `ParsedDocument`. |

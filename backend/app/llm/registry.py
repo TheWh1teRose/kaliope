@@ -2,8 +2,8 @@
 
 Pricing lives here so the run manifest can report cost in USD. Capabilities
 live here too, because provider APIs differ in ways a node must not have to
-know about: current frontier models reject ``temperature`` outright, while the
-cheap models used for classification still accept it. The client adapts the
+know about: current Claude models reject ``temperature`` outright, while
+older small models still accept it. The client adapts the
 request and records a warning rather than letting a node crash on a 400.
 
 An unknown model id is usable — the provider is inferred from its prefix and
@@ -33,9 +33,14 @@ class ModelSpec(BaseModel):
     provider: ProviderName
     input_usd_per_mtok: float
     output_usd_per_mtok: float
-    #: Multipliers applied to the input rate for cached tokens.
+    #: Multipliers applied to the input rate for cached tokens. Anthropic writes
+    #: use the default five-minute ephemeral TTL requested by our provider;
+    #: one-hour cache writes are not requested or separately accounted for.
     cache_read_multiplier: float = 0.1
     cache_write_multiplier: float = 1.25
+    #: Some models charge higher input AND output rates above this prompt size.
+    long_prompt_threshold: int | None = None
+    long_prompt_multiplier: float = 1.0
     context_window: int = 200_000
     max_output_tokens: int = 16_000
     #: ``False`` for models whose API rejects temperature/top_p/top_k.
@@ -140,6 +145,8 @@ MODELS: dict[str, ModelSpec] = {
             provider="anthropic",
             input_usd_per_mtok=2.0,
             output_usd_per_mtok=10.0,
+            # Cache hits fell from $0.20 to $0.10/MTok on 2026-10-07.
+            cache_read_multiplier=0.05,
             context_window=1_000_000,
             max_output_tokens=128_000,
             supports_sampling=False,
@@ -160,6 +167,19 @@ MODELS: dict[str, ModelSpec] = {
             output_usd_per_mtok=15.0,
             context_window=1_000_000,
             max_output_tokens=128_000,
+        ),
+        # Claude API model/pricing pages verified 2026-10-08.
+        ModelSpec(
+            id="claude-haiku-5-5",
+            provider="anthropic",
+            input_usd_per_mtok=0.10,
+            output_usd_per_mtok=0.50,
+            long_prompt_threshold=100_000,
+            long_prompt_multiplier=5.0,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            supports_sampling=False,
+            small=True,
         ),
         ModelSpec(
             id="claude-haiku-4-5",
@@ -316,6 +336,14 @@ _CAPABILITIES: dict[str, dict[str, object]] = {
         }
         for model_id in ("claude-fable-5-1", "claude-fable-5", "claude-sonnet-5-5")
     },
+    "claude-haiku-5-5": {
+        "supports_sampling": False,
+        "thinking_modes": ["adaptive", "off"],
+        "thinking_default": "on",
+        "thinking_off_max_effort": "high",
+        "effort_levels": _EFFORT_ALL,
+        "default_effort": "medium",
+    },
     "claude-opus-5-5": {
         "supports_sampling": False,
         "thinking_modes": ["adaptive"],
@@ -416,7 +444,7 @@ for _model_id, _capabilities in _CAPABILITIES.items():
         MODELS[_model_id] = MODELS[_model_id].model_copy(update=_capabilities)
 
 #: Fallback classifier when ``ZONE_MODEL`` is unset.
-DEFAULT_SMALL_MODEL = "claude-haiku-4-5"
+DEFAULT_SMALL_MODEL = "claude-haiku-5-5"
 
 _PROVIDER_PREFIXES: tuple[tuple[str, ProviderName], ...] = (
     ("claude", "anthropic"),
@@ -455,8 +483,16 @@ def cost_usd(model_id: str, usage: Usage) -> float:
     spec = MODELS.get(model_id)
     if spec is None:
         return 0.0
-    per_token_in = spec.input_usd_per_mtok / 1_000_000
-    per_token_out = spec.output_usd_per_mtok / 1_000_000
+    # Anthropic input_tokens excludes cache reads and writes; all three count
+    # toward the prompt-length tier. Apply the selected rate to output as well.
+    prompt_tokens = usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens
+    multiplier = (
+        spec.long_prompt_multiplier
+        if spec.long_prompt_threshold is not None and prompt_tokens > spec.long_prompt_threshold
+        else 1.0
+    )
+    per_token_in = spec.input_usd_per_mtok * multiplier / 1_000_000
+    per_token_out = spec.output_usd_per_mtok * multiplier / 1_000_000
     total = usage.input_tokens * per_token_in
     total += usage.output_tokens * per_token_out
     total += usage.cache_read_tokens * per_token_in * spec.cache_read_multiplier
