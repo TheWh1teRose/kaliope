@@ -125,6 +125,7 @@ def test_cache_ttl_usage_survives_accumulation_and_node_delta() -> None:
     ("node_model", "env_model", "expected"),
     [
         (None, "", "claude-haiku-5-5"),
+        (None, None, "claude-haiku-5-5"),
         (None, "claude-haiku-4-5", "claude-haiku-4-5"),
         ("claude-haiku-4-5-20251001", "claude-haiku-4-5", "claude-haiku-4-5-20251001"),
     ],
@@ -133,9 +134,18 @@ def test_ingest_classifier_default_and_overrides(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     node_model: str | None,
-    env_model: str,
+    env_model: str | None,
     expected: str,
 ) -> None:
+    if env_model is None:
+        env_file = Path(__file__).resolve().parents[2] / ".env.example"
+        docker_env = dict(
+            line.lstrip().split("=", 1)
+            for line in env_file.read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+        env_model = docker_env["ZONE_MODEL"]
+        assert env_model == ""
     monkeypatch.setattr(get_settings(), "zone_model", env_model)
     monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
     provider, calls = provider_with_usage(
