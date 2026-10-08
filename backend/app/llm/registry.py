@@ -33,7 +33,9 @@ class ModelSpec(BaseModel):
     provider: ProviderName
     input_usd_per_mtok: float
     output_usd_per_mtok: float
-    #: Multipliers applied to the input rate for cached tokens.
+    #: Multipliers applied to the input rate for cached tokens. Anthropic writes
+    #: use the default five-minute ephemeral TTL requested by our provider;
+    #: one-hour cache writes are not requested or separately accounted for.
     cache_read_multiplier: float = 0.1
     cache_write_multiplier: float = 1.25
     #: Some models charge higher input AND output rates above this prompt size.
