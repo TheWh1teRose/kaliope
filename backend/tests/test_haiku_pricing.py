@@ -16,7 +16,6 @@ from app.llm.anthropic import AnthropicProvider
 from app.llm.base import CompletionRequest, LLMClient, Message, Usage
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.pipeline.framework.node import NodeContext
-from app.pipeline.framework.runner import _usage_delta
 from app.pipeline.nodes.ingest import build_classifier
 from app.schemas.document import Block
 
@@ -42,23 +41,17 @@ def provider_with_usage(raw: Any, text: str = "ok") -> tuple[AnthropicProvider, 
 
 
 @pytest.mark.parametrize(
-    ("uncached", "read", "written", "hour", "expected"),
-    [(1000, 0, 0, 0, 0.012), (1000, 6000, 3000, 0, 0.0201), (1000, 6000, 3000, 1000, 0.0216)],
+    ("uncached", "read", "written", "expected"),
+    [(1000, 0, 0, 0.012), (1000, 6000, 3000, 0.0201)],
 )
 def test_sonnet_provider_usage_cost(
-    uncached: int, read: int, written: int, hour: int, expected: float
+    uncached: int, read: int, written: int, expected: float
 ) -> None:
     raw = AnthropicUsage(
         input_tokens=uncached,
         output_tokens=1000,
         cache_read_input_tokens=read,
         cache_creation_input_tokens=written,
-        cache_creation={
-            "ephemeral_5m_input_tokens": written - hour,
-            "ephemeral_1h_input_tokens": hour,
-        }
-        if hour
-        else None,
     )
     provider, _ = provider_with_usage(raw)
     client = LLMClient(resolve=lambda _: provider, cost_of=registry.cost_usd)
@@ -72,7 +65,6 @@ def test_sonnet_provider_usage_cost(
         output_tokens=1000,
         cache_read_tokens=read,
         cache_write_tokens=written,
-        cache_write_1h_tokens=hour,
     )
     assert registry.cost_usd(result.model_id, result.usage) == pytest.approx(expected)
     assert client.total_cost_usd == pytest.approx(expected)
@@ -112,13 +104,6 @@ def test_haiku_prompt_tier_counts_all_input_categories(
         )
     )
     assert client.total_cost_usd == pytest.approx(2 * expected)
-
-
-def test_cache_ttl_usage_survives_accumulation_and_node_delta() -> None:
-    before = Usage(cache_write_tokens=30, cache_write_1h_tokens=10)
-    delta = Usage(input_tokens=100, cache_write_tokens=300, cache_write_1h_tokens=100)
-    assert _usage_delta(before, before + delta) == delta
-    assert registry.cost_usd("claude-haiku-5-5", delta) == pytest.approx(0.000055)
 
 
 @pytest.mark.parametrize(

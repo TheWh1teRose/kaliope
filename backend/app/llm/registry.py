@@ -36,7 +36,6 @@ class ModelSpec(BaseModel):
     #: Multipliers applied to the input rate for cached tokens.
     cache_read_multiplier: float = 0.1
     cache_write_multiplier: float = 1.25
-    cache_write_1h_multiplier: float = 2.0
     #: Some models charge higher input AND output rates above this prompt size.
     long_prompt_threshold: int | None = None
     long_prompt_multiplier: float = 1.0
@@ -495,9 +494,7 @@ def cost_usd(model_id: str, usage: Usage) -> float:
     total = usage.input_tokens * per_token_in
     total += usage.output_tokens * per_token_out
     total += usage.cache_read_tokens * per_token_in * spec.cache_read_multiplier
-    writes_5m = usage.cache_write_tokens - usage.cache_write_1h_tokens
-    total += writes_5m * per_token_in * spec.cache_write_multiplier
-    total += usage.cache_write_1h_tokens * per_token_in * spec.cache_write_1h_multiplier
+    total += usage.cache_write_tokens * per_token_in * spec.cache_write_multiplier
     return round(total, 8)
 
 
