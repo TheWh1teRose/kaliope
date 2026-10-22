@@ -46,6 +46,7 @@ const store = {
     outcome: 'stopping',
     stopped_by: 'reviewer@kalliope.test',
   })),
+  restore: vi.fn(async () => run('completed')),
   progress: [] as { type: string; at: string }[],
   reconnecting: false,
 }
@@ -191,5 +192,35 @@ describe('run detail', () => {
     expect(wrapper.get('[data-stopped]').text()).toContain('Gestoppt von reviewer@kalliope.test')
     expect(wrapper.find('pre.trace').exists()).toBe(false)
     expect(wrapper.get('[data-again]').attributes('href')).toBe('/documents/d1/runs/new')
+  })
+
+  it('says a trashed run is in the trash and restores it from the page', async () => {
+    store.get.mockImplementation(async () => ({ ...run('completed'), trashed_at: '2026-10-04T09:00:00Z' }))
+    const wrapper = mount(RunDetailView, {
+      props: { id: 'r1' },
+      attachTo: document.body,
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-trashed]').text()).toContain(t.run.trashedDetail)
+    store.get.mockImplementation(async () => run('completed'))
+    await wrapper.get('[data-restore]').trigger('click')
+    await flushPromises()
+    expect(store.restore).toHaveBeenCalledWith('r1')
+    expect(wrapper.find('[data-trashed]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('offers restore instead of feedback submit while a paused run is trashed', async () => {
+    store.get.mockImplementation(async () => ({ ...run('paused'), trashed_at: '2026-10-04T09:00:00Z' }))
+    const wrapper = mount(RunDetailView, {
+      props: { id: 'r1' },
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain(t.run.openFeedback)
+    expect(wrapper.get('[data-trashed]').text()).toContain(t.run.trashedDetail)
+    expect(wrapper.get('[data-restore]').text()).toBe(t.run.restore)
+    wrapper.unmount()
   })
 })

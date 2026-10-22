@@ -40,13 +40,17 @@ const totalTokens = computed(() =>
 const reviewable = computed(
   () => run.value && ['completed', 'in_review', 'reviewed'].includes(run.value.status),
 )
-const awaitingNotes = computed(() => run.value?.status === 'paused')
+const awaitingNotes = computed(
+  () => run.value?.status === 'paused' && !run.value.trashed_at,
+)
 const stoppable = computed(() => ['queued', 'running'].includes(run.value?.status ?? ''))
 const stopped = computed(() => run.value?.status === 'stopped')
 const stoppedNotice = computed(() => {
   const who = run.value?.stopped_by
   return who ? fill(t.run.stoppedNoticeBy, { who }) : t.run.stoppedNotice
 })
+const restoring = ref(false)
+const restoreError = ref('')
 const confirmStop = ref(false)
 const stopping = ref(false)
 const stopError = ref('')
@@ -62,7 +66,7 @@ async function reload(): Promise<void> {
   // The graph needs the flow definition; a flow that has since been removed
   // leaves the rest of the page usable rather than blanking it.
   graph.value = await runs.graph(props.id).catch(() => null)
-  if (run.value.status === 'paused') await loadFeedback()
+  if (awaitingNotes.value) await loadFeedback()
   else {
     feedback.value = null
     notesOpen.value = false
@@ -96,6 +100,20 @@ function onLiveEvent(line: ProgressLine): void {
 function follow(): void {
   if (live.value) runs.watch(props.id, reload, onLiveEvent)
   else runs.stopWatching()
+}
+
+async function restore(): Promise<void> {
+  if (restoring.value) return
+  restoring.value = true
+  restoreError.value = ''
+  try {
+    await runs.restore(props.id)
+    run.value = await runs.get(props.id)
+  } catch (exc) {
+    restoreError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
+  } finally {
+    restoring.value = false
+  }
 }
 
 async function loadFeedback(): Promise<void> {
@@ -244,6 +262,13 @@ onUnmounted(() => {
       {{ t.run.verdictInsufficient }}
     </p>
     <p v-if="stopped" class="notice" data-stopped>{{ stoppedNotice }}</p>
+    <div v-if="run.trashed_at" class="notice trashed" data-trashed>
+      <span>{{ t.run.trashedDetail }}</span>
+      <button class="btn btn--sm" type="button" :disabled="restoring" data-restore @click="restore">
+        {{ t.run.restore }}
+      </button>
+    </div>
+    <p v-if="restoreError" class="notice notice--fail" role="alert">{{ restoreError }}</p>
 
     <section v-if="graph" class="sheet">
       <div class="spread">
@@ -583,6 +608,16 @@ onUnmounted(() => {
 .notice--fail {
   background: var(--fail-soft);
   color: var(--fail);
+}
+
+.trashed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  background: var(--sunk);
+  color: var(--ink-2);
 }
 
 .notes-overlay {
