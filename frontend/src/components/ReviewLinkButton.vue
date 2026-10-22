@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { ApiError } from '@/api/client'
 import {
   sharingApi,
@@ -370,6 +371,11 @@ const statusLabel = t.sharing.status
                   👍 {{ link.feedback.impressed }} · 🤢 {{ link.feedback.dislike }} · 🤮
                   {{ link.feedback.horrible }}
                 </p>
+                <RouterLink
+                  class="btn btn--sm in-script"
+                  :to="{ name: 'shared-feedback', params: { id: link.id } }"
+                  >{{ t.sharing.viewInScript }}</RouterLink
+                >
                 <article
                   v-for="response in link.feedback.responses"
                   :key="response.index"
@@ -525,7 +531,8 @@ const statusLabel = t.sharing.status
 }
 .feedback,
 .response,
-.marked {
+.marked,
+.in-script {
   margin-top: var(--s3);
 }
 .response p,

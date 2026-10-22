@@ -103,6 +103,34 @@ export interface LinkMetadata {
   status: 'active' | 'expired' | 'revoked'
   feedback?: FeedbackSummary
 }
+export interface FeedbackVoice {
+  response: number
+  reaction: LineReaction | null
+  slop: boolean
+  comment: string | null
+}
+export interface FeedbackLine {
+  ordinal: number
+  start_s: number | null
+  end_s: number | null
+  speaker: string
+  text: string
+  voices: FeedbackVoice[]
+}
+export interface FeedbackEpisode {
+  index: number
+  title: string
+  audio: { url: string; duration_s: number } | null
+  lines: FeedbackLine[]
+}
+/** The owner's view of one frozen stand with every voice on its line. */
+export interface FeedbackScript {
+  link: LinkMetadata & { feedback: FeedbackSummary }
+  target_kind: 'runs' | 'series'
+  target_id: string
+  title: string
+  episodes: FeedbackEpisode[]
+}
 export interface OwnerLinks {
   configured: boolean
   links: LinkMetadata[]
@@ -140,6 +168,10 @@ export const sharingApi = {
     ),
   revoke: (id: string) =>
     api.delete(`/api/review-links/${encodeURIComponent(id)}`),
+  feedbackScript: (id: string) =>
+    api.get<FeedbackScript>(
+      `/api/review-links/${encodeURIComponent(id)}/feedback`,
+    ),
   feedback: (token: string) => publicJson<FeedbackState>(token, '/feedback'),
   saveMark: (
     token: string,

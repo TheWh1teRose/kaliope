@@ -25,6 +25,7 @@ from app.models import ReviewFeedback, ReviewFeedbackMark, ReviewLink
 from app.schemas.sharing import (
     FeedbackState,
     FeedbackSummary,
+    FeedbackVoice,
     MarkedLine,
     MarkIn,
     MarkState,
@@ -265,12 +266,40 @@ def _counts(marks: list[ReviewFeedbackMark]) -> dict[str, int]:
     return totals
 
 
-def summary(db: Session, link: ReviewLink, content: dict[str, Any] | None) -> FeedbackSummary:
-    rows = db.scalars(
-        select(ReviewFeedback)
-        .where(ReviewFeedback.review_link_id == link.id)
-        .order_by(ReviewFeedback.created_at, ReviewFeedback.id)
+def _responses(db: Session, link: ReviewLink) -> list[ReviewFeedback]:
+    """Responses in the order the owner numbers them (Rückmeldung 1, 2, …)."""
+    return list(
+        db.scalars(
+            select(ReviewFeedback)
+            .where(ReviewFeedback.review_link_id == link.id)
+            .order_by(ReviewFeedback.created_at, ReviewFeedback.id)
+        ).all()
+    )
+
+
+def voices(db: Session, link: ReviewLink) -> dict[tuple[int, int], list[FeedbackVoice]]:
+    """Every mark on this stand, grouped by ``(episode, ordinal)``."""
+    numbers = {row.id: index for index, row in enumerate(_responses(db, link), start=1)}
+    grouped: dict[tuple[int, int], list[FeedbackVoice]] = {}
+    if not numbers:
+        return grouped
+    marks = db.scalars(
+        select(ReviewFeedbackMark).where(ReviewFeedbackMark.feedback_id.in_(numbers))
     ).all()
+    for mark in sorted(marks, key=lambda m: numbers[m.feedback_id]):
+        grouped.setdefault((mark.episode_index, mark.ordinal), []).append(
+            FeedbackVoice(
+                response=numbers[mark.feedback_id],
+                reaction=mark.reaction or None,  # type: ignore[arg-type]
+                slop=mark.slop,
+                comment=mark.comment,
+            )
+        )
+    return grouped
+
+
+def summary(db: Session, link: ReviewLink, content: dict[str, Any] | None) -> FeedbackSummary:
+    rows = _responses(db, link)
     responses: list[ResponseSummary] = []
     lines: list[MarkedLine] = []
     totals = {"impressed": 0, "dislike": 0, "horrible": 0, "slop": 0}

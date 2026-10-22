@@ -62,6 +62,12 @@ export const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: '/review-links/:id/feedback',
+    name: 'shared-feedback',
+    component: () => import('@/views/SharedFeedbackView.vue'),
+    props: true,
+  },
+  {
     path: '/runs/:id/gates',
     name: 'run-gates',
     component: () => import('@/views/GatesView.vue'),
