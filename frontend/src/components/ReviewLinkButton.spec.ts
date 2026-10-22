@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { sharingApi } from '@/api/sharing'
 import { ApiError } from '@/api/client'
@@ -73,7 +73,7 @@ afterEach(() => {
 async function show() {
   const wrapper = mount(ReviewLinkButton, {
     props: { kind: 'series', targetId: 'series-one', ready: true },
-    global: { stubs: { Teleport: true } },
+    global: { stubs: { Teleport: true, RouterLink: RouterLinkStub } },
   })
   wrappers.push(wrapper)
   await wrapper.find('button').trigger('click')
@@ -116,6 +116,9 @@ describe('owner review links', () => {
     const w = await show()
     expect(w.find('.marked').text()).toContain('Comment only')
     expect(w.find('.marked').text()).not.toContain('🤮')
+    const inScript = w.findComponent(RouterLinkStub)
+    expect(inScript.text()).toBe('Im Skript ansehen')
+    expect(inScript.props('to')).toEqual({ name: 'shared-feedback', params: { id: 'link-one' } })
   })
   it('requires missing-audio acknowledgement and validates internally without a visible preview', async () => {
     const w = await show()

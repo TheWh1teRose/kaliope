@@ -1078,3 +1078,80 @@ def test_old_snapshot_without_ordinals_still_reads(owner: TestClient) -> None:
         }
     ]
     assert body["episodes"][0]["pages"] == []
+
+
+def test_owner_sees_every_voice_on_its_frozen_line(owner: TestClient) -> None:
+    rid = run()
+    tid, blob = take(rid)
+    with session_scope() as db:
+        recording = db.get(AudioTake, tid)
+        assert recording
+        mix = AudioMix(
+            blob=blob,
+            duration_s=12,
+            gap_s=0.3,
+            loudness_lufs=-16,
+            chunk_offsets_s=[0],
+            lines=[{"segment_id": "seg-private", "start_s": 2.3, "end_s": 9.1}],
+        )
+        recording.manifest_json = {"bag_hashes": {"audio_mix": store().put("audio_mix", mix).hash}}
+    created = share(owner, rid, choice(tid))
+    link_id = created["link"]["id"]
+    path = public_path(created) + "/feedback"
+    marks = [
+        (1, {"reaction": "dislike", "slop": True, "comment": "zu glatt"}),
+        (2, {"reaction": "impressed"}),
+        (3, {"reaction": None, "comment": "Quelle?"}),
+    ]
+    for reviewer, mark in marks:
+        saved = owner.put(
+            path + "/marks", headers=_reviewer(reviewer), json={"episode": 1, "ordinal": 0, **mark}
+        )
+        assert saved.status_code == 200
+    owner.put(path + "/sheet", headers=_reviewer(2), json={"stars": 4.5, "worked": "Tempo"})
+
+    view = owner.get(f"/api/review-links/{link_id}/feedback")
+    assert view.status_code == 200, view.text
+    body = view.json()
+    assert body["target_kind"] == "runs"
+    assert body["target_id"] == rid
+    assert body["title"] == "Public title"
+    assert body["link"]["feedback"]["responses"][1]["stars"] == 4.5
+    episode = body["episodes"][0]
+    assert episode["audio"]["url"] == f"/api/review-links/{link_id}/episodes/1/audio"
+    line = episode["lines"][0]
+    assert (line["ordinal"], line["start_s"], line["end_s"]) == (0, 2.3, 9.1)
+    assert line["voices"] == [
+        {"response": 1, "reaction": "dislike", "slop": True, "comment": "zu glatt"},
+        {"response": 2, "reaction": "impressed", "slop": False, "comment": None},
+        {"response": 3, "reaction": None, "slop": False, "comment": "Quelle?"},
+    ]
+    assert "seg-private" not in view.text
+    assert "blob" not in view.text
+
+    audio = owner.get(episode["audio"]["url"])
+    assert audio.status_code == 200
+    assert audio.content == b"ID3-test-podcast-bytes"
+
+    # Revocation stops the public link, not the owner's reading of its feedback.
+    assert owner.delete(f"/api/review-links/{link_id}").status_code == 204
+    revoked = owner.get(f"/api/review-links/{link_id}/feedback")
+    assert revoked.status_code == 200
+    assert revoked.json()["link"]["status"] == "revoked"
+    assert len(revoked.json()["episodes"][0]["lines"][0]["voices"]) == 3
+    assert owner.get("/api/review-links/missing/feedback").status_code == 404
+
+    owner.cookies.clear()
+    assert owner.get(f"/api/review-links/{link_id}/feedback").status_code == 401
+    assert owner.get(f"/api/review-links/{link_id}/episodes/1/audio").status_code == 401
+
+
+def test_owner_feedback_view_of_a_script_only_stand_has_no_audio(owner: TestClient) -> None:
+    rid = run()
+    created = share(owner, rid, choice())
+    body = owner.get(f"/api/review-links/{created['link']['id']}/feedback").json()
+    episode = body["episodes"][0]
+    assert episode["audio"] is None
+    assert episode["lines"][0]["start_s"] is None
+    assert episode["lines"][0]["voices"] == []
+    assert body["link"]["feedback"]["responses"] == []

@@ -145,6 +145,41 @@ class LinkMetadata(BaseModel):
     feedback: FeedbackSummary = Field(default_factory=FeedbackSummary)
 
 
+class FeedbackVoice(BaseModel):
+    """One response's mark on one frozen line, numbered like the summary."""
+
+    response: int
+    reaction: ReactionName | None
+    slop: bool = False
+    comment: str | None = None
+
+
+class FeedbackLine(BaseModel):
+    ordinal: int
+    start_s: float | None = None
+    end_s: float | None = None
+    speaker: str
+    text: str
+    voices: list[FeedbackVoice] = Field(default_factory=list)
+
+
+class FeedbackEpisode(BaseModel):
+    index: int
+    title: str
+    audio: ReaderAudio | None = None
+    lines: list[FeedbackLine]
+
+
+class FeedbackScript(BaseModel):
+    """Owner view: the frozen stand with every voice on the line it marks."""
+
+    link: LinkMetadata
+    target_kind: Literal["runs", "series"]
+    target_id: str
+    title: str
+    episodes: list[FeedbackEpisode]
+
+
 class OwnerLinks(BaseModel):
     configured: bool
     links: list[LinkMetadata]

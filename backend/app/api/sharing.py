@@ -32,6 +32,9 @@ from app.schemas.sharing import (
     CreatedLink,
     CreateShare,
     EpisodeOptions,
+    FeedbackEpisode,
+    FeedbackLine,
+    FeedbackScript,
     FeedbackState,
     LinkMetadata,
     MarkIn,
@@ -54,6 +57,7 @@ from app.sharing_feedback import (
     save_mark,
     save_sheet,
     state,
+    voices,
 )
 from app.sharing_feedback import (
     summary as feedback_summary,
@@ -562,11 +566,7 @@ def read_share(token: str, request: Request, db: Session = Depends(get_db)) -> R
         ) from None
 
 
-@router.get("/public/review-links/{token}/episodes/{index}/audio")
-def share_audio(
-    token: str, index: int, request: Request, db: Session = Depends(get_db)
-) -> FileResponse:
-    row = _grant(db, token, request)
+def _audio(row: ReviewLink, index: int) -> FileResponse:
     try:
         content = _store().get_raw(row.snapshot_hash)
         episode = next(e for e in content["episodes"] if e["index"] == index)
@@ -581,6 +581,81 @@ def share_audio(
     return FileResponse(
         path, media_type="audio/mpeg", filename="podcast.mp3", content_disposition_type="inline"
     )
+
+
+@router.get("/public/review-links/{token}/episodes/{index}/audio")
+def share_audio(
+    token: str, index: int, request: Request, db: Session = Depends(get_db)
+) -> FileResponse:
+    return _audio(_grant(db, token, request), index)
+
+
+def _owned(db: Session, link_id: str) -> ReviewLink:
+    row = db.get(ReviewLink, link_id)
+    if row is None:
+        raise problem(404, "Not found", "No such review link.")
+    return row
+
+
+@router.get("/review-links/{link_id}/feedback", response_model=FeedbackScript)
+def feedback_script(
+    link_id: str, db: Session = Depends(get_db), _user: User = Depends(require_admin)
+) -> FeedbackScript:
+    """The frozen stand of one link with its feedback on each line, for the owner.
+
+    Revoked and expired links stay readable here: their feedback remains the
+    owner's. Audio is served from the owner route, never through the bearer URL.
+    """
+    row = _owned(db, link_id)
+    content = _snapshot(row)
+    if content is None:
+        raise problem(404, "Stand nicht verfügbar", "Der geteilte Stand kann nicht geladen werden.")
+    grouped = voices(db, row)
+    try:
+        episodes = [
+            FeedbackEpisode(
+                index=e["index"],
+                title=e["title"],
+                audio=ReaderAudio(
+                    url=f"/api/review-links/{row.id}/episodes/{e['index']}/audio",
+                    duration_s=e["audio"]["duration_s"],
+                )
+                if e.get("audio")
+                else None,
+                lines=[
+                    FeedbackLine(
+                        # Marks address the position in the frozen list (save_mark).
+                        ordinal=ordinal,
+                        start_s=s.get("start_s"),
+                        end_s=s.get("end_s"),
+                        speaker=s["speaker"],
+                        text=s["text"],
+                        voices=grouped.get((e["index"], ordinal), []),
+                    )
+                    for ordinal, s in enumerate(e.get("segments") or [])
+                ],
+            )
+            for e in content["episodes"]
+        ]
+        title = content["title"]
+    except (KeyError, TypeError):
+        raise problem(
+            404, "Stand nicht verfügbar", "Der geteilte Stand kann nicht geladen werden."
+        ) from None
+    return FeedbackScript(
+        link=_metadata(db, row),
+        target_kind="series" if row.target_kind == "series" else "runs",
+        target_id=row.target_id,
+        title=title,
+        episodes=episodes,
+    )
+
+
+@router.get("/review-links/{link_id}/episodes/{index}/audio")
+def feedback_audio(
+    link_id: str, index: int, db: Session = Depends(get_db), _user: User = Depends(require_admin)
+) -> FileResponse:
+    return _audio(_owned(db, link_id), index)
 
 
 def _listed_image(content: dict[str, Any], image: str, episode_index: int | None = None) -> bool:
