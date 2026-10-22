@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.accounts import author_labels
@@ -268,20 +268,34 @@ def trash_run(
     run = _require_run(db, run_id)
     if run.trashed_at is not None:
         return _run_out(db, run, detailed=False)
-    if run.series_id is not None:
-        raise problem(
-            409,
-            "Run belongs to a series",
-            "An episode is part of its series and cannot be moved to the trash on its own.",
+    trashed = db.execute(
+        update(Run)
+        .where(
+            Run.id == run_id,
+            Run.trashed_at.is_(None),
+            Run.series_id.is_(None),
+            Run.status.notin_(tuple(_LIVE_STATUSES)),
         )
-    if run.status in _LIVE_STATUSES or worker.job_active(run.id):
+        .values(trashed_at=utcnow())
+    )
+    if trashed.rowcount != 1:
+        db.rollback()
+        db.refresh(run)
+        if run.trashed_at is not None:
+            return _run_out(db, run, detailed=False)
+        if run.series_id is not None:
+            raise problem(
+                409,
+                "Run belongs to a series",
+                "An episode is part of its series and cannot be moved to the trash on its own.",
+            )
         raise problem(
             409,
             "Run is still in progress",
             "Stop the run, or wait for it to finish, before moving it to the trash.",
         )
-    run.trashed_at = utcnow()
     db.commit()
+    db.refresh(run)
     return _run_out(db, run, detailed=False)
 
 

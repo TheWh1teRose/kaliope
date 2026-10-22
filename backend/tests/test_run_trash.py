@@ -8,11 +8,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import feedback as feedback_api
+from app.api.runs import trash_run
 from app.db import session_scope
 from app.errors import ProblemException
 from app.main import create_app
 from app.models import Document, Run, RunNode, Series, User
-from app.models.base import utcnow
 from app.worker import worker
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.security import hash_password
@@ -172,6 +172,8 @@ def test_a_trashed_paused_run_cannot_be_started(client: TestClient, document_id:
     detail = client.get(f"/api/runs/{run_id}").json()
     assert detail["status"] == "paused"
     assert detail["trashed_at"] == before["trashed_at"]
+    assert "submitted_hash" not in detail["manifest"]["pause"]
+    assert detail["manifest"]["pause"]["draft_notes"] == []
     assert detail["active"] is False
     assert run_id not in _listed(client)
     assert run_id in _listed(client, trashed=True)
@@ -188,7 +190,7 @@ def test_a_trashed_paused_run_cannot_be_started(client: TestClient, document_id:
     assert after["active"] is False
 
 
-def test_a_submit_that_overlaps_trash_stays_paused(
+def test_a_claimed_run_cannot_be_trashed(
     client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run_id = _run(
@@ -204,27 +206,64 @@ def test_a_submit_that_overlaps_trash_stays_paused(
         },
     )
     real_compile = feedback_api.compile_submission
+    queued: list[str] = []
 
     def trash_while_compiling(*args: object, **kwargs: object) -> object:
         with session_scope() as session:
             run = session.get(Run, run_id)
-            assert run is not None and run.status == "paused"
-            run.trashed_at = utcnow()
+            assert run is not None and run.status == "queued" and run.trashed_at is None
+            with pytest.raises(ProblemException) as caught:
+                trash_run(run_id, session)
+            assert caught.value.status_code == 409
+            assert caught.value.detail == (
+                "Stop the run, or wait for it to finish, before moving it to the trash."
+            )
         return real_compile(*args, **kwargs)
 
     monkeypatch.setattr(feedback_api, "compile_submission", trash_while_compiling)
+    monkeypatch.setattr(worker, "submit_run", lambda claimed: queued.append(claimed))
     submitted = client.post(f"/api/runs/{run_id}/feedback/submit", json={"notes": []})
-    assert submitted.status_code == 409, submitted.text
-    assert submitted.json()["detail"] == "Restore the run before starting it again."
+    assert submitted.status_code == 200, submitted.text
+    assert queued == [run_id]
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "queued"
+    assert detail["trashed_at"] is None
+    assert detail["manifest"]["pause"]["submitted_hash"]
+    assert run_id not in _listed(client, trashed=True)
+
+    refused = client.post(f"/api/runs/{run_id}/trash")
+    assert refused.status_code == 409, refused.text
+    after = client.get(f"/api/runs/{run_id}").json()
+    assert after["status"] == "queued"
+    assert after["trashed_at"] is None
+
+
+def test_a_failed_submit_releases_the_claim(
+    client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = _run(
+        document_id,
+        status="paused",
+        manifest_json={
+            "pause": {
+                "node": "human_feedback",
+                "payload": {"subject": "script", "instructions": "Weiter"},
+                "bag_hashes": {},
+                "draft_notes": [],
+            }
+        },
+    )
+
+    def fail_compile(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("bad notes")
+
+    monkeypatch.setattr(feedback_api, "compile_submission", fail_compile)
+    submitted = client.post(f"/api/runs/{run_id}/feedback/submit", json={"notes": []})
+    assert submitted.status_code == 422, submitted.text
 
     detail = client.get(f"/api/runs/{run_id}").json()
     assert detail["status"] == "paused"
-    assert detail["trashed_at"]
-    assert detail["active"] is False
-    assert run_id in _listed(client, trashed=True)
-
-    restored = client.post(f"/api/runs/{run_id}/restore")
-    assert restored.status_code == 200, restored.text
-    assert restored.json()["status"] == "paused"
-    assert restored.json()["trashed_at"] is None
+    assert detail["trashed_at"] is None
+    assert "submitted_hash" not in detail["manifest"]["pause"]
     assert run_id in _listed(client)
