@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.errors import problem
+from app.errors import ProblemException, problem
 from app.events import bus
 from app.models import BenchRun, Run, User
 from app.pipeline.feedback import (
@@ -119,7 +119,12 @@ def submit_run_feedback(
     # Clear before the page re-subscribes: the paused event of the last execution
     # would otherwise replay and end the new stream at once.
     bus.clear(run_id)
-    worker.submit_run(run_id)
+    try:
+        worker.submit_run(run_id)
+    except ProblemException:
+        run.status = "paused"
+        db.commit()
+        raise
     return feedback_out(
         run_id=run_id,
         kind="run",

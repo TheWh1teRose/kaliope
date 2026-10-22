@@ -7,10 +7,12 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api import feedback as feedback_api
 from app.db import session_scope
 from app.errors import ProblemException
 from app.main import create_app
 from app.models import Document, Run, RunNode, Series, User
+from app.models.base import utcnow
 from app.worker import worker
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.security import hash_password
@@ -184,3 +186,45 @@ def test_a_trashed_paused_run_cannot_be_started(client: TestClient, document_id:
     assert after["status"] == "paused"
     assert after["trashed_at"] == before["trashed_at"]
     assert after["active"] is False
+
+
+def test_a_submit_that_overlaps_trash_stays_paused(
+    client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = _run(
+        document_id,
+        status="paused",
+        manifest_json={
+            "pause": {
+                "node": "human_feedback",
+                "payload": {"subject": "script", "instructions": "Weiter"},
+                "bag_hashes": {},
+                "draft_notes": [],
+            }
+        },
+    )
+    real_compile = feedback_api.compile_submission
+
+    def trash_while_compiling(*args: object, **kwargs: object) -> object:
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            assert run is not None and run.status == "paused"
+            run.trashed_at = utcnow()
+        return real_compile(*args, **kwargs)
+
+    monkeypatch.setattr(feedback_api, "compile_submission", trash_while_compiling)
+    submitted = client.post(f"/api/runs/{run_id}/feedback/submit", json={"notes": []})
+    assert submitted.status_code == 409, submitted.text
+    assert submitted.json()["detail"] == "Restore the run before starting it again."
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "paused"
+    assert detail["trashed_at"]
+    assert detail["active"] is False
+    assert run_id in _listed(client, trashed=True)
+
+    restored = client.post(f"/api/runs/{run_id}/restore")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "paused"
+    assert restored.json()["trashed_at"] is None
+    assert run_id in _listed(client)
