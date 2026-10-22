@@ -14,9 +14,9 @@ from app.db import session_scope
 from app.errors import ProblemException
 from app.main import create_app
 from app.models import Document, Run, RunNode, Series, User
-from app.worker import worker
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.security import hash_password
+from app.worker import worker
 
 PASSWORD = "trash-password-1"
 EMAIL = "trash@kalliope.test"

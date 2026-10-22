@@ -12,12 +12,12 @@ import json
 import queue
 from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from app.accounts import author_labels
@@ -278,7 +278,7 @@ def trash_run(
         )
         .values(trashed_at=utcnow())
     )
-    if trashed.rowcount != 1:
+    if cast(CursorResult[Any], trashed).rowcount != 1:
         db.rollback()
         db.refresh(run)
         if run.trashed_at is not None:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import update
+from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -36,9 +38,7 @@ def _store() -> ArtifactStore:
 
 def _release_queued_claim(db: Session, run_id: str) -> None:
     db.rollback()
-    db.execute(
-        update(Run).where(Run.id == run_id, Run.status == "queued").values(status="paused")
-    )
+    db.execute(update(Run).where(Run.id == run_id, Run.status == "queued").values(status="paused"))
     db.commit()
 
 
@@ -111,7 +111,7 @@ def submit_run_feedback(
         .where(Run.id == run_id, Run.status == "paused", Run.trashed_at.is_(None))
         .values(status="queued", error=None)
     )
-    if claimed.rowcount != 1:
+    if cast(CursorResult[Any], claimed).rowcount != 1:
         db.rollback()
         db.refresh(run)
         if run.trashed_at is not None:
@@ -137,7 +137,7 @@ def submit_run_feedback(
             .where(Run.id == run_id, Run.status == "queued", Run.trashed_at.is_(None))
             .values(manifest_json=manifest)
         )
-        if held.rowcount != 1:
+        if cast(CursorResult[Any], held).rowcount != 1:
             db.rollback()
             lost_claim = True
         else:
