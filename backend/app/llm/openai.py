@@ -7,7 +7,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.llm import registry
-from app.llm.base import Completion, CompletionRequest, LLMError, Usage
+from app.llm.base import Completion, CompletionRequest, LLMError, Usage, empty_completion_error
 
 
 class OpenAIProvider:
@@ -75,7 +75,7 @@ class OpenAIProvider:
         choice = response.choices[0]
         text = choice.message.content or ""
         if not text.strip():
-            raise LLMError(f"empty completion (finish_reason={choice.finish_reason})")
+            raise empty_completion_error("finish_reason", choice.finish_reason)
 
         return Completion(
             text=text,

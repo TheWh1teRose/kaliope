@@ -186,7 +186,7 @@ class SeriesPlanInput(BaseModel):
 class SeriesPlanNode:
     name = "series_plan"
     title = "Folgen planen"
-    version = "1.2"
+    version = "1.3"
     Input: type[BaseModel] = SeriesPlanInput
     Output: type[BaseModel] = SeriesPlan
     produces = "series_plan"
@@ -269,9 +269,14 @@ class SeriesPlanNode:
             key="max_tokens",
             label="Max output tokens",
             type="int",
-            default=16000,
-            minimum=1000,
+            default=0,
+            minimum=0,
             maximum=64000,
+            description=(
+                "0 disables the app's output cap. Provider limits still apply, including "
+                "reasoning tokens: a reasoning model can spend a fixed cap on thinking and "
+                "return no plan."
+            ),
             advanced=True,
         ),
     ]
@@ -304,7 +309,7 @@ class SeriesPlanNode:
                         model=ctx.model("claude-opus-5"),
                         system=str(ctx.get("system_prompt") or _SYSTEM),
                         messages=[Message(role="user", content=message)],
-                        max_tokens=int(ctx.get("max_tokens", 16000)),
+                        max_tokens=int(ctx.get("max_tokens", 0)),
                         temperature=ctx.get("temperature"),
                         effort=ctx.request_effort(ctx.model("claude-opus-5")),
                         json_schema=_SCHEMA,
