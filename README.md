@@ -283,7 +283,20 @@ key's SHA-256. Feedback is bound to that link and its frozen snapshot, addressed
 by a share-local line ordinal.
 Replacing the link does not carry marks onto the new text. Writes use the same
 expiry and revocation check as reads. The owner summary on the share screen
-lists reactions, stars, answers and lines with reactions or comments. Each link admits
+lists reactions, stars, answers and lines with reactions or comments. **Im Skript
+ansehen** on that screen opens one page per snapshot
+(`/review-links/{id}/feedback`). It shows the frozen script: the questionnaire
+(stars and what worked or did not) above a person filter — displayed names are
+unverified — then each episode as a strip. Strip width is speaking time when the
+episode has audio and every line is timed; otherwise each line is the same
+width. Height is how many voices are on the line, and a click jumps to that
+line. Each line has a coloured gutter for how it was received, counts of
+👍 / 🤢 / 🤮, KI-Slop and comments, and the comment text in the margin beside
+the line. A reaction without a comment stays a short label there. Hiding a
+person removes their marks, counts and questionnaire answers. When the episode
+has audio and a line has a start time, playback can begin there; that audio
+uses the signed-in admin route, not the public bearer URL. Revoked and expired snapshots stay readable on this
+page. Each link admits
 at most 20 browser identities for feedback; clearing feedback does not release
 a slot. Already admitted browsers can continue updating their feedback.
 
@@ -304,15 +317,16 @@ than making a bucket or existing authenticated audio endpoints public.
 
 Anyone with the URL can read and listen, and can forward or save the content.
 Links expire after 30 days and can be revoked manually. Revocation is checked
-on every metadata/audio request, including byte ranges; it cannot recall bytes
-already received. One link can be active per run/series; a run link and its
+on every public metadata and audio request, including byte ranges; it cannot
+recall bytes already received. One link can be active per run/series; a run link and its
 series link are independent. Replacing it requires
 confirmation and atomically revokes the previous link only after the new
 snapshot is validated. The full URL is returned once when created; management
 lists dates and status, never the bearer token. Losing it requires replacement.
 The database stores a SHA-256 token digest, not the token itself. Snapshot
 artifacts and pinned media retain the existing artifact-store lifetime; expiry
-or revocation removes access, not stored files.
+or revocation removes public access, not stored files. The owner's script page
+for that snapshot stays available.
 
 Creation is disabled until `REVIEW_PUBLIC_ORIGIN` is configured as the reviewed
 external HTTPS origin, with no credentials, path, query or fragment. The preview
