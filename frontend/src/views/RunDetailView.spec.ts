@@ -61,6 +61,7 @@ function router() {
       { path: '/experiments/bench', name: 'bench', component: { template: '<div />' } },
       { path: '/runs/:id/gates', name: 'run-gates', component: { template: '<div />' } },
       { path: '/runs/:id/review', name: 'review', component: { template: '<div />' } },
+      { path: '/review-links/:id/feedback', name: 'shared-feedback', component: { template: '<div />' } },
     ],
   })
 }
@@ -76,6 +77,7 @@ describe('run detail', () => {
   it('puts sharing and received feedback under the Feedback menu without replacing run controls or routes', async () => {
     vi.spyOn(sharingApi, 'links').mockResolvedValue({ configured: true, links: [] })
     vi.spyOn(sharingApi, 'options').mockResolvedValue({ title: 'Review', episodes: [] })
+    vi.spyOn(sharingApi, 'all').mockResolvedValue({ configured: true, links: [] })
     const navigation = router()
     const wrapper = mount(RunDetailView, { props: { id: 'r1' }, attachTo: document.body, global: { plugins: [navigation] } })
     await flushPromises()
@@ -87,9 +89,26 @@ describe('run detail', () => {
     expect(wrapper.find('[data-run-tab]').isVisible()).toBe(false)
     expect(wrapper.find('[data-stop]').exists()).toBe(true)
     expect(sharingApi.links).toHaveBeenCalledWith('runs', 'r1')
+    // The same list as the Feedback page, narrowed to this run.
+    expect(sharingApi.all).toHaveBeenCalledWith({ kind: 'runs', id: 'r1' })
+    expect(wrapper.find('[data-feedback-tab] [data-empty]').exists()).toBe(true)
     await wrapper.findAll('nav button')[0].trigger('click')
     expect(wrapper.find('[data-run-tab]').isVisible()).toBe(true)
     expect(wrapper.find('[data-feedback-tab]').exists()).toBe(false)
+    wrapper.unmount()
+    vi.restoreAllMocks()
+  })
+
+  it('opens on the Feedback tab when the feedback list links here', async () => {
+    vi.spyOn(sharingApi, 'links').mockResolvedValue({ configured: true, links: [] })
+    vi.spyOn(sharingApi, 'options').mockResolvedValue({ title: 'Review', episodes: [] })
+    vi.spyOn(sharingApi, 'all').mockResolvedValue({ configured: true, links: [] })
+    const navigation = router()
+    navigation.addRoute({ path: '/runs/:id', name: 'run', component: { template: '<div />' } })
+    await navigation.push({ name: 'run', params: { id: 'r1' }, query: { tab: 'feedback' } })
+    const wrapper = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [navigation] } })
+    await flushPromises()
+    expect(wrapper.find('[data-feedback-tab]').exists()).toBe(true)
     wrapper.unmount()
     vi.restoreAllMocks()
   })

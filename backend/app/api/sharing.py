@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import FileResponse
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.api.audio import _mix, _spoken_script
@@ -24,7 +24,16 @@ from app.db import get_db
 from app.errors import ProblemException, problem
 from app.ingestion import anchors as anchor_tools
 from app.ingestion.extract import page_size, render_page_png
-from app.models import AudioTake, Document, ReviewLink, Run, RunNode, Series, User
+from app.models import (
+    AudioTake,
+    Document,
+    ReviewFeedback,
+    ReviewLink,
+    Run,
+    RunNode,
+    Series,
+    User,
+)
 from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import Script
@@ -44,6 +53,8 @@ from app.schemas.sharing import (
     ReaderPage,
     ReaderSegment,
     ReaderSnapshot,
+    ReviewLinkIndex,
+    ReviewLinkRow,
     ShareOptions,
     ShareSelection,
     SheetIn,
@@ -362,17 +373,20 @@ def _snapshot(row: ReviewLink) -> dict[str, Any] | None:
     return content if isinstance(content, dict) else None
 
 
-def _metadata(db: Session, row: ReviewLink) -> LinkMetadata:
-    status: Literal["active", "expired", "revoked"] = "active"
+def _status(row: ReviewLink) -> Literal["active", "expired", "revoked"]:
     if row.revoked_at:
-        status = "revoked"
-    elif _as_aware(row.expires_at) <= datetime.now(UTC):
-        status = "expired"
+        return "revoked"
+    if _as_aware(row.expires_at) <= datetime.now(UTC):
+        return "expired"
+    return "active"
+
+
+def _metadata(db: Session, row: ReviewLink) -> LinkMetadata:
     return LinkMetadata(
         id=row.id,
         created_at=_as_aware(row.created_at).isoformat(),
         expires_at=_as_aware(row.expires_at).isoformat(),
-        status=status,
+        status=_status(row),
         feedback=feedback_summary(db, row, _snapshot(row)),
     )
 
@@ -431,6 +445,74 @@ def owner_links(
         configured=bool(get_settings().review_public_origin),
         links=[_metadata(db, row) for row in rows],
     )
+
+
+def _target_title(db: Session, kind: str, target_id: str) -> str | None:
+    if kind == "series":
+        series = db.get(Series, target_id)
+        return (series.name or series.document.title) if series else None
+    run = db.get(Run, target_id)
+    return (run.name or run.document.title) if run else None
+
+
+@router.get("/review-links", response_model=ReviewLinkIndex)
+def all_links(
+    kind: Kind | None = None,
+    target_id: str | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_admin),
+) -> ReviewLinkIndex:
+    """Every shared stand, newest first, with its response count and last activity.
+
+    Read-only over existing rows. ``kind`` and ``target_id`` narrow it to one run
+    or series, which is how a run shows its own feedback.
+    """
+    query = select(ReviewLink).order_by(ReviewLink.created_at.desc()).limit(200)
+    if kind:
+        query = query.where(ReviewLink.target_kind == kind)
+    if target_id:
+        query = query.where(ReviewLink.target_id == target_id)
+    rows = db.scalars(query).all()
+    activity = {
+        link_id: (count, latest)
+        for link_id, count, latest in db.execute(
+            select(
+                ReviewFeedback.review_link_id,
+                func.count(),
+                func.max(ReviewFeedback.updated_at),
+            )
+            .where(ReviewFeedback.review_link_id.in_([row.id for row in rows]))
+            .group_by(ReviewFeedback.review_link_id)
+        ).all()
+    }
+    titles: dict[tuple[str, str], str | None] = {}
+    links = []
+    for row in rows:
+        target = (row.target_kind, row.target_id)
+        if target not in titles:
+            titles[target] = _target_title(db, *target)
+        content = _snapshot(row) or {}
+        count, latest = activity.get(row.id, (0, None))
+        links.append(
+            ReviewLinkRow(
+                id=row.id,
+                target_kind="series" if row.target_kind == "series" else "runs",
+                target_id=row.target_id,
+                target_title=titles[target],
+                title=content.get("title") if isinstance(content.get("title"), str) else None,
+                episodes=[
+                    str(e.get("title") or "")
+                    for e in content.get("episodes") or []
+                    if isinstance(e, dict)
+                ],
+                created_at=_as_aware(row.created_at).isoformat(),
+                expires_at=_as_aware(row.expires_at).isoformat(),
+                status=_status(row),
+                responses=count,
+                last_activity=_as_aware(latest).isoformat() if latest else None,
+            )
+        )
+    return ReviewLinkIndex(configured=bool(get_settings().review_public_origin), links=links)
 
 
 @router.post("/{kind}/{target_id}/review-link/preview")

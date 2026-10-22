@@ -185,6 +185,30 @@ class OwnerLinks(BaseModel):
     links: list[LinkMetadata]
 
 
+class ReviewLinkRow(BaseModel):
+    """One shared stand in the feedback list: where it came from and how far it got."""
+
+    id: str
+    target_kind: Literal["runs", "series"]
+    target_id: str
+    #: The run or series name as it is now; ``None`` once the target is gone.
+    target_title: str | None = None
+    #: The title and episode titles reviewers saw, from the frozen snapshot.
+    title: str | None = None
+    episodes: list[str] = Field(default_factory=list)
+    created_at: str
+    expires_at: str
+    status: Literal["active", "expired", "revoked"]
+    responses: int = 0
+    #: When a reviewer last changed a response; ``None`` without responses.
+    last_activity: str | None = None
+
+
+class ReviewLinkIndex(BaseModel):
+    configured: bool
+    links: list[ReviewLinkRow]
+
+
 class CreatedLink(BaseModel):
     link: LinkMetadata
     url: str

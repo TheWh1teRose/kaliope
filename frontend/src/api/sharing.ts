@@ -135,6 +135,24 @@ export interface OwnerLinks {
   configured: boolean
   links: LinkMetadata[]
 }
+/** One shared stand in the feedback list. */
+export interface ReviewLinkRow {
+  id: string
+  target_kind: 'runs' | 'series'
+  target_id: string
+  target_title: string | null
+  title: string | null
+  episodes: string[]
+  created_at: string
+  expires_at: string
+  status: LinkMetadata['status']
+  responses: number
+  last_activity: string | null
+}
+export interface ReviewLinkIndex {
+  configured: boolean
+  links: ReviewLinkRow[]
+}
 export interface SharePreview {
   snapshot: SharedSnapshot
   key: string
@@ -165,6 +183,12 @@ export const sharingApi = {
         preview_key: key,
         replace_link_id: replaceId,
       },
+    ),
+  all: (target?: { kind: 'runs' | 'series'; id: string }) =>
+    api.get<ReviewLinkIndex>(
+      target
+        ? `/api/review-links?kind=${target.kind}&target_id=${encodeURIComponent(target.id)}`
+        : '/api/review-links',
     ),
   revoke: (id: string) =>
     api.delete(`/api/review-links/${encodeURIComponent(id)}`),

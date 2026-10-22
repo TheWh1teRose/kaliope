@@ -1155,3 +1155,43 @@ def test_owner_feedback_view_of_a_script_only_stand_has_no_audio(owner: TestClie
     assert episode["lines"][0]["start_s"] is None
     assert episode["lines"][0]["voices"] == []
     assert body["link"]["feedback"]["responses"] == []
+
+
+def test_feedback_list_shows_every_stand_with_its_responses(owner: TestClient) -> None:
+    first, second = run(), run()
+    old = share(owner, first, choice())
+    path = public_path(old) + "/feedback"
+    for reviewer in (1, 2):
+        mark = {"episode": 1, "ordinal": 0, "reaction": "impressed"}
+        assert owner.put(path + "/marks", headers=_reviewer(reviewer), json=mark).status_code == 200
+    assert owner.delete(f"/api/review-links/{old['link']['id']}").status_code == 204
+    other = share(owner, second, choice())
+
+    listed = owner.get("/api/review-links")
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert body["configured"] is True
+    rows = {row["id"]: row for row in body["links"]}
+    assert {old["link"]["id"], other["link"]["id"]} <= set(rows)
+    revoked = rows[old["link"]["id"]]
+    assert revoked["target_kind"] == "runs"
+    assert revoked["target_id"] == first
+    assert revoked["target_title"] == "Private run name"
+    assert revoked["title"] == "Public title"
+    assert revoked["episodes"] == ["Public episode"]
+    assert revoked["status"] == "revoked"
+    assert revoked["responses"] == 2
+    assert revoked["last_activity"] is not None
+    fresh = rows[other["link"]["id"]]
+    assert (fresh["status"], fresh["responses"], fresh["last_activity"]) == ("active", 0, None)
+    # Newest first, and no bearer material in the list.
+    ids = [row["id"] for row in body["links"]]
+    assert ids.index(other["link"]["id"]) < ids.index(old["link"]["id"])
+    assert old["url"].rsplit("/", 1)[1] not in listed.text
+
+    narrowed = owner.get("/api/review-links", params={"kind": "runs", "target_id": first})
+    assert [row["id"] for row in narrowed.json()["links"]] == [old["link"]["id"]]
+    assert owner.get("/api/review-links", params={"kind": "documents"}).status_code == 422
+
+    owner.cookies.clear()
+    assert owner.get("/api/review-links").status_code == 401

@@ -21,6 +21,7 @@ const props = defineProps<{
   ready: boolean
   inline?: boolean
 }>()
+const emit = defineEmits<{ (e: 'changed'): void }>()
 const open = ref(false)
 const busy = ref(false)
 const loading = ref(false)
@@ -150,6 +151,7 @@ async function create(confirmed = false): Promise<void> {
     url.value = result.url
     copyState.value = ''
     replaceConfirmation.value = false
+    emit('changed')
     if (management.value)
       management.value.links = [
         result.link,
@@ -186,6 +188,7 @@ async function revoke(): Promise<void> {
     revokeId.value = null
     url.value = ''
     copyState.value = ''
+    emit('changed')
   } catch (exc) {
     if (current === generation) error.value = message(exc)
   } finally {
@@ -361,71 +364,19 @@ const statusLabel = t.sharing.status
                 })
               }}
             </p>
-            <div v-if="link.feedback" class="feedback">
-              <p class="eyebrow">{{ t.sharing.ownerFeedback }}</p>
-              <p v-if="!link.feedback.responses.length" class="meta">
-                {{ t.sharing.noFeedback }}
-              </p>
-              <template v-else>
-                <p class="meta">
-                  👍 {{ link.feedback.impressed }} · 🤢 {{ link.feedback.dislike }} · 🤮
-                  {{ link.feedback.horrible }}
-                </p>
-                <RouterLink
-                  class="btn btn--sm in-script"
-                  :to="{ name: 'shared-feedback', params: { id: link.id } }"
-                  >{{ t.sharing.viewInScript }}</RouterLink
-                >
-                <article
-                  v-for="response in link.feedback.responses"
-                  :key="response.index"
-                  class="response"
-                >
-                  <p>
-                    <b>{{
-                      fill(t.sharing.responseLabel, { n: response.index })
-                    }}</b>
-                  </p>
-                  <p v-if="response.stars != null" class="meta">
-                    {{
-                      fill(t.sharing.starsValue, {
-                        n: response.stars.toLocaleString('de-DE'),
-                      })
-                    }}
-                  </p>
-                  <p v-if="response.worked" class="meta">
-                    {{ t.sharing.worked }} {{ response.worked }}
-                  </p>
-                  <p v-if="response.did_not" class="meta">
-                    {{ t.sharing.didNot }} {{ response.did_not }}
-                  </p>
-                </article>
-                <div v-if="link.feedback.lines.length">
-                  <p class="eyebrow">{{ t.sharing.markedLines }}</p>
-                  <article
-                    v-for="line in link.feedback.lines"
-                    :key="`${line.response}-${line.key}`"
-                    class="marked"
-                  >
-                    <p class="meta">
-                      {{ line.key }} ·
-                      {{
-                        line.reaction === 'impressed'
-                          ? '👍'
-                          : line.reaction === 'dislike'
-                            ? '🤢'
-                            : line.reaction === 'horrible' ? '🤮' : t.sharing.comment
-                      }}
-                      · {{ fill(t.sharing.responseLabel, { n: line.response }) }}
-                    </p>
-                    <p v-if="line.speaker || line.text">
-                      <b>{{ line.speaker }}</b> {{ line.text }}
-                    </p>
-                    <p v-if="line.comment" class="meta">{{ line.comment }}</p>
-                  </article>
-                </div>
-              </template>
-            </div>
+            <p v-if="link.feedback" class="meta feedback">
+              {{
+                link.feedback.responses.length
+                  ? fill(t.feedbackBoard.responseCount, { n: link.feedback.responses.length })
+                  : t.sharing.noFeedback
+              }}
+              <RouterLink
+                v-if="link.feedback.responses.length"
+                class="btn btn--sm in-script"
+                :to="{ name: 'shared-feedback', params: { id: link.id } }"
+                >{{ t.sharing.viewInScript }}</RouterLink
+              >
+            </p>
           </div>
           <button
             v-if="link.status === 'active'"
@@ -529,15 +480,13 @@ const statusLabel = t.sharing.status
   overflow-wrap: anywhere;
   margin-top: var(--s2);
 }
-.feedback,
-.response,
-.marked,
-.in-script {
-  margin-top: var(--s3);
+.feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
 }
-.response p,
-.marked p {
-  margin: 0 0 var(--s2);
-  overflow-wrap: anywhere;
+.in-script {
+  text-decoration: none;
 }
 </style>

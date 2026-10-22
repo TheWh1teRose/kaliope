@@ -66,3 +66,14 @@ describe('settings route', () => {
     ).toBe('/settings?tab=organisation')
   })
 })
+
+describe('feedback routes', () => {
+  it('lists all feedback under its own top-level address', () => {
+    expect(freshRouter().resolve('/feedback').name).toBe('feedbacks')
+  })
+
+  it('keeps the run notes and the shared-stand pages where they were', () => {
+    expect(freshRouter().resolve('/runs/r1/feedback').name).toBe('feedback')
+    expect(freshRouter().resolve('/review-links/l1/feedback').name).toBe('shared-feedback')
+  })
+})
