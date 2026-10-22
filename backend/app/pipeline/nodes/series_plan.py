@@ -270,12 +270,10 @@ class SeriesPlanNode:
             label="Max output tokens",
             type="int",
             default=0,
-            minimum=0,
             maximum=64000,
             description=(
-                "0 disables the app's output cap. Provider limits still apply, including "
-                "reasoning tokens: a reasoning model can spend a fixed cap on thinking and "
-                "return no plan."
+                "Provider limits still apply, including reasoning tokens: a reasoning "
+                "model can spend a fixed cap on thinking and return no plan."
             ),
             advanced=True,
         ),

@@ -101,7 +101,7 @@ def test_a_cap_below_what_reasoning_needs_names_the_length_stop(tmp_path: Path) 
     assert "finish_reason=length" in str(caught.value)
 
 
-def test_the_cap_can_be_turned_off_from_the_editor() -> None:
+def test_the_planner_cap_defaults_off_without_an_editor_switch() -> None:
     (param,) = [p for p in node_params(SeriesPlanNode()) if p.key == "max_tokens"]
-    assert param.minimum == 0
     assert param.default == 0
+    assert param.minimum != 0
