@@ -246,6 +246,29 @@ describe('runs trash', () => {
     wrapper.unmount()
   })
 
+  it('shows a trash load failure instead of an empty trash', async () => {
+    runs.trashed.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = await mountList('/runs?tab=trash')
+    expect(wrapper.get('[data-trash-load-error]').text()).toContain(t.errors.generic)
+    expect(wrapper.text()).not.toContain(t.run.trashEmpty)
+    expect(wrapper.find('[data-trash-list]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps a loaded trash list when a later load fails', async () => {
+    const row = { ...runRow('r-old', 'failed'), trashed_at: '2026-10-04T09:00:00Z' }
+    runs.trashed.mockResolvedValueOnce([row])
+    const wrapper = await mountList('/runs?tab=trash')
+    expect(wrapper.findAll('[data-trash-list] tbody tr')).toHaveLength(1)
+    runs.trashed.mockRejectedValueOnce(new ApiError(503, 'Down', 'Papierkorb nicht geladen.'))
+    await wrapper.get('[data-restore]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-trash-load-error]').text()).toContain('Papierkorb nicht geladen.')
+    expect(wrapper.findAll('[data-trash-list] tbody tr')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain(t.run.trashEmpty)
+    wrapper.unmount()
+  })
+
   it('shows a rejected trash request', async () => {
     runs.trash.mockRejectedValueOnce(new ApiError(409, 'Run is still in progress', 'Erst stoppen.'))
     const wrapper = await mountList()

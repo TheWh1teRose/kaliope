@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import session_scope
+from app.errors import problem
 from app.events import bus
 from app.ingestion.pipeline import ParseOptions, parse
 from app.ingestion.zones import ZoneCache, ZoneClassifier
@@ -213,6 +214,14 @@ class Worker:
     # ------------------------------------------------------------------ runs
 
     def submit_run(self, run_id: str) -> Future[Any]:
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            if run is not None and run.trashed_at is not None:
+                raise problem(
+                    409,
+                    "Run is in the trash",
+                    "Restore the run before starting it again.",
+                )
         self._arm(run_id)
         return self._track(run_id, self.submit(self.execute_run, run_id))
 
@@ -299,6 +308,9 @@ class Worker:
             if tagged is None:
                 logger.warning("execution requested for unknown run %s", run_id)
                 return None
+            if tagged.trashed_at is not None:
+                logger.warning("refusing to execute trashed run %s", run_id)
+                return None
             if tagged.status == "stopped":
                 return False
             if tagged.series_id and tagged.episode_index is not None:
@@ -313,6 +325,9 @@ class Worker:
             run = session.get(Run, run_id)
             if run is None:
                 logger.warning("execution requested for unknown run %s", run_id)
+                return None
+            if run.trashed_at is not None:
+                logger.warning("refusing to execute trashed run %s", run_id)
                 return None
             halted = False
             if run.status == "stopped":

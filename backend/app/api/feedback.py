@@ -97,6 +97,12 @@ def submit_run_feedback(
         raise problem(404, "No such run", str(exc)) from exc
     except ValueError as exc:
         raise problem(409, "Not waiting", str(exc)) from exc
+    if run.trashed_at is not None:
+        raise problem(
+            409,
+            "Run is in the trash",
+            "Restore the run before starting it again.",
+        )
     store = _store()
     try:
         notes = compile_submission(store, run.manifest_json, payload.notes)

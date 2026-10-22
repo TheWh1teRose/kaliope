@@ -40,7 +40,9 @@ const totalTokens = computed(() =>
 const reviewable = computed(
   () => run.value && ['completed', 'in_review', 'reviewed'].includes(run.value.status),
 )
-const awaitingNotes = computed(() => run.value?.status === 'paused')
+const awaitingNotes = computed(
+  () => run.value?.status === 'paused' && !run.value.trashed_at,
+)
 const stoppable = computed(() => ['queued', 'running'].includes(run.value?.status ?? ''))
 const stopped = computed(() => run.value?.status === 'stopped')
 const stoppedNotice = computed(() => {
@@ -64,7 +66,7 @@ async function reload(): Promise<void> {
   // The graph needs the flow definition; a flow that has since been removed
   // leaves the rest of the page usable rather than blanking it.
   graph.value = await runs.graph(props.id).catch(() => null)
-  if (run.value.status === 'paused') await loadFeedback()
+  if (awaitingNotes.value) await loadFeedback()
   else {
     feedback.value = null
     notesOpen.value = false

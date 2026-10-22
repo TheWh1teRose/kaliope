@@ -8,8 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db import session_scope
+from app.errors import ProblemException
 from app.main import create_app
 from app.models import Document, Run, RunNode, Series, User
+from app.worker import worker
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.security import hash_password
 
@@ -141,3 +143,44 @@ def test_an_episode_is_trashed_only_with_its_series(client: TestClient, document
 def test_trashing_an_unknown_run_is_a_404(client: TestClient) -> None:
     assert client.post("/api/runs/nope/trash").status_code == 404
     assert client.post("/api/runs/nope/restore").status_code == 404
+
+
+def test_a_trashed_paused_run_cannot_be_started(client: TestClient, document_id: str) -> None:
+    run_id = _run(
+        document_id,
+        status="paused",
+        manifest_json={
+            "pause": {
+                "node": "human_feedback",
+                "payload": {"subject": "script", "instructions": "Weiter"},
+                "bag_hashes": {},
+                "draft_notes": [],
+            }
+        },
+    )
+    trashed = client.post(f"/api/runs/{run_id}/trash")
+    assert trashed.status_code == 200, trashed.text
+    before = client.get(f"/api/runs/{run_id}").json()
+    assert before["trashed_at"]
+
+    submitted = client.post(f"/api/runs/{run_id}/feedback/submit", json={"notes": []})
+    assert submitted.status_code == 409, submitted.text
+    assert submitted.json()["detail"] == "Restore the run before starting it again."
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "paused"
+    assert detail["trashed_at"] == before["trashed_at"]
+    assert detail["active"] is False
+    assert run_id not in _listed(client)
+    assert run_id in _listed(client, trashed=True)
+
+    with pytest.raises(ProblemException) as caught:
+        worker.submit_run(run_id)
+    assert caught.value.status_code == 409
+    assert caught.value.detail == "Restore the run before starting it again."
+
+    worker.execute_run(run_id)
+    after = client.get(f"/api/runs/{run_id}").json()
+    assert after["status"] == "paused"
+    assert after["trashed_at"] == before["trashed_at"]
+    assert after["active"] is False

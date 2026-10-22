@@ -210,4 +210,17 @@ describe('run detail', () => {
     expect(wrapper.find('[data-trashed]').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('offers restore instead of feedback submit while a paused run is trashed', async () => {
+    store.get.mockImplementation(async () => ({ ...run('paused'), trashed_at: '2026-10-04T09:00:00Z' }))
+    const wrapper = mount(RunDetailView, {
+      props: { id: 'r1' },
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain(t.run.openFeedback)
+    expect(wrapper.get('[data-trashed]').text()).toContain(t.run.trashedDetail)
+    expect(wrapper.get('[data-restore]').text()).toBe(t.run.restore)
+    wrapper.unmount()
+  })
 })

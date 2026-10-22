@@ -28,6 +28,8 @@ const route = useRoute()
 const router = useRouter()
 const series = ref<SeriesOut[]>([])
 const trash = ref<RunOut[]>([])
+const trashLoaded = ref(false)
+const trashLoadError = ref('')
 /** The run just trashed, so the notice can offer to take it back. */
 const lastTrashed = ref<RunOut | null>(null)
 const trashBusy = ref<string | null>(null)
@@ -58,7 +60,13 @@ function trashable(run: RunOut): boolean {
 }
 
 async function loadTrash(): Promise<void> {
-  trash.value = await runs.trashed().catch(() => trash.value)
+  try {
+    trash.value = await runs.trashed()
+    trashLoaded.value = true
+    trashLoadError.value = ''
+  } catch (exc) {
+    trashLoadError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
+  }
 }
 
 async function load(): Promise<void> {
@@ -166,8 +174,11 @@ onUnmounted(() => {
 
     <template v-if="tab === 'trash'">
       <p class="muted lead">{{ t.run.trashLead }}</p>
-      <p v-if="!trash.length" class="muted empty">{{ t.run.trashEmpty }}</p>
-      <table v-else class="runs" data-trash-list>
+      <p v-if="trashLoadError" class="notice notice--fail" role="alert" data-trash-load-error>
+        {{ trashLoadError }}
+      </p>
+      <p v-if="trashLoaded && !trashLoadError && !trash.length" class="muted empty">{{ t.run.trashEmpty }}</p>
+      <table v-if="trash.length" class="runs" data-trash-list>
         <thead>
           <tr>
             <th>{{ t.run.document }}</th>
