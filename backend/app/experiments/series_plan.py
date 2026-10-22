@@ -42,7 +42,8 @@ from app.pipeline.objective_rule import formulated_goal
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import AudienceSpec, ContentBudget, FormatSpec, SeriesRequest
 
-#: The series planner pins this model and this ``max_tokens``.
+#: The series planner pins this model. Its node has no app output cap; an experiment
+#: needs a positive ``max_tokens``, so it runs with this one.
 PRODUCTION_MODEL = "claude-opus-5"
 PRODUCTION_MAX_TOKENS = 16000
 
