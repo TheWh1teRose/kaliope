@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.errors import problem
+from app.errors import ProblemException, problem
 from app.events import bus
 from app.models import BenchRun, Run, User
 from app.pipeline.feedback import (
@@ -37,9 +37,7 @@ def _store() -> ArtifactStore:
 def _release_queued_claim(db: Session, run_id: str) -> None:
     db.rollback()
     db.execute(
-        update(Run)
-        .where(Run.id == run_id, Run.status == "queued", Run.trashed_at.is_(None))
-        .values(status="paused")
+        update(Run).where(Run.id == run_id, Run.status == "queued").values(status="paused")
     )
     db.commit()
 
@@ -126,24 +124,48 @@ def submit_run_feedback(
     db.commit()
     db.refresh(run)
     store = _store()
+    lost_claim = False
     try:
         notes = compile_submission(store, run.manifest_json, payload.notes)
         stored = store.put("notes", notes)
         pause = (run.manifest_json or {}).get("pause") or {}
         node_name = str(pause.get("node") or "human_feedback")
+        manifest = mark_submitted(run.manifest_json, stored.hash, notes)
         persist_human_output(db, kind="run", run_id=run_id, node_name=node_name, digest=stored.hash)
-        run.manifest_json = mark_submitted(run.manifest_json, stored.hash, notes)
-        db.commit()
+        held = db.execute(
+            update(Run)
+            .where(Run.id == run_id, Run.status == "queued", Run.trashed_at.is_(None))
+            .values(manifest_json=manifest)
+        )
+        if held.rowcount != 1:
+            db.rollback()
+            lost_claim = True
+        else:
+            db.commit()
     except (KeyError, ValueError) as exc:
         _release_queued_claim(db, run_id)
         raise problem(422, "Invalid notes", str(exc)) from exc
     except Exception:
         _release_queued_claim(db, run_id)
         raise
+    if lost_claim:
+        db.refresh(run)
+        if run.trashed_at is not None:
+            raise problem(
+                409,
+                "Run is in the trash",
+                "Restore the run before starting it again.",
+            )
+        raise problem(409, "Not waiting", f"run status is '{run.status}', not paused")
+    db.refresh(run)
     # Clear before the page re-subscribes: the paused event of the last execution
     # would otherwise replay and end the new stream at once.
     bus.clear(run_id)
-    worker.submit_run(run_id)
+    try:
+        worker.submit_run(run_id)
+    except ProblemException:
+        _release_queued_claim(db, run_id)
+        raise
     return feedback_out(
         run_id=run_id,
         kind="run",

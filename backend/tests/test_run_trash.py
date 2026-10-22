@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.api import feedback as feedback_api
 from app.api.runs import trash_run
@@ -267,3 +268,45 @@ def test_a_failed_submit_releases_the_claim(
     assert detail["trashed_at"] is None
     assert "submitted_hash" not in detail["manifest"]["pause"]
     assert run_id in _listed(client)
+
+
+def test_a_stop_during_claim_does_not_submit_the_pause(
+    client: TestClient, document_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = _run(
+        document_id,
+        status="paused",
+        manifest_json={
+            "pause": {
+                "node": "human_feedback",
+                "payload": {"subject": "script", "instructions": "Weiter"},
+                "bag_hashes": {},
+                "draft_notes": [],
+            }
+        },
+    )
+    real_compile = feedback_api.compile_submission
+    started: list[str] = []
+
+    def stop_while_compiling(*args: object, **kwargs: object) -> object:
+        with session_scope() as session:
+            user_id = session.scalars(select(User.id).where(User.email == EMAIL)).one()
+            run = session.get(Run, run_id)
+            assert run is not None and run.status == "queued" and run.trashed_at is None
+        status, _outcome = worker.stop_run(run_id, user_id)
+        assert status == "stopped"
+        return real_compile(*args, **kwargs)
+
+    monkeypatch.setattr(feedback_api, "compile_submission", stop_while_compiling)
+    monkeypatch.setattr(worker, "submit_run", lambda claimed: started.append(claimed))
+    submitted = client.post(f"/api/runs/{run_id}/feedback/submit", json={"notes": []})
+    assert submitted.status_code == 409, submitted.text
+    assert submitted.json()["detail"] == "run status is 'stopped', not paused"
+    assert started == []
+
+    detail = client.get(f"/api/runs/{run_id}").json()
+    assert detail["status"] == "stopped"
+    assert detail["trashed_at"] is None
+    assert "submitted_hash" not in detail["manifest"]["pause"]
+    assert detail["manifest"]["pause"]["draft_notes"] == []
+    assert [node["node_name"] for node in detail["nodes"]] == ["script"]
