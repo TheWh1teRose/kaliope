@@ -77,7 +77,7 @@ describe('run detail', () => {
   it('puts sharing and received feedback under the Feedback menu without replacing run controls or routes', async () => {
     vi.spyOn(sharingApi, 'links').mockResolvedValue({ configured: true, links: [] })
     vi.spyOn(sharingApi, 'options').mockResolvedValue({ title: 'Review', episodes: [] })
-    vi.spyOn(sharingApi, 'all').mockResolvedValue({ configured: true, links: [] })
+    vi.spyOn(sharingApi, 'all').mockResolvedValue({ links: [] })
     const navigation = router()
     const wrapper = mount(RunDetailView, { props: { id: 'r1' }, attachTo: document.body, global: { plugins: [navigation] } })
     await flushPromises()
@@ -102,7 +102,7 @@ describe('run detail', () => {
   it('opens on the Feedback tab when the feedback list links here', async () => {
     vi.spyOn(sharingApi, 'links').mockResolvedValue({ configured: true, links: [] })
     vi.spyOn(sharingApi, 'options').mockResolvedValue({ title: 'Review', episodes: [] })
-    vi.spyOn(sharingApi, 'all').mockResolvedValue({ configured: true, links: [] })
+    vi.spyOn(sharingApi, 'all').mockResolvedValue({ links: [] })
     const navigation = router()
     navigation.addRoute({ path: '/runs/:id', name: 'run', component: { template: '<div />' } })
     await navigation.push({ name: 'run', params: { id: 'r1' }, query: { tab: 'feedback' } })

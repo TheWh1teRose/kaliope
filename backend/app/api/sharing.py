@@ -450,9 +450,23 @@ def owner_links(
 def _target_title(db: Session, kind: str, target_id: str) -> str | None:
     if kind == "series":
         series = db.get(Series, target_id)
-        return (series.name or series.document.title) if series else None
+        if series is None:
+            return None
+        plan_title = None
+        if not series.name:
+            plan = load_plan(_store(), series)
+            plan_title = plan.title if plan is not None else None
+        document = series.document
+        return (
+            series.name
+            or plan_title
+            or ((document.title or document.filename) if document is not None else None)
+        )
     run = db.get(Run, target_id)
-    return (run.name or run.document.title) if run else None
+    if run is None:
+        return None
+    document = run.document
+    return run.name or ((document.title or document.filename) if document is not None else None)
 
 
 @router.get("/review-links", response_model=ReviewLinkIndex)
@@ -467,7 +481,7 @@ def all_links(
     Read-only over existing rows. ``kind`` and ``target_id`` narrow it to one run
     or series, which is how a run shows its own feedback.
     """
-    query = select(ReviewLink).order_by(ReviewLink.created_at.desc()).limit(200)
+    query = select(ReviewLink).order_by(ReviewLink.created_at.desc())
     if kind:
         query = query.where(ReviewLink.target_kind == kind)
     if target_id:
@@ -512,7 +526,7 @@ def all_links(
                 last_activity=_as_aware(latest).isoformat() if latest else None,
             )
         )
-    return ReviewLinkIndex(configured=bool(get_settings().review_public_origin), links=links)
+    return ReviewLinkIndex(links=links)
 
 
 @router.post("/{kind}/{target_id}/review-link/preview")

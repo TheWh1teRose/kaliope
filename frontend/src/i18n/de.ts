@@ -1321,6 +1321,7 @@ export default {
     pickRun: 'Lauf',
     pickPlaceholder: 'Lauf wählen …',
     noRuns: 'Noch kein fertiger Lauf zum Teilen.',
+    runsError: 'Die Läufe konnten nicht geladen werden.',
     share: 'Teilen',
     stand: 'Geteilter Stand',
     source: 'Lauf / Serie',

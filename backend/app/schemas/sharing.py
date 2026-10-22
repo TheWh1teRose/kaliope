@@ -191,7 +191,7 @@ class ReviewLinkRow(BaseModel):
     id: str
     target_kind: Literal["runs", "series"]
     target_id: str
-    #: The run or series name as it is now; ``None`` once the target is gone.
+    #: How the runs or series list names it now; ``None`` once that row is gone.
     target_title: str | None = None
     #: The title and episode titles reviewers saw, from the frozen snapshot.
     title: str | None = None
@@ -205,7 +205,6 @@ class ReviewLinkRow(BaseModel):
 
 
 class ReviewLinkIndex(BaseModel):
-    configured: bool
     links: list[ReviewLinkRow]
 
 

@@ -150,7 +150,6 @@ export interface ReviewLinkRow {
   last_activity: string | null
 }
 export interface ReviewLinkIndex {
-  configured: boolean
   links: ReviewLinkRow[]
 }
 export interface SharePreview {

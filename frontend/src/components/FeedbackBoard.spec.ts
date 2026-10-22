@@ -62,9 +62,11 @@ function board(props: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  vi.mocked(sharingApi.all).mockResolvedValue({ configured: true, links: [runRow, seriesRow] })
+  vi.mocked(sharingApi.all).mockResolvedValue({ links: [runRow, seriesRow] })
   vi.mocked(sharingApi.links).mockResolvedValue({ configured: true, links: [] })
   vi.mocked(sharingApi.options).mockResolvedValue({ title: 'Review', episodes: [] })
+  store.load.mockReset()
+  store.load.mockImplementation(async () => undefined)
   store.items = [
     { id: 'run-one', status: 'completed', name: null, document_title: 'Physiologie', created_at: runRow.created_at },
     { id: 'run-busy', status: 'running', name: null, document_title: 'Anatomie', created_at: runRow.created_at },
@@ -105,7 +107,7 @@ describe('FeedbackBoard', () => {
   })
 
   it('says so when nothing is shared yet and when the list fails', async () => {
-    vi.mocked(sharingApi.all).mockResolvedValueOnce({ configured: true, links: [] })
+    vi.mocked(sharingApi.all).mockResolvedValueOnce({ links: [] })
     const empty = board()
     await flushPromises()
     expect(empty.find('[data-empty]').text()).toContain('Noch kein Feedback')
@@ -121,7 +123,7 @@ describe('FeedbackBoard', () => {
     await flushPromises()
     await w.find('[data-create]').trigger('click')
     await flushPromises()
-    expect(store.load).toHaveBeenCalled()
+    expect(store.load).toHaveBeenCalledWith(undefined, 500)
     const picker = document.body.querySelector<HTMLSelectElement>('#feedback-run')!
     const choices = [...picker.options].filter((o) => o.value).map((o) => o.value)
     expect(choices).toEqual(['run-one'])
@@ -140,7 +142,7 @@ describe('FeedbackBoard', () => {
   })
 
   it('shows one run its own feedback and sharing controls', async () => {
-    vi.mocked(sharingApi.all).mockResolvedValue({ configured: true, links: [runRow] })
+    vi.mocked(sharingApi.all).mockResolvedValue({ links: [runRow] })
     const w = board({ run: { id: 'run-one', ready: false } })
     await flushPromises()
     expect(sharingApi.all).toHaveBeenCalledWith({ kind: 'runs', id: 'run-one' })
@@ -149,5 +151,33 @@ describe('FeedbackBoard', () => {
     expect(w.find('tbody tr').text()).toContain('Herz und Kreislauf')
     const share = w.findComponent(ReviewLinkButton)
     expect(share.props()).toMatchObject({ kind: 'runs', targetId: 'run-one', ready: false })
+  })
+
+  it('says there is no finished run only after that list loads empty', async () => {
+    store.items = []
+    const w = board()
+    await flushPromises()
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('Noch kein fertiger Lauf')
+  })
+
+  it('shows the run-list error instead of claiming there is nothing to share', async () => {
+    store.items = []
+    store.load.mockRejectedValueOnce(new ApiError(500, 'Error', ''))
+    const w = board()
+    await flushPromises()
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    expect(store.load).toHaveBeenCalledWith(undefined, 500)
+    expect(document.body.textContent).toContain('Die Läufe konnten nicht geladen werden')
+    expect(document.body.textContent).not.toContain('Noch kein fertiger Lauf')
+
+    store.load.mockRejectedValueOnce(new ApiError(503, 'Error', 'Datenbank nicht erreichbar'))
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('Datenbank nicht erreichbar')
+    expect(document.body.textContent).not.toContain('Noch kein fertiger Lauf')
+    expect(document.body.textContent).not.toContain('Die Läufe konnten nicht geladen werden')
   })
 })

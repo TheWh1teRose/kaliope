@@ -26,6 +26,8 @@ const creating = ref(false)
 const chosen = ref('')
 
 const shareable = computed(() => runs.items.filter((run) => READY.has(run.status)))
+const pickerError = ref('')
+const runsLoaded = ref(false)
 
 function when(value: string): string {
   return new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
@@ -49,8 +51,16 @@ async function load(): Promise<void> {
 
 async function startCreate(): Promise<void> {
   chosen.value = ''
+  pickerError.value = ''
+  runsLoaded.value = false
   creating.value = true
-  await runs.load().catch(() => undefined)
+  try {
+    await runs.load(undefined, 500)
+    runsLoaded.value = true
+  } catch (exc) {
+    pickerError.value =
+      exc instanceof ApiError && exc.detail ? exc.detail : t.feedbackBoard.runsError
+  }
 }
 
 function closeCreate(): void {
@@ -153,6 +163,7 @@ onMounted(load)
       wide
       @close="closeCreate"
     >
+      <p v-if="pickerError" class="notice notice--fail" role="alert">{{ pickerError }}</p>
       <div class="field">
         <label for="feedback-run">{{ t.feedbackBoard.pickRun }}</label>
         <select id="feedback-run" v-model="chosen" class="select" data-autofocus>
@@ -161,7 +172,9 @@ onMounted(load)
             {{ runTitle(run) }} · {{ when(run.created_at) }}
           </option>
         </select>
-        <p v-if="!shareable.length" class="muted hint">{{ t.feedbackBoard.noRuns }}</p>
+        <p v-if="!pickerError && runsLoaded && !shareable.length" class="muted hint">
+          {{ t.feedbackBoard.noRuns }}
+        </p>
       </div>
       <ReviewLinkButton
         v-if="chosen"

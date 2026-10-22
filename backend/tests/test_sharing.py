@@ -135,6 +135,24 @@ def choice(take_id: str | None = None) -> dict[str, Any]:
     }
 
 
+def stand(
+    db: Any, user_id: str, kind: str, target_id: str, *, created_at: datetime | None = None
+) -> str:
+    when = created_at or datetime.now(UTC)
+    row = ReviewLink(
+        target_kind=kind,
+        target_id=target_id,
+        created_by=user_id,
+        created_at=when,
+        expires_at=when + timedelta(days=30),
+        token_digest=uuid4().hex + uuid4().hex,
+        snapshot_hash="0" * 64,
+    )
+    db.add(row)
+    db.flush()
+    return row.id
+
+
 def share(owner: TestClient, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     base = f"/api/runs/{run_id}/review-link"
     preview = owner.post(base + "/preview", json=payload)
@@ -1170,7 +1188,7 @@ def test_feedback_list_shows_every_stand_with_its_responses(owner: TestClient) -
     listed = owner.get("/api/review-links")
     assert listed.status_code == 200, listed.text
     body = listed.json()
-    assert body["configured"] is True
+    assert "configured" not in body
     rows = {row["id"]: row for row in body["links"]}
     assert {old["link"]["id"], other["link"]["id"]} <= set(rows)
     revoked = rows[old["link"]["id"]]
@@ -1195,3 +1213,102 @@ def test_feedback_list_shows_every_stand_with_its_responses(owner: TestClient) -
 
     owner.cookies.clear()
     assert owner.get("/api/review-links").status_code == 401
+
+
+def test_feedback_list_names_a_living_target_and_only_a_missing_row_is_gone(
+    owner: TestClient,
+) -> None:
+    plan = SeriesPlan(
+        title="Planteil",
+        episodes=[
+            EpisodePlan(
+                id="episode-1",
+                index=1,
+                title="Folge",
+                target_minutes=10,
+                supportable_minutes=10,
+            )
+        ],
+        budget=SeriesBudget(
+            max_supportable_minutes=10,
+            minutes_per_episode=10,
+            verdict="ok",
+            explanation="Enough",
+        ),
+    )
+    plan_hash = store().put("series_plan", plan).hash
+    with session_scope() as db:
+        user = db.scalars(select(User).order_by(User.created_at.desc())).first()
+        assert user
+        titled = Document(filename="named.pdf", sha256=uuid4().hex * 2, title="Dokument")
+        bare = Document(filename="ohne-titel.pdf", sha256=uuid4().hex * 2, title=None)
+        db.add_all([titled, bare])
+        db.flush()
+
+        def add_run(document_id: str, name: str | None) -> str:
+            row = Run(document_id=document_id, flow_id="baseline_v0", flow_version="1.0", name=name)
+            db.add(row)
+            db.flush()
+            return row.id
+
+        def add_series(document_id: str, name: str | None, artifact: str | None) -> str:
+            row = Series(
+                document_id=document_id,
+                name=name,
+                flow_id="baseline_v0",
+                flow_version="1.0",
+                plan_flow_id="series_plan_v0",
+                plan_artifact_hash=artifact,
+            )
+            db.add(row)
+            db.flush()
+            return row.id
+
+        ids = {
+            "run_name": stand(db, user.id, "runs", add_run(titled.id, "Laufname")),
+            "run_title": stand(db, user.id, "runs", add_run(titled.id, None)),
+            "run_file": stand(db, user.id, "runs", add_run(bare.id, None)),
+            "series_name": stand(
+                db, user.id, "series", add_series(titled.id, "Klimaserie", plan_hash)
+            ),
+            "series_plan": stand(db, user.id, "series", add_series(titled.id, None, plan_hash)),
+            "series_doc": stand(db, user.id, "series", add_series(titled.id, None, None)),
+            "series_file": stand(db, user.id, "series", add_series(bare.id, None, None)),
+            "gone_run": stand(db, user.id, "runs", "missing-run"),
+            "gone_series": stand(db, user.id, "series", "missing-series"),
+        }
+    listed = owner.get("/api/review-links")
+    assert listed.status_code == 200, listed.text
+    rows = {row["id"]: row for row in listed.json()["links"]}
+    assert rows[ids["run_name"]]["target_title"] == "Laufname"
+    assert rows[ids["run_title"]]["target_title"] == "Dokument"
+    assert rows[ids["run_file"]]["target_title"] == "ohne-titel.pdf"
+    assert rows[ids["series_name"]]["target_title"] == "Klimaserie"
+    assert rows[ids["series_plan"]]["target_title"] == "Planteil"
+    assert rows[ids["series_doc"]]["target_title"] == "Dokument"
+    assert rows[ids["series_file"]]["target_title"] == "ohne-titel.pdf"
+    assert rows[ids["gone_run"]]["target_title"] is None
+    assert rows[ids["gone_series"]]["target_title"] is None
+
+
+def test_feedback_list_returns_every_stand(owner: TestClient) -> None:
+    with session_scope() as db:
+        user = db.scalars(select(User).order_by(User.created_at.desc())).first()
+        assert user
+        start = datetime.now(UTC) + timedelta(days=365)
+        ids: list[str] = []
+        for index in range(201):
+            ids.append(
+                stand(
+                    db,
+                    user.id,
+                    "runs",
+                    uuid4().hex,
+                    created_at=start + timedelta(seconds=index),
+                )
+            )
+    listed = owner.get("/api/review-links")
+    assert listed.status_code == 200, listed.text
+    found = {row["id"] for row in listed.json()["links"]}
+    assert ids[0] in found
+    assert set(ids) <= found
