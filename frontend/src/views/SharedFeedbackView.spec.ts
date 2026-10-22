@@ -102,10 +102,11 @@ describe('SharedFeedbackView', () => {
     expect(quiet.classes()).toContain('quiet')
     expect(quiet.find('.margin').text()).toBe('')
     expect(w.find('.back').exists()).toBe(true)
-    expect(w.findComponent(RouterLinkStub).props('to')).toEqual({
-      name: 'series',
-      params: { id: 'series-one' },
-    })
+    const links = w.findAllComponents(RouterLinkStub)
+    // Back leads to the feedback list, the main access point; the stand's source stays one click away.
+    expect(links[0].props('to')).toEqual({ name: 'feedbacks' })
+    expect(links[1].props('to')).toEqual({ name: 'series', params: { id: 'series-one' } })
+    expect(links[1].text()).toBe('Zur Serie')
     expect(w.text()).toContain('Widerrufen')
   })
 

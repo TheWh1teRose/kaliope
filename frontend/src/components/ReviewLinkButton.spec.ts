@@ -104,7 +104,7 @@ describe('owner review links', () => {
     }
     expect(sharingApi.links).toHaveBeenCalledTimes(2)
   })
-  it('labels an owner comment-only line without inventing an emoji rating', async () => {
+  it('counts responses on a link and opens them in the script', async () => {
     vi.mocked(sharingApi.links).mockResolvedValue({ configured: true, links: [{
       ...metadata,
       feedback: {
@@ -114,8 +114,9 @@ describe('owner review links', () => {
       },
     }] })
     const w = await show()
-    expect(w.find('.marked').text()).toContain('Comment only')
-    expect(w.find('.marked').text()).not.toContain('🤮')
+    expect(w.find('.feedback').text()).toContain('Rückmeldungen: 1')
+    // The responses themselves are read on the feedback page, not repeated here.
+    expect(w.find('.management').text()).not.toContain('Comment only')
     const inScript = w.findComponent(RouterLinkStub)
     expect(inScript.text()).toBe('Im Skript ansehen')
     expect(inScript.props('to')).toEqual({ name: 'shared-feedback', params: { id: 'link-one' } })

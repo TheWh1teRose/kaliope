@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { FeedbackOut, NodeIOOut, Note, RunGraphOut, RunOut } from '@/api/types'
 import AudioPanel from '@/components/AudioPanel.vue'
+import FeedbackBoard from '@/components/FeedbackBoard.vue'
 import FlowGraph from '@/components/FlowGraph.vue'
 import GateList from '@/components/GateList.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
 import StatusPill from '@/components/StatusPill.vue'
-import ReviewLinkButton from '@/components/ReviewLinkButton.vue'
 import { fill, t } from '@/i18n'
 import { type ProgressLine, useRunsStore } from '@/stores/runs'
 import { runTitle } from '@/titles'
@@ -21,7 +21,8 @@ const props = defineProps<{ id: string }>()
 const runs = useRunsStore()
 const run = ref<RunOut | null>(null)
 const graph = ref<RunGraphOut | null>(null)
-const activeTab = ref<'run' | 'feedback'>('run')
+// The feedback list links here with `?tab=feedback`.
+const activeTab = ref<'run' | 'feedback'>(useRoute().query.tab === 'feedback' ? 'feedback' : 'run')
 const inspected = ref<string | null>(null)
 const io = ref<NodeIOOut | null>(null)
 const ioLoading = ref(false)
@@ -237,7 +238,7 @@ onUnmounted(() => {
     </nav>
     <section v-if="activeTab === 'feedback'" class="sheet" data-feedback-tab>
       <h2 class="h-section">{{ t.sharing.feedback }}</h2>
-      <ReviewLinkButton inline kind="runs" :target-id="run.id" :ready="!!reviewable" />
+      <FeedbackBoard :run="{ id: run.id, ready: !!reviewable }" />
     </section>
     <div v-show="activeTab === 'run'" data-run-tab>
     <p v-if="run.verdict === 'insufficient'" class="notice notice--fail">

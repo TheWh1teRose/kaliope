@@ -51,8 +51,12 @@ export const useRunsStore = defineStore('runs', () => {
   const reconnecting = ref(false)
   let stream: StreamHandle | null = null
 
-  async function load(documentId?: string): Promise<void> {
-    const query = documentId ? `?document_id=${encodeURIComponent(documentId)}` : ''
+  async function load(documentId?: string, limit?: number): Promise<void> {
+    const params = [
+      documentId ? `document_id=${encodeURIComponent(documentId)}` : '',
+      limit != null ? `limit=${encodeURIComponent(String(limit))}` : '',
+    ].filter((part) => part !== '')
+    const query = params.length ? `?${params.join('&')}` : ''
     items.value = await api.get<RunOut[]>(`/api/runs${query}`)
   }
 

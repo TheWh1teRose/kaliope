@@ -62,6 +62,11 @@ export const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: '/feedback',
+    name: 'feedbacks',
+    component: () => import('@/views/FeedbackListView.vue'),
+  },
+  {
     path: '/review-links/:id/feedback',
     name: 'shared-feedback',
     component: () => import('@/views/SharedFeedbackView.vue'),
