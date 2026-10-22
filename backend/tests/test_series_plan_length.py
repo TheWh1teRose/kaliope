@@ -96,9 +96,9 @@ def test_an_explicit_cap_is_still_sent(tmp_path: Path) -> None:
 
 
 def test_a_cap_below_what_reasoning_needs_names_the_length_stop(tmp_path: Path) -> None:
-    with pytest.raises(LLMError, match="output token limit") as caught:
+    with pytest.raises(LLMError) as caught:
         _run(tmp_path, ReasoningSDK(), {"max_tokens": 16_000})
-    assert "finish_reason=length" in str(caught.value)
+    assert str(caught.value) == "empty completion (finish_reason=length)"
 
 
 def test_the_planner_cap_defaults_off_without_an_editor_switch() -> None:

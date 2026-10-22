@@ -102,24 +102,6 @@ class LLMError(RuntimeError):
     """Raised when a provider call fails in a way the node cannot recover from."""
 
 
-LENGTH_STOPS = {"max_tokens", "length", "MAX_TOKENS"}
-
-
-def empty_completion_error(field: str, stop_reason: str | None) -> LLMError:
-    """The error for a response without text, naming a length stop as the cause.
-
-    Thinking tokens count against the output limit, so a model can spend the
-    whole limit before it writes anything.
-    """
-    message = f"empty completion ({field}={stop_reason})"
-    if stop_reason in LENGTH_STOPS:
-        message += (
-            ": the output token limit was reached before any text, "
-            "reasoning tokens included; raise or disable the max output tokens"
-        )
-    return LLMError(message)
-
-
 class Provider(Protocol):
     name: str
 

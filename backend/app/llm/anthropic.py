@@ -20,14 +20,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.llm import registry
-from app.llm.base import (
-    Completion,
-    CompletionRequest,
-    LLMError,
-    Message,
-    Usage,
-    empty_completion_error,
-)
+from app.llm.base import Completion, CompletionRequest, LLMError, Message, Usage
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +129,7 @@ class AnthropicProvider:
             if getattr(block, "type", None) == "text"
         )
         if not text.strip():
-            raise empty_completion_error("stop_reason", stop_reason)
+            raise LLMError(f"empty completion (stop_reason={stop_reason})")
 
         return Completion(
             text=text,

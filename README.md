@@ -521,8 +521,7 @@ settings and saved revisions stay intact.
 
 The series planner's **Max output tokens** also default to 0: a reasoning model's
 thinking counts against a fixed cap, and a plan that gets no text failed with
-`empty completion (finish_reason=length)`. A positive value is still sent as the cap,
-and a response without text now names the output limit when that was the stop.
+`empty completion (finish_reason=length)`. A positive value is still sent as the cap.
 
 Every save appends a **revision**; nothing is ever overwritten, and restoring an
 old revision writes a new one carrying the old content. A run records the flow

@@ -7,7 +7,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.llm import registry
-from app.llm.base import Completion, CompletionRequest, LLMError, Usage, empty_completion_error
+from app.llm.base import Completion, CompletionRequest, LLMError, Usage
 
 
 class GoogleProvider:
@@ -68,7 +68,7 @@ class GoogleProvider:
         text = getattr(response, "text", "") or ""
         stop_reason = _stop_reason(response)
         if not text.strip():
-            raise empty_completion_error("stop_reason", stop_reason)
+            raise LLMError(f"empty completion (stop_reason={stop_reason})")
 
         return Completion(
             text=text,
