@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+/**
+ * The runs overview. Deleting a run only moves it to the trash, which is the
+ * second tab: nothing of the run is removed, and its share links keep working,
+ * so restoring it is one click. The active tab is the `tab` query.
+ */
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
-import type { SeriesOut } from '@/api/types'
+import type { RunOut, SeriesOut } from '@/api/types'
 import ModalDialog from '@/components/ModalDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
@@ -19,7 +24,14 @@ const LIVE_SERIES = new Set(['queued', 'planning', 'outlining', 'writing'])
 
 const runs = useRunsStore()
 const seriesStore = useSeriesStore()
+const route = useRoute()
+const router = useRouter()
 const series = ref<SeriesOut[]>([])
+const trash = ref<RunOut[]>([])
+/** The run just trashed, so the notice can offer to take it back. */
+const lastTrashed = ref<RunOut | null>(null)
+const trashBusy = ref<string | null>(null)
+const trashError = ref('')
 const confirmStop = ref<{ kind: 'run' | 'series'; id: string } | null>(null)
 const stopping = ref(false)
 const stopError = ref('')
@@ -28,6 +40,25 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 function when(value: string): string {
   return new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+const tab = computed<'runs' | 'trash'>(() => (route.query.tab === 'trash' ? 'trash' : 'runs'))
+
+function selectTab(next: 'runs' | 'trash'): void {
+  if (next === tab.value) return
+  const query = { ...route.query }
+  if (next === 'runs') delete query.tab
+  else query.tab = next
+  void router.replace({ name: 'runs', query })
+}
+
+/** A run that is not in progress and not part of a series can go to the trash. */
+function trashable(run: RunOut): boolean {
+  return !run.series_id && !STOPPABLE_RUN.has(run.status) && !run.active
+}
+
+async function loadTrash(): Promise<void> {
+  trash.value = await runs.trashed().catch(() => trash.value)
 }
 
 async function load(): Promise<void> {
@@ -65,7 +96,36 @@ async function confirm(): Promise<void> {
   }
 }
 
-onMounted(load)
+async function moveToTrash(run: RunOut): Promise<void> {
+  if (trashBusy.value) return
+  trashBusy.value = run.id
+  trashError.value = ''
+  try {
+    lastTrashed.value = await runs.trash(run.id)
+    await Promise.all([load(), loadTrash()])
+  } catch (exc) {
+    trashError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
+  } finally {
+    trashBusy.value = null
+  }
+}
+
+async function restore(id: string): Promise<void> {
+  if (trashBusy.value) return
+  trashBusy.value = id
+  trashError.value = ''
+  try {
+    await runs.restore(id)
+    if (lastTrashed.value?.id === id) lastTrashed.value = null
+    await Promise.all([load(), loadTrash()])
+  } catch (exc) {
+    trashError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
+  } finally {
+    trashBusy.value = null
+  }
+}
+
+onMounted(() => Promise.all([load(), loadTrash()]))
 onUnmounted(() => {
   disposed = true
   if (timer) clearInterval(timer)
@@ -79,113 +139,197 @@ onUnmounted(() => {
       <h1 class="h-page">{{ t.nav.runs }}</h1>
     </header>
 
-    <table v-if="series.length" class="runs">
-      <thead>
-        <tr>
-          <th>{{ t.series.title }}</th>
-          <th>{{ t.run.flow }}</th>
-          <th>Status</th>
-          <th class="right">{{ t.common.cost }}</th>
-          <th class="right">{{ t.series.count }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in series" :key="row.id">
-          <td>
-            <RouterLink :to="{ name: 'series', params: { id: row.id } }" class="link">
-              {{ seriesTitle(row) }}
-            </RouterLink>
-            <span class="meta block">{{ row.document_title }} · {{ when(row.created_at) }}</span>
-          </td>
-          <td class="meta">{{ row.flow_id }} v{{ row.flow_version }}</td>
-          <td>
-            <span
-              class="badge"
-              :class="
-                row.status === 'failed'
-                  ? 'badge--fail'
-                  : row.status === 'completed'
-                    ? 'badge--pass'
-                    : row.status === 'stopped'
-                      ? 'badge--idle'
-                      : 'badge--mark'
-              "
-            >
-              {{ t.series.status[row.status] }}
-            </span>
-            <button
-              v-if="LIVE_SERIES.has(row.status)"
-              class="btn btn--sm"
-              type="button"
-              data-stop-series
-              @click="askStop('series', row.id)"
-            >
-              {{ t.run.stop }}
-            </button>
-          </td>
-          <td class="right num">${{ row.total_cost_usd.toFixed(4) }}</td>
-          <td class="right num">{{ row.episodes.length || row.request.episodes || t.common.none }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="tabs pipeline-tabs">
+      <button class="tab" :class="{ 'tab--on': tab === 'runs' }" data-tab="runs" @click="selectTab('runs')">
+        {{ t.run.tabRuns }}
+        <span class="tab__count num">{{ runs.items.length }}</span>
+      </button>
+      <button class="tab" :class="{ 'tab--on': tab === 'trash' }" data-tab="trash" @click="selectTab('trash')">
+        {{ t.run.tabTrash }}
+        <span class="tab__count num">{{ trash.length }}</span>
+      </button>
+    </div>
 
-    <p v-if="!runs.items.length" class="muted empty">{{ t.run.empty }}</p>
+    <div v-if="lastTrashed" class="notice trashed" role="status" data-trashed-notice>
+      <span>{{ fill(t.run.trashedNotice, { title: runTitle(lastTrashed) }) }}</span>
+      <button
+        class="btn btn--sm"
+        type="button"
+        data-undo
+        :disabled="trashBusy !== null"
+        @click="restore(lastTrashed.id)"
+      >
+        {{ t.run.undo }}
+      </button>
+    </div>
+    <p v-if="trashError" class="notice notice--fail" role="alert">{{ trashError }}</p>
 
-    <table v-else class="runs">
-      <thead>
-        <tr>
-          <th>{{ t.run.document }}</th>
-          <th>{{ t.run.flow }}</th>
-          <th>Status</th>
-          <th class="right">{{ t.common.cost }}</th>
-          <th class="right">{{ t.run.targetMinutes }}</th>
-          <th class="right">{{ t.common.page }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="run in runs.items" :key="run.id">
-          <td>
-            <RouterLink :to="{ name: 'run', params: { id: run.id } }" class="link">
-              {{ runTitle(run) }}
-            </RouterLink>
-            <span class="meta block">
-              <template v-if="run.name && run.document_title">{{ run.document_title }} · </template>{{ when(run.created_at) }}
-            </span>
-            <RouterLink
-              v-if="run.series_id && run.episode_index"
-              class="badge badge--mark series-badge"
-              :to="{ name: 'series', params: { id: run.series_id } }"
-            >
-              {{ fill(t.run.seriesBadge, { n: run.episode_index }) }}
-            </RouterLink>
-          </td>
-          <td class="meta">{{ run.flow_id }} v{{ run.flow_version }}</td>
-          <td>
-            <StatusPill :status="run.status" />
-            <button
-              v-if="STOPPABLE_RUN.has(run.status)"
-              class="btn btn--sm"
-              type="button"
-              data-stop
-              @click="askStop('run', run.id)"
-            >
-              {{ t.run.stop }}
-            </button>
-          </td>
-          <td class="right num">${{ run.total_cost_usd.toFixed(4) }}</td>
-          <td class="right num">{{ run.target_minutes ?? t.common.none }}</td>
-          <td class="right">
-            <RouterLink
-              v-if="['completed', 'in_review', 'reviewed'].includes(run.status)"
-              class="btn btn--sm"
-              :to="{ name: 'review', params: { id: run.id } }"
-            >
-              {{ t.review.title }}
-            </RouterLink>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <template v-if="tab === 'trash'">
+      <p class="muted lead">{{ t.run.trashLead }}</p>
+      <p v-if="!trash.length" class="muted empty">{{ t.run.trashEmpty }}</p>
+      <table v-else class="runs" data-trash-list>
+        <thead>
+          <tr>
+            <th>{{ t.run.document }}</th>
+            <th>{{ t.run.flow }}</th>
+            <th>Status</th>
+            <th class="right">{{ t.common.cost }}</th>
+            <th class="right">{{ t.run.trashedAt }}</th>
+            <th class="right">{{ t.common.page }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="run in trash" :key="run.id">
+            <td>
+              <RouterLink :to="{ name: 'run', params: { id: run.id } }" class="link">
+                {{ runTitle(run) }}
+              </RouterLink>
+              <span class="meta block">
+                <template v-if="run.name && run.document_title">{{ run.document_title }} · </template>{{ when(run.created_at) }}
+              </span>
+            </td>
+            <td class="meta">{{ run.flow_id }} v{{ run.flow_version }}</td>
+            <td><StatusPill :status="run.status" /></td>
+            <td class="right num">${{ run.total_cost_usd.toFixed(4) }}</td>
+            <td class="right meta">{{ run.trashed_at ? when(run.trashed_at) : t.common.none }}</td>
+            <td class="right">
+              <button
+                class="btn btn--sm"
+                type="button"
+                data-restore
+                :disabled="trashBusy !== null"
+                @click="restore(run.id)"
+              >
+                {{ t.run.restore }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </template>
+
+    <template v-else>
+      <table v-if="series.length" class="runs">
+        <thead>
+          <tr>
+            <th>{{ t.series.title }}</th>
+            <th>{{ t.run.flow }}</th>
+            <th>Status</th>
+            <th class="right">{{ t.common.cost }}</th>
+            <th class="right">{{ t.series.count }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in series" :key="row.id">
+            <td>
+              <RouterLink :to="{ name: 'series', params: { id: row.id } }" class="link">
+                {{ seriesTitle(row) }}
+              </RouterLink>
+              <span class="meta block">{{ row.document_title }} · {{ when(row.created_at) }}</span>
+            </td>
+            <td class="meta">{{ row.flow_id }} v{{ row.flow_version }}</td>
+            <td>
+              <span
+                class="badge"
+                :class="
+                  row.status === 'failed'
+                    ? 'badge--fail'
+                    : row.status === 'completed'
+                      ? 'badge--pass'
+                      : row.status === 'stopped'
+                        ? 'badge--idle'
+                        : 'badge--mark'
+                "
+              >
+                {{ t.series.status[row.status] }}
+              </span>
+              <button
+                v-if="LIVE_SERIES.has(row.status)"
+                class="btn btn--sm"
+                type="button"
+                data-stop-series
+                @click="askStop('series', row.id)"
+              >
+                {{ t.run.stop }}
+              </button>
+            </td>
+            <td class="right num">${{ row.total_cost_usd.toFixed(4) }}</td>
+            <td class="right num">{{ row.episodes.length || row.request.episodes || t.common.none }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p v-if="!runs.items.length" class="muted empty">{{ t.run.empty }}</p>
+
+      <table v-else class="runs">
+        <thead>
+          <tr>
+            <th>{{ t.run.document }}</th>
+            <th>{{ t.run.flow }}</th>
+            <th>Status</th>
+            <th class="right">{{ t.common.cost }}</th>
+            <th class="right">{{ t.run.targetMinutes }}</th>
+            <th class="right">{{ t.common.page }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="run in runs.items" :key="run.id">
+            <td>
+              <RouterLink :to="{ name: 'run', params: { id: run.id } }" class="link">
+                {{ runTitle(run) }}
+              </RouterLink>
+              <span class="meta block">
+                <template v-if="run.name && run.document_title">{{ run.document_title }} · </template>{{ when(run.created_at) }}
+              </span>
+              <RouterLink
+                v-if="run.series_id && run.episode_index"
+                class="badge badge--mark series-badge"
+                :to="{ name: 'series', params: { id: run.series_id } }"
+              >
+                {{ fill(t.run.seriesBadge, { n: run.episode_index }) }}
+              </RouterLink>
+            </td>
+            <td class="meta">{{ run.flow_id }} v{{ run.flow_version }}</td>
+            <td>
+              <StatusPill :status="run.status" />
+              <button
+                v-if="STOPPABLE_RUN.has(run.status)"
+                class="btn btn--sm"
+                type="button"
+                data-stop
+                @click="askStop('run', run.id)"
+              >
+                {{ t.run.stop }}
+              </button>
+            </td>
+            <td class="right num">${{ run.total_cost_usd.toFixed(4) }}</td>
+            <td class="right num">{{ run.target_minutes ?? t.common.none }}</td>
+            <td class="right">
+              <span class="row-actions">
+                <RouterLink
+                  v-if="['completed', 'in_review', 'reviewed'].includes(run.status)"
+                  class="btn btn--sm"
+                  :to="{ name: 'review', params: { id: run.id } }"
+                >
+                  {{ t.review.title }}
+                </RouterLink>
+                <button
+                  v-if="trashable(run)"
+                  class="btn btn--sm btn--ghost btn--danger"
+                  type="button"
+                  data-trash
+                  :title="t.run.trash"
+                  :disabled="trashBusy !== null"
+                  @click="moveToTrash(run)"
+                >
+                  {{ t.run.delete }}
+                </button>
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </template>
 
     <ModalDialog
       :open="confirmStop !== null"
@@ -290,5 +434,38 @@ onUnmounted(() => {
 .empty {
   padding: var(--s8);
   text-align: center;
+}
+
+.lead {
+  margin: 0;
+  font-size: var(--t-sm);
+}
+
+.row-actions {
+  display: inline-flex;
+  gap: var(--s2);
+  justify-content: flex-end;
+}
+
+.notice {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-md);
+  font-size: var(--t-sm);
+}
+
+.notice--fail {
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
+.trashed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  background: var(--sunk);
+  color: var(--ink-2);
 }
 </style>

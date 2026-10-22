@@ -21,8 +21,9 @@ function runRow(id: string, status: RunStatus) {
     created_at: '2026-10-03T10:00:00Z',
     total_cost_usd: 0.01,
     target_minutes: 15,
-    series_id: null,
-    episode_index: null,
+    series_id: null as string | null,
+    episode_index: null as number | null,
+    trashed_at: null as string | null,
   }
 }
 
@@ -48,6 +49,9 @@ const runs = {
   items: [] as ReturnType<typeof runRow>[],
   load: vi.fn(async () => {}),
   stop: vi.fn(async () => ({ id: 'r-live', status: 'stopping', outcome: 'stopping', stopped_by: null })),
+  trashed: vi.fn(async () => [] as ReturnType<typeof runRow>[]),
+  trash: vi.fn(async (id: string) => ({ ...runRow(id, 'completed'), trashed_at: '2026-10-04T09:00:00Z' })),
+  restore: vi.fn(async (id: string) => runRow(id, 'completed')),
 }
 
 const seriesStore = {
@@ -70,8 +74,10 @@ function router() {
   })
 }
 
-async function mountList() {
-  const wrapper = mount(RunsView, { attachTo: document.body, global: { plugins: [router()] } })
+async function mountList(path = '/runs') {
+  const routes = router()
+  await routes.push(path)
+  const wrapper = mount(RunsView, { attachTo: document.body, global: { plugins: [routes] } })
   await flushPromises()
   return wrapper
 }
@@ -175,6 +181,78 @@ describe('runs list', () => {
     expect(failed.text()).toContain('Fehlgeschlagen')
     expect(wrapper.findAll('[data-stop]')).toHaveLength(1)
     expect(wrapper.findAll('[data-stop-series]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+})
+
+describe('runs trash', () => {
+  beforeEach(() => {
+    runs.items = [
+      runRow('r-done', 'completed'),
+      runRow('r-live', 'running'),
+      { ...runRow('r-episode', 'completed'), series_id: 's1', episode_index: 1 },
+    ]
+    seriesStore.list.mockResolvedValue([])
+    runs.trashed.mockResolvedValue([])
+    runs.trash.mockClear()
+    runs.restore.mockClear()
+  })
+
+  it('offers delete only for a finished run outside a series', async () => {
+    const wrapper = await mountList()
+    const buttons = wrapper.findAll('[data-trash]')
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0].text()).toBe(t.run.delete)
+    wrapper.unmount()
+  })
+
+  it('moves a run to the trash without asking and offers to undo', async () => {
+    const wrapper = await mountList()
+    runs.load.mockImplementationOnce(async () => {
+      runs.items = runs.items.filter((run) => run.id !== 'r-done')
+    })
+    runs.trashed.mockResolvedValueOnce([{ ...runRow('r-done', 'completed'), trashed_at: '2026-10-04T09:00:00Z' }])
+    await wrapper.get('[data-trash]').trigger('click')
+    await flushPromises()
+    expect(runs.trash).toHaveBeenCalledWith('r-done')
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(wrapper.get('[data-trashed-notice]').text()).toContain('liegt im Papierkorb')
+    expect(wrapper.get('[data-tab="trash"]').text()).toContain('1')
+
+    await wrapper.get('[data-undo]').trigger('click')
+    await flushPromises()
+    expect(runs.restore).toHaveBeenCalledWith('r-done')
+    expect(wrapper.find('[data-trashed-notice]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('lists trashed runs in the trash tab and restores one in a click', async () => {
+    runs.trashed.mockResolvedValue([{ ...runRow('r-old', 'failed'), trashed_at: '2026-10-04T09:00:00Z' }])
+    const wrapper = await mountList('/runs?tab=trash')
+    expect(wrapper.find('[data-trash]').exists()).toBe(false)
+    const rows = wrapper.findAll('[data-trash-list] tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Physiologie')
+    expect(wrapper.text()).toContain(t.run.trashLead)
+    await wrapper.get('[data-restore]').trigger('click')
+    await flushPromises()
+    expect(runs.restore).toHaveBeenCalledWith('r-old')
+    wrapper.unmount()
+  })
+
+  it('shows an empty trash', async () => {
+    const wrapper = await mountList('/runs?tab=trash')
+    expect(wrapper.text()).toContain(t.run.trashEmpty)
+    wrapper.unmount()
+  })
+
+  it('shows a rejected trash request', async () => {
+    runs.trash.mockRejectedValueOnce(new ApiError(409, 'Run is still in progress', 'Erst stoppen.'))
+    const wrapper = await mountList()
+    await wrapper.get('[data-trash]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Erst stoppen.')
+    expect(wrapper.find('[data-trashed-notice]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

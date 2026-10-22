@@ -56,6 +56,20 @@ export const useRunsStore = defineStore('runs', () => {
     items.value = await api.get<RunOut[]>(`/api/runs${query}`)
   }
 
+  /** The runs in the trash, latest trashed first. */
+  async function trashed(): Promise<RunOut[]> {
+    return api.get<RunOut[]>('/api/runs?trashed=true')
+  }
+
+  /** Move a run to the trash. Nothing of it is deleted. */
+  async function trash(id: string): Promise<RunOut> {
+    return api.post<RunOut>(`/api/runs/${id}/trash`)
+  }
+
+  async function restore(id: string): Promise<RunOut> {
+    return api.post<RunOut>(`/api/runs/${id}/restore`)
+  }
+
   async function get(id: string): Promise<RunOut> {
     current.value = await api.get<RunOut>(`/api/runs/${id}`)
     return current.value
@@ -154,6 +168,9 @@ export const useRunsStore = defineStore('runs', () => {
     progress,
     reconnecting,
     load,
+    trashed,
+    trash,
+    restore,
     get,
     stop,
     create,
