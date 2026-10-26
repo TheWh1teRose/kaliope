@@ -142,11 +142,7 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <RouterLink
-      v-if="data"
-      class="back"
-      :to="{ name: data.target_kind === 'series' ? 'series' : 'run', params: { id: data.target_id } }"
-    >
+    <RouterLink class="back" :to="{ name: 'feedbacks' }">
       {{ t.sharedFeedback.back }}
     </RouterLink>
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
@@ -165,6 +161,17 @@ onMounted(async () => {
               expires: sharedDate(data.link.expires_at),
             })
           }}
+          ·
+          <RouterLink
+            class="source"
+            :to="
+              data.target_kind === 'series'
+                ? { name: 'series', params: { id: data.target_id } }
+                : { name: 'run', params: { id: data.target_id }, query: { tab: 'feedback' } }
+            "
+          >
+            {{ data.target_kind === 'series' ? t.sharedFeedback.toSeries : t.sharedFeedback.toRun }}
+          </RouterLink>
         </p>
       </header>
 
@@ -380,6 +387,10 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
+}
+
+.source {
+  color: inherit;
 }
 
 .back {

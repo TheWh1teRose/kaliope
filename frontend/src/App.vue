@@ -59,6 +59,15 @@ onMounted(async () => {
         <span class="rail__icon" aria-hidden="true">≡</span>
         <span class="rail__label">{{ t.nav.runs }}</span>
       </RouterLink>
+      <RouterLink
+        :to="{ name: 'feedbacks' }"
+        class="rail__link"
+        :class="{ 'router-link-active': route.name === 'shared-feedback' }"
+        :title="t.nav.feedback"
+      >
+        <span class="rail__icon" aria-hidden="true">❝</span>
+        <span class="rail__label">{{ t.nav.feedback }}</span>
+      </RouterLink>
       <RouterLink :to="{ name: 'pipelines' }" class="rail__link" :title="t.nav.pipelines">
         <span class="rail__icon" aria-hidden="true">⧉</span>
         <span class="rail__label">{{ t.nav.pipelines }}</span>
