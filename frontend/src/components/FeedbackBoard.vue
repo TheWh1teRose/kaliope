@@ -29,6 +29,7 @@ const chosen = ref('')
 const shareable = computed(() => runs.items.filter((run) => READY.has(run.status)))
 const pickerError = ref('')
 const runsLoaded = ref(false)
+let createEpoch = 0
 
 const STATUS_ORDER: ReviewLinkRow['status'][] = ['active', 'expired', 'revoked']
 
@@ -62,14 +63,17 @@ async function load(): Promise<void> {
 }
 
 async function startCreate(): Promise<void> {
+  const ticket = ++createEpoch
   chosen.value = ''
   pickerError.value = ''
   runsLoaded.value = false
   creating.value = true
   try {
     await runs.load(undefined, 500)
+    if (ticket !== createEpoch) return
     runsLoaded.value = true
   } catch (exc) {
+    if (ticket !== createEpoch) return
     pickerError.value =
       exc instanceof ApiError && exc.detail ? exc.detail : t.feedbackBoard.runsError
   }

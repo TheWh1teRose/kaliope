@@ -223,6 +223,83 @@ describe('FeedbackBoard', () => {
     expect(document.body.textContent).toContain('Noch kein fertiger Lauf')
   })
 
+  it('keeps the share spinner when an older run list resolves after reopen', async () => {
+    store.items = []
+    let releaseOld: () => void = () => {}
+    store.load.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          releaseOld = () => resolve(undefined)
+        }),
+    )
+    const w = board()
+    await flushPromises()
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Schließen"]')?.click()
+    await flushPromises()
+
+    let releaseNew: () => void = () => {}
+    store.load.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          releaseNew = () => resolve(undefined)
+        }),
+    )
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"] [data-loading]')).not.toBeNull()
+
+    releaseOld()
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"] [data-loading]')).not.toBeNull()
+    expect(document.body.textContent).not.toContain('Noch kein fertiger Lauf')
+
+    releaseNew()
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"] [data-loading]')).toBeNull()
+    expect(document.body.textContent).toContain('Noch kein fertiger Lauf')
+  })
+
+  it('drops a stale run-list error after a newer share load succeeds', async () => {
+    store.items = []
+    let rejectOld: ((error: unknown) => void) | null = null
+    store.load.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((_resolve, reject) => {
+          rejectOld = reject
+        }),
+    )
+    const w = board()
+    await flushPromises()
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Schließen"]')?.click()
+    await flushPromises()
+
+    store.load.mockImplementationOnce(async () => {
+      store.items = [
+        {
+          id: 'run-one',
+          status: 'completed',
+          name: null,
+          document_title: 'Physiologie',
+          created_at: runRow.created_at,
+        },
+      ]
+    })
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('Physiologie')
+    expect(document.body.textContent).not.toContain('Die Läufe konnten nicht geladen werden')
+
+    rejectOld?.(new Error('offline'))
+    rejectOld = null
+    await flushPromises()
+    expect(document.body.textContent).toContain('Physiologie')
+    expect(document.body.textContent).not.toContain('Die Läufe konnten nicht geladen werden')
+  })
+
   it('shows the run-list error instead of claiming there is nothing to share', async () => {
     store.items = []
     store.load.mockRejectedValueOnce(new ApiError(500, 'Error', ''))
