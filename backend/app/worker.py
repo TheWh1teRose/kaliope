@@ -140,9 +140,10 @@ class Worker:
 
         Runs at startup, before any job is queued, so nothing can still be
         driving them; left alone they would read as running forever. A series
-        and its runs are failed, and a series resumes where it stopped. A
-        standalone run is stopped, with the same interrupted note, so it can
-        be started again. Returns ``(runs, series)`` marked.
+        left mid-way is failed, and so is a run of a series that was still
+        queued or running. A series resumes where it stopped. A standalone run
+        is stopped, with the same interrupted note, so it can be started again.
+        Returns ``(runs, series)`` marked.
         """
         now = datetime.now(UTC)
         with session_scope() as session:
