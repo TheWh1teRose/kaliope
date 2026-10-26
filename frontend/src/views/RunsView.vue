@@ -30,7 +30,7 @@ const seriesStore = useSeriesStore()
 const route = useRoute()
 const router = useRouter()
 const series = ref<SeriesOut[]>([])
-/** False until the first load has answered; later polls refresh silently. */
+/** False until a load succeeds. A failure keeps the error up, and later polls refresh silently. */
 const runsLoaded = ref(false)
 const runsLoadError = ref('')
 const trash = ref<RunOut[]>([])
