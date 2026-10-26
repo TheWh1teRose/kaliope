@@ -104,6 +104,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "classification and every generation node will fail."
         )
 
+    runs, series = worker.mark_interrupted()
+    if runs or series:
+        logger.warning("marked %s run(s) and %s series interrupted by the restart", runs, series)
     worker.start()
     try:
         yield

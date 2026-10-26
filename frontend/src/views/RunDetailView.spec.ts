@@ -259,4 +259,36 @@ describe('run detail', () => {
     expect(wrapper.get('[data-restore]').text()).toBe(t.run.restore)
     wrapper.unmount()
   })
+
+  it('shows why the run could not be loaded instead of a blank page, and retries', async () => {
+    store.get.mockRejectedValueOnce(new ApiError(500, 'Internal Server Error', 'Internal Server Error'))
+    const wrapper = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    const failure = wrapper.get('[data-load-error]')
+    expect(failure.attributes('role')).toBe('alert')
+    expect(failure.text()).toContain(t.run.loadError)
+    expect(failure.text()).toContain('Internal Server Error')
+    expect(wrapper.find('h1').exists()).toBe(false)
+    expect(store.watch).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-retry]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-load-error]').exists()).toBe(false)
+    expect(wrapper.find('h1').exists()).toBe(true)
+    expect(store.watch).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it('says it is loading until the run arrives', async () => {
+    let arrive: (value: RunOut) => void = () => undefined
+    store.get.mockImplementationOnce(() => new Promise<RunOut>((resolve) => (arrive = resolve)))
+    const wrapper = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-loading]').text()).toBe(t.common.loading)
+    arrive(run('completed'))
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.find('h1').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

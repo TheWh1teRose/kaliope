@@ -106,7 +106,8 @@ export const useSeriesStore = defineStore('series', () => {
    * Follow a series live. `onEvent` sees every event, tagged with its episode;
    * `onTerminal` runs when the series stops or waits. A dropped connection is
    * reopened with a growing pause, and `onReconnect` lets the page reload what
-   * it may have missed.
+   * it may have missed. `onIdle` runs when nothing drives the series any more;
+   * without it, `onTerminal` does.
    */
   function watch(
     id: string,
@@ -114,6 +115,7 @@ export const useSeriesStore = defineStore('series', () => {
       onEvent?: (event: SeriesEvent) => void
       onTerminal?: () => void
       onReconnect?: () => void
+      onIdle?: () => void
     },
   ): void {
     stopWatching()
@@ -129,6 +131,7 @@ export const useSeriesStore = defineStore('series', () => {
       },
       onTerminal: () => handlers.onTerminal?.(),
       onReconnect: () => handlers.onReconnect?.(),
+      onIdle: handlers.onIdle,
       onState: (state) => {
         reconnecting.value = state === 'reconnecting'
       },
