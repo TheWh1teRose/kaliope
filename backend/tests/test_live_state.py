@@ -31,6 +31,11 @@ def test_a_node_without_a_row_is_waiting_not_running() -> None:
     assert _node_status(None, reached=False, run_status="queued") == "pending"
     assert _node_status(None, reached=True, run_status="running") == "blocked"
     assert _node_status(started, reached=False, run_status="paused") == "paused"
+    assert _node_status(started, reached=False, run_status="stopped") == "blocked"
+    assert _node_status(started, reached=False, run_status="failed") == "blocked"
+    failed = RunNode(node_name="select", finished_at=datetime.now(UTC), error="boom")
+    assert _node_status(failed, reached=False, run_status="failed") == "failed"
+    assert _node_status(finished, reached=False, run_status="failed") == "cached"
 
 
 def test_the_runner_records_a_node_when_it_starts(tmp_path: Path) -> None:

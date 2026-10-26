@@ -34,7 +34,7 @@ from app.api.runs import (
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
-from app.events import bus, seen_until
+from app.events import bus, closing_frame, seen_until
 from app.lang.resources import words_per_minute
 from app.models import Document, Run, Series, User
 from app.naming import clean_name
@@ -398,10 +398,7 @@ def series_events(
     db.close()
     closing = None
     if status in SERIES_IDLE and not worker.series_driven(series_id):
-        closing = (
-            f"event: series.{status}\n"
-            f'data: {{"type": "series.{status}", "series_id": "{series_id}"}}\n\n'
-        )
+        closing = closing_frame(f"series.{status}", series_id=series_id)
     return StreamingResponse(
         bus.follow(
             series_channel(series_id),

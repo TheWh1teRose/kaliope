@@ -60,6 +60,11 @@ class Event:
         return f"id: {self.id}\nevent: {self.type}\ndata: {payload}\n\n"
 
 
+def closing_frame(event_type: str, **data: Any) -> str:
+    payload = json.dumps({"type": event_type, "at": datetime.now(UTC).isoformat(), **data})
+    return f"event: {event_type}\ndata: {payload}\n\n"
+
+
 class EventBus:
     def __init__(self) -> None:
         self._lock = threading.Lock()

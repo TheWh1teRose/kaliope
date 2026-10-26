@@ -25,7 +25,7 @@ from app.api.review import edited_texts, segment_states
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
-from app.events import bus, seen_until
+from app.events import bus, closing_frame, seen_until
 from app.ingestion import anchors as anchor_tools
 from app.models import Document, GateResult, Run, RunNode, Series, User
 from app.models.base import utcnow
@@ -360,7 +360,7 @@ def run_events(
     db.close()
     closing = None
     if status in {"completed", "failed", "reviewed", "paused", "stopped"}:
-        closing = f'event: run.{status}\ndata: {{"type": "run.{status}", "run_id": "{run_id}"}}\n\n'
+        closing = closing_frame(f"run.{status}", run_id=run_id)
     return StreamingResponse(
         bus.follow(
             run_id,
@@ -885,6 +885,8 @@ def _node_status(row: RunNode | None, *, reached: bool, run_status: str) -> Node
     if row.error:
         return "failed"
     if row.finished_at is None:
+        if run_status == "failed":
+            return "blocked"
         return "paused" if run_status == "paused" else "running"
     return "cached" if row.cache_hit else "ok"
 

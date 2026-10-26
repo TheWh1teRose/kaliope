@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
-from app.events import bus, seen_until
+from app.events import bus, closing_frame, seen_until
 from app.llm import registry as llm_registry
 from app.models import BenchNode, BenchRun, Document, User
 from app.pipeline import catalogue
@@ -209,9 +209,7 @@ def run_events(
     db.close()
     closing = None
     if status in {"completed", "failed", "paused"}:
-        closing = (
-            f'event: run.{status}\ndata: {{"type": "run.{status}", "run_id": "{bench_id}"}}\n\n'
-        )
+        closing = closing_frame(f"run.{status}", run_id=bench_id)
     return StreamingResponse(
         bus.follow(
             bench_id,
