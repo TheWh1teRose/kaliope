@@ -32,6 +32,7 @@ const router = useRouter()
 const series = ref<SeriesOut[]>([])
 /** False until the first load has answered; later polls refresh silently. */
 const runsLoaded = ref(false)
+const runsLoadError = ref('')
 const trash = ref<RunOut[]>([])
 const trashedSeries = ref<SeriesOut[]>([])
 const trashLoaded = ref(false)
@@ -97,8 +98,10 @@ async function loadTrash(): Promise<void> {
 async function load(): Promise<void> {
   try {
     await runs.load()
-  } finally {
     runsLoaded.value = true
+    runsLoadError.value = ''
+  } catch (exc) {
+    runsLoadError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
   }
   series.value = await seriesStore.list().catch(() => [])
   const moving =
@@ -310,6 +313,9 @@ onUnmounted(() => {
     </template>
 
     <template v-else>
+      <p v-if="runsLoadError" class="notice notice--fail" role="alert" data-runs-load-error>
+        {{ runsLoadError }}
+      </p>
       <table v-if="series.length" class="runs">
         <thead>
           <tr>
@@ -363,10 +369,10 @@ onUnmounted(() => {
         </tbody>
       </table>
 
-      <LoadingState v-if="!runsLoaded && !runs.items.length" class="empty" />
-      <p v-else-if="!runs.items.length" class="muted empty">{{ t.run.empty }}</p>
+      <LoadingState v-if="!runsLoaded && !runsLoadError && !runs.items.length" class="empty" />
+      <p v-else-if="runsLoaded && !runsLoadError && !runs.items.length" class="muted empty">{{ t.run.empty }}</p>
 
-      <table v-else class="runs">
+      <table v-else-if="runs.items.length" class="runs">
         <thead>
           <tr>
             <th>{{ t.run.document }}</th>

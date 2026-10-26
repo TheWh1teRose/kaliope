@@ -96,19 +96,21 @@ function polledRow(): DocumentSummary | undefined {
 
 async function refreshDocument(): Promise<void> {
   const ticket = documents.beginRefresh()
-  const next = await documents.get(props.id)
-  if (!documents.refreshIsCurrent(ticket)) return
-  document.value = next
-  if (next.parse_status !== 'parsed') {
-    structure.value = null
-    return
+  try {
+    const next = await documents.get(props.id)
+    if (!documents.refreshIsCurrent(ticket)) return
+    document.value = next
+    if (next.parse_status !== 'parsed') {
+      structure.value = null
+      return
+    }
+    structureLoading.value = true
+    const parsed = await documents.structure(props.id)
+    if (!documents.refreshIsCurrent(ticket)) return
+    structure.value = parsed
+  } finally {
+    if (documents.refreshIsCurrent(ticket)) structureLoading.value = false
   }
-  structureLoading.value = true
-  const parsed = await documents
-    .structure(props.id)
-    .finally(() => (structureLoading.value = false))
-  if (!documents.refreshIsCurrent(ticket)) return
-  structure.value = parsed
 }
 
 async function onDocumentChanged(): Promise<void> {

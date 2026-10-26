@@ -276,6 +276,31 @@ describe('runs trash', () => {
     wrapper.unmount()
   })
 
+  it('shows a runs load failure instead of an empty list', async () => {
+    runs.items = []
+    seriesStore.list.mockResolvedValue([seriesRow('s-live', 'writing')])
+    runs.load.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = await mountList()
+    expect(wrapper.get('[data-runs-load-error]').text()).toContain(t.errors.generic)
+    expect(wrapper.text()).not.toContain(t.run.empty)
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Serie s-live')
+    wrapper.unmount()
+  })
+
+  it('keeps a loaded runs list when a later load fails', async () => {
+    const wrapper = await mountList()
+    const rows = wrapper.findAll('[data-trash]').length
+    expect(rows).toBeGreaterThan(0)
+    runs.load.mockRejectedValueOnce(new ApiError(503, 'Down', 'Läufe nicht geladen.'))
+    await wrapper.get('[data-trash]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
+    expect(wrapper.findAll('[data-trash]')).toHaveLength(rows)
+    expect(wrapper.text()).not.toContain(t.run.empty)
+    wrapper.unmount()
+  })
+
   it('shows a loading indicator instead of the empty list until the runs arrive', async () => {
     runs.items = []
     let answer: () => void = () => {}
