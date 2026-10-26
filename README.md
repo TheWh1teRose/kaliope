@@ -523,6 +523,10 @@ A length stop emits a progress warning that output may be incomplete; usable
 JSON is parsed as before. There is no automatic continuation. Existing numeric
 settings and saved revisions stay intact.
 
+The series planner's **Max output tokens** also default to 0: a reasoning model's
+thinking counts against a fixed cap, and a plan that gets no text failed with
+`empty completion (finish_reason=length)`. A positive value is still sent as the cap.
+
 Every save appends a **revision**; nothing is ever overwritten, and restoring an
 old revision writes a new one carrying the old content. A run records the flow
 revision it used, so a script from last month stays explainable. Archiving takes
