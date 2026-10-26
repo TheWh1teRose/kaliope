@@ -65,6 +65,20 @@ export const useSeriesStore = defineStore('series', () => {
     return api.get<SeriesOut[]>(`/api/series${query}`)
   }
 
+  /** The series in the trash, latest trashed first. */
+  async function trashed(): Promise<SeriesOut[]> {
+    return api.get<SeriesOut[]>('/api/series?trashed=true')
+  }
+
+  /** Move a series with all its episodes to the trash. Nothing of it is deleted. */
+  async function trash(id: string): Promise<SeriesOut> {
+    return api.post<SeriesOut>(`/api/series/${id}/trash`)
+  }
+
+  async function restore(id: string): Promise<SeriesOut> {
+    return api.post<SeriesOut>(`/api/series/${id}/restore`)
+  }
+
   async function graph(id: string): Promise<SeriesGraphOut> {
     return api.get<SeriesGraphOut>(`/api/series/${id}/graph`)
   }
@@ -134,6 +148,9 @@ export const useSeriesStore = defineStore('series', () => {
     create,
     get,
     list,
+    trashed,
+    trash,
+    restore,
     graph,
     approve,
     replan,

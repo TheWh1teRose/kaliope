@@ -3,6 +3,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SeriesOut } from '@/api/types'
+import { t } from '@/i18n'
 import { seriesGraph } from '@/series/fixtures'
 
 import SeriesView from './SeriesView.vue'
@@ -85,6 +86,7 @@ const store = {
   approve: vi.fn(async () => series('queued')),
   replan: vi.fn(async () => series('queued')),
   resume: vi.fn(async () => series('queued')),
+  restore: vi.fn(async () => series('stopped')),
   stop: vi.fn(async () => ({ id: 's1', status: 'stopped', outcome: 'stopped', stopped_by: null })),
   watch: vi.fn(),
   stopWatching: vi.fn(),
@@ -342,5 +344,23 @@ describe('series view', () => {
     expect(wrapper.find('[data-resume]').exists()).toBe(true)
     expect(wrapper.findAll('[data-node]').length).toBeGreaterThan(0)
     expect(wrapper.text()).toContain('Gestoppt')
+  })
+
+  it('says a trashed series is in the trash, holds its actions and restores it', async () => {
+    store.restore.mockClear()
+    store.get.mockImplementation(async () => ({ ...series('stopped'), trashed_at: '2026-10-04T09:00:00Z' }))
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-trashed]').text()).toContain(t.series.trashedDetail)
+    expect(wrapper.find('[data-resume]').exists()).toBe(false)
+    expect(wrapper.find('[data-approve]').exists()).toBe(false)
+    expect(wrapper.find('[data-replan]').exists()).toBe(false)
+    store.get.mockImplementation(async () => series('stopped'))
+    await wrapper.get('[data-trashed] [data-restore]').trigger('click')
+    await flushPromises()
+    expect(store.restore).toHaveBeenCalledWith('s1')
+    expect(wrapper.find('[data-trashed]').exists()).toBe(false)
+    expect(wrapper.find('[data-resume]').exists()).toBe(true)
+    wrapper.unmount()
   })
 })

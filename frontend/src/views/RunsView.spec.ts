@@ -42,6 +42,7 @@ function seriesRow(id: string, status: string) {
     total_cost_usd: 0.02,
     episodes: [{ index: 1 }, { index: 2 }],
     request: { episodes: 2 },
+    trashed_at: null as string | null,
   }
 }
 
@@ -56,6 +57,9 @@ const runs = {
 
 const seriesStore = {
   list: vi.fn(async () => [] as ReturnType<typeof seriesRow>[]),
+  trashed: vi.fn(async () => [] as ReturnType<typeof seriesRow>[]),
+  trash: vi.fn(async (id: string) => ({ ...seriesRow(id, 'stopped'), trashed_at: '2026-10-04T09:00:00Z' })),
+  restore: vi.fn(async (id: string) => seriesRow(id, 'stopped')),
   stop: vi.fn(async () => ({ id: 's-live', status: 'stopping', outcome: 'stopping', stopped_by: null })),
 }
 
@@ -194,11 +198,14 @@ describe('runs trash', () => {
     ]
     seriesStore.list.mockResolvedValue([])
     runs.trashed.mockResolvedValue([])
+    seriesStore.trashed.mockResolvedValue([])
     runs.trash.mockClear()
     runs.restore.mockClear()
+    seriesStore.trash.mockClear()
+    seriesStore.restore.mockClear()
   })
 
-  it('offers delete only for a finished run outside a series', async () => {
+  it('offers delete only for a finished run, and an episode only beside its series', async () => {
     const wrapper = await mountList()
     const buttons = wrapper.findAll('[data-trash]')
     expect(buttons).toHaveLength(1)
@@ -276,6 +283,80 @@ describe('runs trash', () => {
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toContain('Erst stoppen.')
     expect(wrapper.find('[data-trashed-notice]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('offers delete for an idle series and its episodes, not a writing one', async () => {
+    runs.items = [
+      { ...runRow('r-ep-done', 'completed'), series_id: 's-stop', episode_index: 1 },
+      { ...runRow('r-ep-live', 'completed'), series_id: 's-live', episode_index: 1 },
+    ]
+    seriesStore.list.mockResolvedValue([seriesRow('s-live', 'writing'), seriesRow('s-stop', 'stopped')])
+    const wrapper = await mountList()
+    const seriesButtons = wrapper.findAll('[data-trash-series]')
+    expect(seriesButtons).toHaveLength(1)
+    expect(seriesButtons[0].attributes('title')).toBe(t.series.trash)
+    const episodeButtons = wrapper.findAll('[data-trash]')
+    expect(episodeButtons).toHaveLength(1)
+    expect(episodeButtons[0].attributes('title')).toBe(t.series.trash)
+    wrapper.unmount()
+  })
+
+  it('moves a whole series to the trash from an episode row and undoes it', async () => {
+    runs.items = [{ ...runRow('r-ep', 'completed'), series_id: 's-stop', episode_index: 2 }]
+    seriesStore.list.mockResolvedValue([seriesRow('s-stop', 'stopped')])
+    const wrapper = await mountList()
+    seriesStore.trashed.mockResolvedValueOnce([{ ...seriesRow('s-stop', 'stopped'), trashed_at: '2026-10-04T09:00:00Z' }])
+    await wrapper.get('[data-trash]').trigger('click')
+    await flushPromises()
+    expect(seriesStore.trash).toHaveBeenCalledWith('s-stop')
+    expect(runs.trash).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-trashed-notice]').text()).toContain('Serie s-stop')
+    expect(wrapper.get('[data-trashed-notice]').text()).toContain('mit allen Folgen')
+    expect(wrapper.get('[data-tab="trash"]').text()).toContain('1')
+
+    await wrapper.get('[data-undo]').trigger('click')
+    await flushPromises()
+    expect(seriesStore.restore).toHaveBeenCalledWith('s-stop')
+    expect(runs.restore).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-trashed-notice]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('moves a series to the trash from its own row', async () => {
+    seriesStore.list.mockResolvedValue([seriesRow('s-fail', 'failed')])
+    const wrapper = await mountList()
+    await wrapper.get('[data-trash-series]').trigger('click')
+    await flushPromises()
+    expect(seriesStore.trash).toHaveBeenCalledWith('s-fail')
+    expect(wrapper.get('[data-trashed-notice]').text()).toContain('Serie s-fail')
+    wrapper.unmount()
+  })
+
+  it('shows a rejected series trash request', async () => {
+    seriesStore.list.mockResolvedValue([seriesRow('s-stop', 'stopped')])
+    seriesStore.trash.mockRejectedValueOnce(new ApiError(409, 'Series is still in progress', 'Erst die Serie stoppen.'))
+    const wrapper = await mountList()
+    await wrapper.get('[data-trash-series]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Erst die Serie stoppen.')
+    expect(wrapper.find('[data-trashed-notice]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('lists a trashed series as one entry and restores it whole', async () => {
+    runs.trashed.mockResolvedValue([{ ...runRow('r-old', 'failed'), trashed_at: '2026-10-04T09:00:00Z' }])
+    seriesStore.trashed.mockResolvedValue([{ ...seriesRow('s-old', 'completed'), trashed_at: '2026-10-05T09:00:00Z' }])
+    const wrapper = await mountList('/runs?tab=trash')
+    expect(wrapper.get('[data-tab="trash"]').text()).toContain('2')
+    const rows = wrapper.findAll('[data-trash-series-list] tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Serie s-old')
+    expect(wrapper.findAll('[data-trash-list] tbody tr')).toHaveLength(1)
+    await wrapper.get('[data-restore-series]').trigger('click')
+    await flushPromises()
+    expect(seriesStore.restore).toHaveBeenCalledWith('s-old')
+    expect(runs.restore).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

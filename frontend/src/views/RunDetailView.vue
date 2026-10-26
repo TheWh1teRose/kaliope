@@ -264,7 +264,7 @@ onUnmounted(() => {
     </p>
     <p v-if="stopped" class="notice" data-stopped>{{ stoppedNotice }}</p>
     <div v-if="run.trashed_at" class="notice trashed" data-trashed>
-      <span>{{ t.run.trashedDetail }}</span>
+      <span>{{ run.series_id ? t.run.trashedEpisodeDetail : t.run.trashedDetail }}</span>
       <button class="btn btn--sm" type="button" :disabled="restoring" data-restore @click="restore">
         {{ t.run.restore }}
       </button>

@@ -9,12 +9,13 @@ holds no execution logic; the worker drives the stages.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from app.models import Run, Series
+from app.models.base import utcnow
 from app.pipeline import catalogue
 from app.pipeline.feedback import last_row_for_key
 from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
@@ -38,6 +39,8 @@ MIN_ASSIGNED_SHARE = 0.9
 SCRIPT_DONE = frozenset({"completed", "in_review", "reviewed"})
 #: Series states in which no worker job is meant to be running.
 SERIES_IDLE = frozenset({"planned", "completed", "failed", "stopped"})
+#: Series states in which the worker drives the series, so it cannot be trashed.
+SERIES_LIVE = frozenset({"queued", "planning", "outlining", "writing"})
 #: Nodes that pause for a person; a series cannot run an episode flow with one yet.
 PAUSING_NODES = frozenset({"human_feedback"})
 
@@ -85,6 +88,49 @@ def apply_episode_names(session: Session, series: Series) -> None:
     """Point every episode run at the series name. An unnamed series clears them."""
     for index, run in episode_runs(session, series.id).items():
         run.name = episode_run_name(series.name, index)
+
+
+def trash_series(session: Session, series_id: str) -> bool:
+    """Mark a series and every run of it as trashed, as one unit; nothing is removed.
+
+    Refuses, returning ``False``, while the series is in a live state or one of
+    its runs is running. The caller checks the worker and commits.
+    """
+    now = utcnow()
+    moved = session.execute(
+        update(Series)
+        .where(
+            Series.id == series_id,
+            Series.trashed_at.is_(None),
+            Series.status.notin_(tuple(SERIES_LIVE)),
+        )
+        .values(trashed_at=now)
+    )
+    if cast(CursorResult[Any], moved).rowcount != 1:
+        session.rollback()
+        return False
+    running = session.scalars(
+        select(Run.id).where(Run.series_id == series_id, Run.status == "running").limit(1)
+    ).first()
+    if running is not None:
+        session.rollback()
+        return False
+    session.execute(
+        update(Run)
+        .where(Run.series_id == series_id, Run.trashed_at.is_(None))
+        .values(trashed_at=now)
+    )
+    return True
+
+
+def restore_series(session: Session, series: Series) -> None:
+    """Take a series and all of its runs back out of the trash. The caller commits."""
+    series.trashed_at = None
+    session.execute(
+        update(Run)
+        .where(Run.series_id == series.id, Run.trashed_at.is_not(None))
+        .values(trashed_at=None)
+    )
 
 
 def episode_runs(session: Session, series_id: str) -> dict[int, Run]:

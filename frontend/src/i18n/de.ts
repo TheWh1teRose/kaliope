@@ -363,11 +363,13 @@ export default {
     trashedAt: 'Gelöscht',
     trashedNotice: '„{title}“ liegt im Papierkorb.',
     trashedDetail: 'Dieser Lauf liegt im Papierkorb. Er bleibt vollständig erhalten, Freigabelinks funktionieren weiter.',
+    trashedEpisodeDetail:
+      'Diese Folge liegt mit ihrer Serie im Papierkorb. Wiederherstellen holt die ganze Serie zurück.',
     undo: 'Rückgängig',
     restore: 'Wiederherstellen',
     trashEmpty: 'Der Papierkorb ist leer.',
     trashLead:
-      'Gelöschte Läufe bleiben hier vollständig erhalten, mit Skript, Audio und Freigabelinks. Wiederherstellen holt sie zurück in die Liste.',
+      'Gelöschte Läufe und Serien bleiben hier vollständig erhalten, mit Skript, Audio und Freigabelinks. Wiederherstellen holt sie zurück in die Liste; eine Serie kommt mit allen Folgen zurück.',
     verdictInsufficient:
       'Der Lauf wurde abgebrochen, weil das Dokument zu wenig sprechbaren Inhalt enthält.',
     liveWaiting: 'Warte auf Ereignisse …',
@@ -449,6 +451,10 @@ export default {
       stopped: 'Gestoppt',
     },
     stop: 'Serie stoppen',
+    trash: 'Serie mit allen Folgen in den Papierkorb legen',
+    trashedNotice: '„{title}“ liegt mit allen Folgen im Papierkorb.',
+    trashedDetail:
+      'Diese Serie liegt mit allen Folgen im Papierkorb. Sie bleibt vollständig erhalten, Freigabelinks funktionieren weiter.',
     stopTitle: 'Serie stoppen?',
     stopLead:
       'Die Folge, die gerade läuft, wird beendet. Weitere Folgen starten nicht. Der Plan und fertige Folgen bleiben.',
