@@ -254,6 +254,9 @@ class Run(Base):
     episode_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     #: Hash of the series context the episode's script was written with.
     context_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: When the run was moved to the trash. Unset means it is listed normally;
+    #: nothing of a trashed run is removed, so restoring only clears this.
+    trashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     document: Mapped[Document] = relationship()
 

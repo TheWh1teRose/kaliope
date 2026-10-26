@@ -299,6 +299,8 @@ export interface RunOut {
   episode_index?: number | null
   /** Set when someone stopped the run. */
   stopped_by?: string | null
+  /** Set while the run is in the trash. */
+  trashed_at?: string | null
 }
 
 export interface StopOut {

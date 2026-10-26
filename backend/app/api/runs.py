@@ -12,12 +12,12 @@ import json
 import queue
 from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from app.accounts import author_labels
@@ -30,6 +30,7 @@ from app.errors import problem
 from app.events import bus
 from app.ingestion import anchors as anchor_tools
 from app.models import Document, GateResult, Run, RunNode, User
+from app.models.base import utcnow
 from app.naming import clean_name
 from app.pipeline import catalogue
 from app.pipeline.catalogue import CatalogueError
@@ -77,6 +78,8 @@ _SAMPLE_CHARS = 240
 
 #: Seconds between SSE heartbeats when nothing is happening.
 _HEARTBEAT_SECONDS = 15.0
+#: Statuses in which a run is still being worked on and so cannot be trashed.
+_LIVE_STATUSES = frozenset({"queued", "running"})
 #: Events after which the stream closes itself.
 _TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.paused", "run.stopped"})
 
@@ -213,14 +216,17 @@ def stop_run(
 def list_runs(
     document_id: str | None = None,
     limit: int = 100,
+    trashed: bool = False,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[RunOut]:
+    """The runs, newest first. ``trashed`` lists the trash instead, latest trashed first."""
     statement = (
         select(Run)
         # A series' planner run makes no script; the series view shows it.
         .where((Run.episode_index.is_(None)) | (Run.episode_index > 0))
-        .order_by(Run.created_at.desc())
+        .where(Run.trashed_at.is_not(None) if trashed else Run.trashed_at.is_(None))
+        .order_by(Run.trashed_at.desc() if trashed else Run.created_at.desc())
         .limit(max(1, min(limit, 500)))
     )
     if document_id:
@@ -247,6 +253,62 @@ def rename_run(
     run.name = clean_name(payload.name)
     db.commit()
     return _run_out(db, run)
+
+
+@router.post("/runs/{run_id}/trash", response_model=RunOut)
+def trash_run(
+    run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
+) -> RunOut:
+    """Move a run to the trash: it leaves the lists, and nothing of it is deleted.
+
+    Its script, audio and review links stay as they are, so restoring brings it
+    back exactly as it was. A run still in progress, or an episode of a series,
+    cannot be trashed on its own.
+    """
+    run = _require_run(db, run_id)
+    if run.trashed_at is not None:
+        return _run_out(db, run, detailed=False)
+    trashed = db.execute(
+        update(Run)
+        .where(
+            Run.id == run_id,
+            Run.trashed_at.is_(None),
+            Run.series_id.is_(None),
+            Run.status.notin_(tuple(_LIVE_STATUSES)),
+        )
+        .values(trashed_at=utcnow())
+    )
+    if cast(CursorResult[Any], trashed).rowcount != 1:
+        db.rollback()
+        db.refresh(run)
+        if run.trashed_at is not None:
+            return _run_out(db, run, detailed=False)
+        if run.series_id is not None:
+            raise problem(
+                409,
+                "Run belongs to a series",
+                "An episode is part of its series and cannot be moved to the trash on its own.",
+            )
+        raise problem(
+            409,
+            "Run is still in progress",
+            "Stop the run, or wait for it to finish, before moving it to the trash.",
+        )
+    db.commit()
+    db.refresh(run)
+    return _run_out(db, run, detailed=False)
+
+
+@router.post("/runs/{run_id}/restore", response_model=RunOut)
+def restore_run(
+    run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
+) -> RunOut:
+    """Take a run back out of the trash. A run that is not in it is left as it is."""
+    run = _require_run(db, run_id)
+    if run.trashed_at is not None:
+        run.trashed_at = None
+        db.commit()
+    return _run_out(db, run, detailed=False)
 
 
 @router.get("/runs/{run_id}/events")
@@ -1090,6 +1152,7 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         series_id=run.series_id,
         episode_index=run.episode_index,
         stopped_by=_person(db, config.get("stopped_by")),
+        trashed_at=_iso(run.trashed_at),
     )
 
 

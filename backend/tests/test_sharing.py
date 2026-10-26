@@ -250,6 +250,16 @@ def test_acknowledged_script_only_snapshot_never_follows_edits_or_audio(owner: T
     assert owner.get(public_path(created) + "/episodes/1/audio").status_code == 404
 
 
+def test_a_trashed_run_keeps_its_review_link_working(owner: TestClient) -> None:
+    rid = run()
+    created = share(owner, rid, choice())
+    before = owner.get(public_path(created)).json()
+    assert owner.post(f"/api/runs/{rid}/trash").status_code == 200
+    assert owner.get(public_path(created)).json() == before
+    assert owner.post(f"/api/runs/{rid}/restore").status_code == 200
+    assert owner.get(public_path(created)).json() == before
+
+
 def test_replacement_is_explicit_atomic_and_revokes_audio(owner: TestClient) -> None:
     rid = run()
     tid, blob = take(rid)

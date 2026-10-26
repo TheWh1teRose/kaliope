@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.errors import problem
+from app.errors import ProblemException, problem
 from app.events import bus
 from app.models import BenchRun, Run, User
 from app.pipeline.feedback import (
@@ -31,6 +34,12 @@ router = APIRouter(tags=["feedback"])
 
 def _store() -> ArtifactStore:
     return ArtifactStore(get_settings().artifacts_dir)
+
+
+def _release_queued_claim(db: Session, run_id: str) -> None:
+    db.rollback()
+    db.execute(update(Run).where(Run.id == run_id, Run.status == "queued").values(status="paused"))
+    db.commit()
 
 
 @router.get("/api/runs/{run_id}/feedback", response_model=FeedbackOut)
@@ -97,23 +106,66 @@ def submit_run_feedback(
         raise problem(404, "No such run", str(exc)) from exc
     except ValueError as exc:
         raise problem(409, "Not waiting", str(exc)) from exc
+    claimed = db.execute(
+        update(Run)
+        .where(Run.id == run_id, Run.status == "paused", Run.trashed_at.is_(None))
+        .values(status="queued", error=None)
+    )
+    if cast(CursorResult[Any], claimed).rowcount != 1:
+        db.rollback()
+        db.refresh(run)
+        if run.trashed_at is not None:
+            raise problem(
+                409,
+                "Run is in the trash",
+                "Restore the run before starting it again.",
+            )
+        raise problem(409, "Not waiting", f"run status is '{run.status}', not paused")
+    db.commit()
+    db.refresh(run)
     store = _store()
+    lost_claim = False
     try:
         notes = compile_submission(store, run.manifest_json, payload.notes)
+        stored = store.put("notes", notes)
+        pause = (run.manifest_json or {}).get("pause") or {}
+        node_name = str(pause.get("node") or "human_feedback")
+        manifest = mark_submitted(run.manifest_json, stored.hash, notes)
+        persist_human_output(db, kind="run", run_id=run_id, node_name=node_name, digest=stored.hash)
+        held = db.execute(
+            update(Run)
+            .where(Run.id == run_id, Run.status == "queued", Run.trashed_at.is_(None))
+            .values(manifest_json=manifest)
+        )
+        if cast(CursorResult[Any], held).rowcount != 1:
+            db.rollback()
+            lost_claim = True
+        else:
+            db.commit()
     except (KeyError, ValueError) as exc:
+        _release_queued_claim(db, run_id)
         raise problem(422, "Invalid notes", str(exc)) from exc
-    stored = store.put("notes", notes)
-    pause = (run.manifest_json or {}).get("pause") or {}
-    node_name = str(pause.get("node") or "human_feedback")
-    persist_human_output(db, kind="run", run_id=run_id, node_name=node_name, digest=stored.hash)
-    run.manifest_json = mark_submitted(run.manifest_json, stored.hash, notes)
-    run.status = "queued"
-    run.error = None
-    db.commit()
+    except Exception:
+        _release_queued_claim(db, run_id)
+        raise
+    if lost_claim:
+        db.refresh(run)
+        if run.trashed_at is not None:
+            raise problem(
+                409,
+                "Run is in the trash",
+                "Restore the run before starting it again.",
+            )
+        raise problem(409, "Not waiting", f"run status is '{run.status}', not paused")
+    db.refresh(run)
     # Clear before the page re-subscribes: the paused event of the last execution
     # would otherwise replay and end the new stream at once.
     bus.clear(run_id)
-    worker.submit_run(run_id)
+    try:
+        worker.submit_run(run_id)
+    except ProblemException:
+        _release_queued_claim(db, run_id)
+        raise
     return feedback_out(
         run_id=run_id,
         kind="run",

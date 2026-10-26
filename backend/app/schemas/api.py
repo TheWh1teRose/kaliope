@@ -230,6 +230,8 @@ class RunOut(BaseModel):
     episode_index: int | None = None
     #: Recorded stopper label; queued series episodes may retain it until execution starts.
     stopped_by: str | None = None
+    #: When the run was moved to the trash; unset while it is listed normally.
+    trashed_at: str | None = None
 
 
 class StopOut(BaseModel):

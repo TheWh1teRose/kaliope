@@ -356,6 +356,18 @@ export default {
     exportMd: 'Als Markdown exportieren',
     error: 'Fehlermeldung',
     empty: 'Noch keine Läufe.',
+    tabRuns: 'Läufe',
+    tabTrash: 'Papierkorb',
+    delete: 'Löschen',
+    trash: 'In den Papierkorb legen',
+    trashedAt: 'Gelöscht',
+    trashedNotice: '„{title}“ liegt im Papierkorb.',
+    trashedDetail: 'Dieser Lauf liegt im Papierkorb. Er bleibt vollständig erhalten, Freigabelinks funktionieren weiter.',
+    undo: 'Rückgängig',
+    restore: 'Wiederherstellen',
+    trashEmpty: 'Der Papierkorb ist leer.',
+    trashLead:
+      'Gelöschte Läufe bleiben hier vollständig erhalten, mit Skript, Audio und Freigabelinks. Wiederherstellen holt sie zurück in die Liste.',
     verdictInsufficient:
       'Der Lauf wurde abgebrochen, weil das Dokument zu wenig sprechbaren Inhalt enthält.',
     liveWaiting: 'Warte auf Ereignisse …',
