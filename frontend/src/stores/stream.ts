@@ -6,7 +6,7 @@
  * "running" until it was reloaded. This reopens the stream itself with a
  * growing pause and tells the page, so it can reload what it may have missed.
  *
- * The server closes a stream after a few minutes with `stream.renew`, so an
+ * The server closes a stream after two minutes with `stream.renew`, so an
  * open stream never holds one of its few request slots for long; that one is
  * reopened at once and quietly. `stream.idle` means nothing drives the job any
  * more, so there is nothing left to follow. Each reopened stream asks only for
