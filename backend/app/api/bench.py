@@ -209,7 +209,9 @@ def run_events(
     db.close()
     closing = None
     if status in {"completed", "failed", "paused"}:
-        closing = f'event: run.{status}\ndata: {{"run_id": "{bench_id}"}}\n\n'
+        closing = (
+            f'event: run.{status}\ndata: {{"type": "run.{status}", "run_id": "{bench_id}"}}\n\n'
+        )
     return StreamingResponse(
         bus.follow(
             bench_id,

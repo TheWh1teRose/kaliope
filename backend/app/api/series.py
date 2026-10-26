@@ -398,7 +398,10 @@ def series_events(
     db.close()
     closing = None
     if status in SERIES_IDLE and not worker.series_driven(series_id):
-        closing = f'event: series.{status}\ndata: {{"series_id": "{series_id}"}}\n\n'
+        closing = (
+            f"event: series.{status}\n"
+            f'data: {{"type": "series.{status}", "series_id": "{series_id}"}}\n\n'
+        )
     return StreamingResponse(
         bus.follow(
             series_channel(series_id),

@@ -8,6 +8,7 @@ drives the job. A reopened stream picks up after the last event it saw.
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 import time
@@ -23,7 +24,7 @@ from app import events
 from app.db import get_engine, session_scope
 from app.events import bus
 from app.main import create_app
-from app.models import Document, Run, Series, User
+from app.models import BenchRun, Document, Run, Series, User
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
 from app.security import hash_password
 from app.worker import worker
@@ -188,6 +189,39 @@ def test_the_lifetime_cap_closes_a_stream_and_asks_for_a_new_one(
     assert time.monotonic() - started < 5
     assert body.rstrip().endswith('data: {"type": "stream.renew"}')
     _wait_for(lambda: bus.subscribers(run_id) == 0)
+
+
+def _bench(status: str) -> str:
+    with session_scope() as session:
+        row = BenchRun(status=status)
+        session.add(row)
+        session.flush()
+        return row.id
+
+
+def _data_frames(body: str) -> list[dict[str, Any]]:
+    return [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+
+
+def test_a_finished_job_with_no_history_closes_on_a_typed_frame(
+    client: TestClient, document_id: str
+) -> None:
+    """An already-finished row with an empty history ends on a frame the console can finish."""
+    run_id = _run(document_id, "failed")
+    frames = _data_frames(_sse(client, f"/api/runs/{run_id}/events"))
+    assert frames[-1] == {"type": "run.failed", "run_id": run_id}
+
+    series_id = _series(document_id, "failed")
+    frames = _data_frames(_sse(client, f"/api/series/{series_id}/events"))
+    assert frames[-1] == {"type": "series.failed", "series_id": series_id}
+
+    bench_id = _bench("failed")
+    frames = _data_frames(_sse(client, f"/api/bench/runs/{bench_id}/events"))
+    assert frames[-1] == {"type": "run.failed", "run_id": bench_id}
 
 
 def test_a_stream_nothing_drives_goes_idle(client: TestClient, document_id: str) -> None:
