@@ -93,7 +93,7 @@ _SERIES_STOPPABLE = frozenset({"queued", "planning", "outlining", "writing"})
 #: Take states a stop can still change. ``paused`` is the approval hold:
 #: stopping there spends nothing further.
 _TAKE_STOPPABLE = frozenset({"queued", "running", "paused"})
-#: Why a run or series a previous process left mid-way is failed at startup.
+#: Note stored when a previous process left a run or series mid-way.
 INTERRUPTED = "interrupted by a restart of the app; resume or start it again"
 
 
@@ -136,11 +136,13 @@ class Worker:
     # ------------------------------------------------------------ lifecycle
 
     def mark_interrupted(self) -> tuple[int, int]:
-        """Fail the runs and series a previous process left mid-way.
+        """Close the runs and series a previous process left mid-way.
 
         Runs at startup, before any job is queued, so nothing can still be
-        driving them; left alone they would read as running forever. A failed
-        series resumes where it stopped. Returns ``(runs, series)`` marked.
+        driving them; left alone they would read as running forever. A series
+        and its runs are failed, and a series resumes where it stopped. A
+        standalone run is stopped, with the same interrupted note, so it can
+        be started again. Returns ``(runs, series)`` marked.
         """
         now = datetime.now(UTC)
         with session_scope() as session:
@@ -149,12 +151,18 @@ class Worker:
                 .where(Series.status.in_(tuple(_SERIES_STOPPABLE)))
                 .values(status="failed", error=INTERRUPTED, finished_at=now)
             )
-            runs = session.execute(
+            standalone = session.execute(
                 sa_update(Run)
-                .where(Run.status.in_(tuple(_RUN_STOPPABLE)))
+                .where(Run.status.in_(tuple(_RUN_STOPPABLE)), Run.series_id.is_(None))
+                .values(status="stopped", error=INTERRUPTED, finished_at=now)
+            )
+            belonging = session.execute(
+                sa_update(Run)
+                .where(Run.status.in_(tuple(_RUN_STOPPABLE)), Run.series_id.is_not(None))
                 .values(status="failed", error=INTERRUPTED, finished_at=now)
             )
-            return int(getattr(runs, "rowcount", 0)), int(getattr(series, "rowcount", 0))
+            runs = int(getattr(standalone, "rowcount", 0)) + int(getattr(belonging, "rowcount", 0))
+            return runs, int(getattr(series, "rowcount", 0))
 
     def start(self) -> None:
         if self._pool is None:

@@ -433,10 +433,11 @@ series attribution and run accounting limits are described under
 [Series of episodes](#series-of-episodes).
 
 A restart of the app (a deploy, for one) ends whatever the worker was doing.
-On startup, runs left queued or running and series left queued, planning,
-outlining or writing are marked **failed** with "interrupted by a restart of
-the app"; **Fortsetzen** picks a series up where it stopped, and a standalone
-run is started again.
+On startup, series left queued, planning, outlining or writing, and the runs
+that belong to them, are marked **failed** with "interrupted by a restart of
+the app"; **Fortsetzen** picks a series up where it stopped. A standalone run
+left queued or running is marked **stopped** with the same note, and
+**Erneut starten** starts it again.
 
 ### Gates
 

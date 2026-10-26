@@ -1,10 +1,11 @@
 """What a restart leaves behind, and what the database mount can throw at us.
 
 A new process finds runs and series an earlier one was driving; nothing drives
-them now, so startup fails them and a series can be resumed. On the Cloud
-Storage mount a pooled connection can point at a file another writer replaced;
-such a connection is dropped instead of failing every request it serves. And a
-startup that migrates must leave the server's error log switched on.
+them now, so startup fails a series and its runs, stops a standalone run, and
+a series can be resumed. On the Cloud Storage mount a pooled connection can
+point at a file another writer replaced; such a connection is dropped instead
+of failing every request it serves. And a startup that migrates must leave the
+server's error log switched on.
 """
 
 from __future__ import annotations
@@ -97,10 +98,10 @@ def test_startup_fails_what_the_previous_process_left_running(
         monkeypatch.setattr(worker, "submit_series", resumed.append)
         with TestClient(create_app()) as client:
             with session_scope() as session:
-                for run_id in (planner, queued):
+                for run_id, status in ((planner, "failed"), (queued, "stopped")):
                     run = session.get(Run, run_id)
                     assert run is not None
-                    assert (run.status, run.error) == ("failed", INTERRUPTED)
+                    assert (run.status, run.error) == (status, INTERRUPTED)
                     assert run.finished_at is not None
                 assert session.get(Run, done).status == "completed"  # type: ignore[union-attr]
                 assert session.get(Run, paused).status == "paused"  # type: ignore[union-attr]
@@ -109,6 +110,13 @@ def test_startup_fails_what_the_previous_process_left_running(
 
             login = client.post("/api/auth/login", json={"email": EMAIL, "password": PASSWORD})
             assert login.status_code == 200
+            standalone = client.get(f"/api/runs/{queued}")
+            assert standalone.status_code == 200
+            assert standalone.json()["status"] == "stopped"
+            assert standalone.json()["error"] == INTERRUPTED
+            episode = client.get(f"/api/runs/{planner}")
+            assert episode.status_code == 200
+            assert (episode.json()["status"], episode.json()["error"]) == ("failed", INTERRUPTED)
             response = client.post(f"/api/series/{series_id}/resume")
             assert response.status_code == 200, response.text
             assert response.json()["status"] == "queued"
