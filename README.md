@@ -581,7 +581,8 @@ GET /api/runs/{id}/graph                # the same, as it actually ran
 GET /api/runs/{id}/nodes/{node}/io      # one node's real inputs and output
 POST /api/runs/{id}/trash               # move a run to the trash; nothing is deleted, links keep working;
                                         # an episode goes with its whole series
-POST /api/runs/{id}/restore             # take it back out; GET /api/runs?trashed=true lists the trash
+POST /api/runs/{id}/restore             # take it back; an episode returns with its series.
+                                        # GET /api/runs?trashed=true lists standalone runs only
 GET /api/documents/{id}/budget          # how many minutes a document supports
 POST /api/series                        # start a series; approve, replan, stop and resume below it
 GET /api/series/{id}/graph              # the planner run and every episode run

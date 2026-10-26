@@ -60,7 +60,7 @@ export const useRunsStore = defineStore('runs', () => {
     items.value = await api.get<RunOut[]>(`/api/runs${query}`)
   }
 
-  /** The runs in the trash, latest trashed first. */
+  /** Standalone runs in the trash, latest trashed first. */
   async function trashed(): Promise<RunOut[]> {
     return api.get<RunOut[]>('/api/runs?trashed=true')
   }

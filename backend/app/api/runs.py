@@ -221,7 +221,11 @@ def list_runs(
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[RunOut]:
-    """The runs, newest first. ``trashed`` lists the trash instead, latest trashed first."""
+    """The runs, newest first.
+
+    ``trashed`` lists standalone runs in the trash, latest first. A trashed
+    series is omitted here and listed by ``GET /api/series?trashed=true``.
+    """
     statement = (
         select(Run)
         # A series' planner run makes no script; the series view shows it.
