@@ -263,11 +263,11 @@ describe('FeedbackBoard', () => {
 
   it('drops a stale run-list error after a newer share load succeeds', async () => {
     store.items = []
-    let rejectOld: ((error: unknown) => void) | null = null
+    const stale: { reject: ((error: unknown) => void) | null } = { reject: null }
     store.load.mockImplementationOnce(
       () =>
         new Promise<undefined>((_resolve, reject) => {
-          rejectOld = reject
+          stale.reject = reject
         }),
     )
     const w = board()
@@ -293,8 +293,8 @@ describe('FeedbackBoard', () => {
     expect(document.body.textContent).toContain('Physiologie')
     expect(document.body.textContent).not.toContain('Die Läufe konnten nicht geladen werden')
 
-    rejectOld?.(new Error('offline'))
-    rejectOld = null
+    stale.reject?.(new Error('offline'))
+    stale.reject = null
     await flushPromises()
     expect(document.body.textContent).toContain('Physiologie')
     expect(document.body.textContent).not.toContain('Die Läufe konnten nicht geladen werden')

@@ -179,13 +179,13 @@ describe('runs list', () => {
     runs.items = [runRow('r-live', 'running')]
     seriesStore.list.mockResolvedValue([])
     const wrapper = await mountList()
-    let rejectOld: ((error: unknown) => void) | null = null
+    const stale: { reject: ((error: unknown) => void) | null } = { reject: null }
     try {
       const reads = runs.load.mock.calls.length
       runs.load.mockImplementationOnce(
         () =>
           new Promise<void>((_resolve, reject) => {
-            rejectOld = reject
+            stale.reject = reject
           }),
       )
       await vi.advanceTimersByTimeAsync(4000)
@@ -202,8 +202,8 @@ describe('runs list', () => {
       expect(wrapper.text()).toContain('Gestoppt')
       expect(wrapper.text()).toContain('Serie s-new')
 
-      rejectOld?.(new Error('offline'))
-      rejectOld = null
+      stale.reject?.(new Error('offline'))
+      stale.reject = null
       await vi.advanceTimersByTimeAsync(0)
       expect(wrapper.find('[data-runs-load-error]').exists()).toBe(false)
       expect(wrapper.text()).toContain('Serie s-new')
@@ -211,7 +211,7 @@ describe('runs list', () => {
       await vi.advanceTimersByTimeAsync(12000)
       expect(runs.load).toHaveBeenCalledTimes(settled)
     } finally {
-      rejectOld?.(new Error('offline'))
+      stale.reject?.(new Error('offline'))
       wrapper.unmount()
       vi.useRealTimers()
     }
@@ -222,12 +222,12 @@ describe('runs list', () => {
     runs.items = [runRow('r-live', 'running')]
     seriesStore.list.mockResolvedValue([])
     const wrapper = await mountList()
-    let resolveOld: (() => void) | null = null
+    const stale: { resolve: (() => void) | null } = { resolve: null }
     try {
       runs.load.mockImplementationOnce(
         () =>
           new Promise<void>((resolve) => {
-            resolveOld = resolve
+            stale.resolve = resolve
           }),
       )
       await vi.advanceTimersByTimeAsync(4000)
@@ -235,12 +235,12 @@ describe('runs list', () => {
       await vi.advanceTimersByTimeAsync(4000)
       expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
 
-      resolveOld?.()
-      resolveOld = null
+      stale.resolve?.()
+      stale.resolve = null
       await vi.advanceTimersByTimeAsync(0)
       expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
     } finally {
-      resolveOld?.()
+      stale.resolve?.()
       wrapper.unmount()
       vi.useRealTimers()
     }
@@ -251,25 +251,27 @@ describe('runs list', () => {
     runs.items = [runRow('r-live', 'stopped')]
     seriesStore.list.mockResolvedValue([{ ...seriesRow('s-live', 'writing') }])
     const wrapper = await mountList()
-    let releaseOld: ((rows: ReturnType<typeof seriesRow>[]) => void) | null = null
+    const stale: { release: ((rows: ReturnType<typeof seriesRow>[]) => void) | null } = {
+      release: null,
+    }
     try {
       seriesStore.list.mockResolvedValue([seriesRow('s-new', 'stopped')])
       seriesStore.list.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
-            releaseOld = resolve
+            stale.release = resolve
           }),
       )
       await vi.advanceTimersByTimeAsync(4000)
-      expect(releaseOld).not.toBeNull()
+      expect(stale.release).not.toBeNull()
       expect(wrapper.text()).toContain('Serie s-live')
       expect(wrapper.text()).not.toContain('Serie s-new')
       await vi.advanceTimersByTimeAsync(4000)
       expect(wrapper.text()).toContain('Serie s-new')
       expect(wrapper.text()).not.toContain('Serie s-live')
 
-      releaseOld?.([seriesRow('s-old', 'writing')])
-      releaseOld = null
+      stale.release?.([seriesRow('s-old', 'writing')])
+      stale.release = null
       await vi.advanceTimersByTimeAsync(0)
       expect(wrapper.text()).toContain('Serie s-new')
       expect(wrapper.text()).not.toContain('Serie s-old')
@@ -277,7 +279,7 @@ describe('runs list', () => {
       await vi.advanceTimersByTimeAsync(12000)
       expect(runs.load).toHaveBeenCalledTimes(settled)
     } finally {
-      releaseOld?.([])
+      stale.release?.([])
       wrapper.unmount()
       vi.useRealTimers()
     }
