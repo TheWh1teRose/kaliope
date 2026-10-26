@@ -276,6 +276,44 @@ describe('runs trash', () => {
     wrapper.unmount()
   })
 
+  it('shows a loading indicator instead of the empty list until the runs arrive', async () => {
+    runs.items = []
+    let answer: () => void = () => {}
+    runs.load.mockImplementationOnce(() => new Promise<void>((resolve) => (answer = resolve)))
+    const wrapper = await mountList()
+    expect(wrapper.find('[data-loading]').exists()).toBe(true)
+    expect(wrapper.text()).toContain(t.common.loading)
+    expect(wrapper.text()).not.toContain(t.run.empty)
+    answer()
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(t.run.empty)
+    wrapper.unmount()
+  })
+
+  it('keeps the list in place while a later load refreshes it', async () => {
+    const wrapper = await mountList()
+    runs.load.mockImplementationOnce(() => new Promise<void>(() => {}))
+    await wrapper.get('[data-trash]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-trash]').length).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
+  it('shows a loading indicator instead of an empty trash until it arrives', async () => {
+    let answer: (rows: ReturnType<typeof runRow>[]) => void = () => {}
+    runs.trashed.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+    const wrapper = await mountList('/runs?tab=trash')
+    expect(wrapper.find('[data-loading]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain(t.run.trashEmpty)
+    answer([])
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(t.run.trashEmpty)
+    wrapper.unmount()
+  })
+
   it('shows a rejected trash request', async () => {
     runs.trash.mockRejectedValueOnce(new ApiError(409, 'Run is still in progress', 'Erst stoppen.'))
     const wrapper = await mountList()

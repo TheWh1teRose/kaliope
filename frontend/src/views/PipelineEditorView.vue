@@ -25,6 +25,7 @@ import type {
   PipelineDraft,
   RevisionOut,
 } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
 import NodeParams from '@/components/NodeParams.vue'
@@ -221,7 +222,7 @@ onMounted(load)
     </header>
 
     <p v-if="error" class="banner banner--fail">{{ error }}</p>
-    <p v-if="loading" class="muted pad">{{ t.common.loading }}</p>
+    <LoadingState v-if="loading" class="pad" />
 
     <div v-else class="layout">
       <div class="main">

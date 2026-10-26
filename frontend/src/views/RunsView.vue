@@ -11,6 +11,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { RunOut, SeriesOut } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
@@ -29,6 +30,8 @@ const seriesStore = useSeriesStore()
 const route = useRoute()
 const router = useRouter()
 const series = ref<SeriesOut[]>([])
+/** False until the first load has answered; later polls refresh silently. */
+const runsLoaded = ref(false)
 const trash = ref<RunOut[]>([])
 const trashedSeries = ref<SeriesOut[]>([])
 const trashLoaded = ref(false)
@@ -92,7 +95,11 @@ async function loadTrash(): Promise<void> {
 }
 
 async function load(): Promise<void> {
-  await runs.load()
+  try {
+    await runs.load()
+  } finally {
+    runsLoaded.value = true
+  }
   series.value = await seriesStore.list().catch(() => [])
   const moving =
     runs.items.some((run) => LIVE_RUN.has(run.status) || run.active) ||
@@ -220,6 +227,7 @@ onUnmounted(() => {
       <p v-if="trashLoadError" class="notice notice--fail" role="alert" data-trash-load-error>
         {{ trashLoadError }}
       </p>
+      <LoadingState v-if="!trashLoaded && !trashLoadError" class="empty" />
       <p v-if="trashLoaded && !trashLoadError && !trashCount" class="muted empty">{{ t.run.trashEmpty }}</p>
       <table v-if="trashedSeries.length" class="runs" data-trash-series-list>
         <thead>
@@ -355,7 +363,8 @@ onUnmounted(() => {
         </tbody>
       </table>
 
-      <p v-if="!runs.items.length" class="muted empty">{{ t.run.empty }}</p>
+      <LoadingState v-if="!runsLoaded && !runs.items.length" class="empty" />
+      <p v-else-if="!runs.items.length" class="muted empty">{{ t.run.empty }}</p>
 
       <table v-else class="runs">
         <thead>
@@ -530,6 +539,10 @@ onUnmounted(() => {
 .empty {
   padding: var(--s8);
   text-align: center;
+}
+
+.loading.empty {
+  justify-content: center;
 }
 
 .lead {

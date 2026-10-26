@@ -14,6 +14,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import ArtifactView from '@/components/ArtifactView.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import type {
   ExperimentDetail,
   ExperimentOutput,
@@ -376,7 +377,7 @@ onBeforeRouteLeave(() => {
     </template>
 
     <template #setup>
-      <p v-if="loading" class="muted">{{ t.common.loading }}</p>
+      <LoadingState v-if="loading" />
       <template v-else-if="setup">
         <div class="spread">
           <p class="eyebrow">{{ labels.setup }}</p>

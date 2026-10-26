@@ -6,6 +6,7 @@ import type { DocumentSummary, FolderOut } from '@/api/types'
 import ConfidenceStrip from '@/components/ConfidenceStrip.vue'
 import DocumentActions from '@/components/DocumentActions.vue'
 import FolderTree from '@/components/FolderTree.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { t } from '@/i18n'
@@ -203,7 +204,9 @@ onUnmounted(() => documents.stopPolling())
           </span>
         </p>
 
-        <div v-if="!visible.length && !documents.loading" class="empty card">
+        <LoadingState v-if="documents.loading && !documents.items.length" class="pending card" />
+
+        <div v-else-if="!visible.length && !documents.loading" class="empty card">
           <p class="empty__text">
             {{ documents.items.length ? t.folders.empty : t.documents.empty }}
           </p>
@@ -486,6 +489,11 @@ onUnmounted(() => documents.stopPolling())
   gap: var(--s4);
   padding: var(--s8) var(--s5);
   text-align: center;
+}
+
+.pending {
+  justify-content: center;
+  padding: var(--s8) var(--s5);
 }
 
 .empty__text {

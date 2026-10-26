@@ -12,6 +12,7 @@ import {
   type FeedbackVoice,
   type LineReaction,
 } from '@/api/sharing'
+import LoadingState from '@/components/LoadingState.vue'
 import { fill, t } from '@/i18n'
 
 /**
@@ -146,7 +147,7 @@ onMounted(async () => {
       {{ t.sharedFeedback.back }}
     </RouterLink>
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
-    <p v-else-if="!data" class="muted">{{ t.sharedFeedback.loading }}</p>
+    <LoadingState v-else-if="!data" :label="t.sharedFeedback.loading" />
     <template v-else>
       <header>
         <p class="eyebrow">{{ t.sharedFeedback.title }}</p>

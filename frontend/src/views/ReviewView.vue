@@ -12,6 +12,7 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import type { AnchorOut, EditAction, ReviewSummary, RunOut, ScriptOut, StructureOut } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import ReasonPicker from '@/components/ReasonPicker.vue'
 import SeriesStrip from '@/components/SeriesStrip.vue'
@@ -32,6 +33,8 @@ const catalogue = useCatalogueStore()
 const router = useRouter()
 
 const script = ref<ScriptOut | null>(null)
+/** True until the script has answered, so its pane is not blank meanwhile. */
+const opening = ref(true)
 const run = ref<RunOut | null>(null)
 const structure = ref<StructureOut | null>(null)
 
@@ -266,7 +269,9 @@ async function finish(): Promise<void> {
 }
 
 onMounted(async () => {
-  ;[run.value, script.value] = await Promise.all([runs.get(props.id), review.open(props.id)])
+  ;[run.value, script.value] = await Promise.all([runs.get(props.id), review.open(props.id)]).finally(
+    () => (opening.value = false),
+  )
   structure.value = await documents.structure(script.value.document_id)
 })
 </script>
@@ -307,6 +312,7 @@ onMounted(async () => {
       :active-segment-id="activeSegmentId"
     >
         <p class="eyebrow pane__label">{{ t.review.script }}</p>
+        <LoadingState v-if="opening" class="pane__loading" />
 
         <article
           v-for="segment in script?.segments ?? []"
@@ -586,6 +592,10 @@ onMounted(async () => {
   z-index: 1;
   padding: var(--s2) 0;
   background: var(--press);
+}
+
+.pane__loading {
+  padding: var(--s3) 0;
 }
 
 /* ------------------------------------------------------------- segments */

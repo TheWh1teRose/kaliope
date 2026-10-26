@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { FeedbackOut, Note, RunOut } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
 import { t } from '@/i18n'
 import { useRunsStore } from '@/stores/runs'
@@ -59,7 +60,7 @@ onMounted(load)
 <template>
   <div class="page">
     <p v-if="error" class="notice notice--fail">{{ error }}</p>
-    <p v-if="!feedback" class="muted pad">{{ t.common.loading }}</p>
+    <LoadingState v-if="!feedback" class="pad" />
     <NotesEditor
       v-else
       :feedback="feedback"

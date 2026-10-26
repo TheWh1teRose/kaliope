@@ -16,6 +16,7 @@ import { audioApi, lineAt, takeActive, type AudioScope } from '@/api/audio'
 import { ApiError } from '@/api/client'
 import type { AudioStatus, AudioTakeOut, RunAudioOut, SpeechVoice, VoiceCast } from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import { tagParts } from '@/components/artifactView'
 import { fill, t } from '@/i18n'
@@ -264,6 +265,7 @@ onUnmounted(() => window.clearTimeout(timer))
       <b>{{ t.audio.notConfigured }}</b> {{ data.message }}
     </p>
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
+    <LoadingState v-if="!data && !error" />
 
     <div v-if="data && !take" class="row wrap">
       <button class="btn btn--mark" :disabled="busy" @click="start('sample')">

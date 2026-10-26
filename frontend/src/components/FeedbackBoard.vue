@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import { sharingApi, type ReviewLinkRow } from '@/api/sharing'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import ReviewLinkButton from '@/components/ReviewLinkButton.vue'
 import { fill, t } from '@/i18n'
@@ -92,7 +93,7 @@ onMounted(load)
     </div>
 
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
-    <p v-else-if="!links" class="muted" role="status">{{ t.common.loading }}</p>
+    <LoadingState v-else-if="!links" />
     <p v-else-if="!links.length" class="muted empty" data-empty>
       {{ props.run ? t.feedbackBoard.emptyRun : t.feedbackBoard.empty }}
     </p>
@@ -196,7 +197,8 @@ onMounted(load)
             {{ runTitle(run) }} · {{ when(run.created_at) }}
           </option>
         </select>
-        <p v-if="!pickerError && runsLoaded && !shareable.length" class="muted hint">
+        <LoadingState v-if="!pickerError && !runsLoaded" class="hint" />
+        <p v-else-if="!pickerError && !shareable.length" class="muted hint">
           {{ t.feedbackBoard.noRuns }}
         </p>
       </div>

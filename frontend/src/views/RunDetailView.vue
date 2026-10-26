@@ -8,6 +8,7 @@ import AudioPanel from '@/components/AudioPanel.vue'
 import FeedbackBoard from '@/components/FeedbackBoard.vue'
 import FlowGraph from '@/components/FlowGraph.vue'
 import GateList from '@/components/GateList.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
@@ -409,7 +410,7 @@ onUnmounted(() => {
           @save="saveNotes"
           @submit="submitNotes"
         />
-        <p v-else class="muted pad">{{ t.common.loading }}</p>
+        <LoadingState v-else class="pad" />
       </div>
     </Teleport>
 
@@ -464,7 +465,7 @@ onUnmounted(() => {
       <span>{{ t.run.loadError }} {{ loadError }}</span>
       <button class="btn btn--sm" type="button" data-retry @click="load">{{ t.common.retry }}</button>
     </div>
-    <p v-else class="muted" role="status" data-loading>{{ t.common.loading }}</p>
+    <LoadingState v-else />
   </div>
 </template>
 

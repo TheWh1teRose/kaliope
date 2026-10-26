@@ -5,6 +5,7 @@ import { RouterLink } from 'vue-router'
 import type { BlockOut, DocumentSummary, StructureOut } from '@/api/types'
 import ConfidenceStrip from '@/components/ConfidenceStrip.vue'
 import DocumentActions from '@/components/DocumentActions.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import PageCanvas from '@/components/PageCanvas.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -19,6 +20,9 @@ const catalogue = useCatalogueStore()
 
 const document = ref<DocumentSummary | null>(null)
 const structure = ref<StructureOut | null>(null)
+/** True until the first answer for the document, so the page is not blank meanwhile. */
+const opening = ref(true)
+const structureLoading = ref(false)
 const page = ref(0)
 const selectedBlockId = ref<string | null>(null)
 const sectionFilter = ref<string>('')
@@ -99,7 +103,10 @@ async function refreshDocument(): Promise<void> {
     structure.value = null
     return
   }
-  const parsed = await documents.structure(props.id)
+  structureLoading.value = true
+  const parsed = await documents
+    .structure(props.id)
+    .finally(() => (structureLoading.value = false))
   if (!documents.refreshIsCurrent(ticket)) return
   structure.value = parsed
 }
@@ -152,7 +159,7 @@ watch(polledParse, async (signature) => {
 
 onMounted(async () => {
   try {
-    await refreshDocument()
+    await refreshDocument().finally(() => (opening.value = false))
     if (
       inFlight(document.value?.parse_status) ||
       documents.items.some((item) => inFlight(item.parse_status))
@@ -326,6 +333,7 @@ onUnmounted(() => {
         />
       </div>
     </section>
+    <LoadingState v-else-if="structureLoading" class="sheet" />
 
     <ModalDialog
       :open="Boolean(relabelTarget)"
@@ -359,6 +367,9 @@ onUnmounted(() => {
         </button>
       </template>
     </ModalDialog>
+  </div>
+  <div v-else-if="opening" class="detail">
+    <LoadingState />
   </div>
 </template>
 

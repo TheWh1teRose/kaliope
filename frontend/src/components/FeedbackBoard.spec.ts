@@ -207,6 +207,22 @@ describe('FeedbackBoard', () => {
     expect(document.body.textContent).toContain('Noch kein fertiger Lauf')
   })
 
+  it('shows the run list loading before saying there is no finished run', async () => {
+    store.items = []
+    let answer: () => void = () => {}
+    store.load.mockImplementationOnce(() => new Promise<undefined>((resolve) => (answer = () => resolve(undefined))))
+    const w = board()
+    await flushPromises()
+    await w.find('[data-create]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"] [data-loading]')).not.toBeNull()
+    expect(document.body.textContent).not.toContain('Noch kein fertiger Lauf')
+    answer()
+    await flushPromises()
+    expect(document.body.querySelector('[role="dialog"] [data-loading]')).toBeNull()
+    expect(document.body.textContent).toContain('Noch kein fertiger Lauf')
+  })
+
   it('shows the run-list error instead of claiming there is nothing to share', async () => {
     store.items = []
     store.load.mockRejectedValueOnce(new ApiError(500, 'Error', ''))
