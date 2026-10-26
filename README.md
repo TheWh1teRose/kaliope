@@ -231,13 +231,16 @@ short script typed with any speakers, or on a beat loaded from a run.
 
 ### Review links
 
-**Feedback** in the main menu lists every shared snapshot of every run and
-series: its title and episodes, the run or series it came from, link status,
-response count and last reviewer activity, each one click from its feedback in
-the script. **Neues Feedback** there picks a finished run and opens the same
-link creation as the run. Each run keeps a **Feedback** tab with the same list
-narrowed to that run, plus link creation; existing links show their status,
-response count and revocation action on reload, without creating a replacement.
+**Feedback** in the main menu groups every shared snapshot of every run and
+series by link status. **Aktiv** is always the first group, then
+**Abgelaufen**, then **Widerrufen**; a status with no links is omitted. Each
+entry shows its title and episodes, the run or series it came from, link
+status, response count and last reviewer activity, each one click from its
+feedback in the script. **Neues Feedback** there picks a finished run and
+opens the same link creation as the run. Each run keeps a **Feedback** tab
+with the same groups narrowed to that run, plus link creation; existing links
+show their status, response count and revocation action on reload, without
+creating a replacement.
 With an existing link the creation options are collapsed initially. Completed
 series also have a **Review-Link** action. Choose the public
 titles and a completed full recording for each episode, then create and copy the
