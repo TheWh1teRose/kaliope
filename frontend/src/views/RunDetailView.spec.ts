@@ -242,4 +242,21 @@ describe('run detail', () => {
     expect(wrapper.get('[data-restore]').text()).toBe(t.run.restore)
     wrapper.unmount()
   })
+
+  it('says a trashed episode is in the trash with its series', async () => {
+    store.get.mockImplementation(async () => ({
+      ...run('completed'),
+      series_id: 's1',
+      episode_index: 2,
+      trashed_at: '2026-10-04T09:00:00Z',
+    }))
+    const wrapper = mount(RunDetailView, {
+      props: { id: 'r1' },
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-trashed]').text()).toContain(t.run.trashedEpisodeDetail)
+    expect(wrapper.get('[data-restore]').text()).toBe(t.run.restore)
+    wrapper.unmount()
+  })
 })

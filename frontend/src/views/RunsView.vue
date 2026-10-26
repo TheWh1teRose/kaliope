@@ -2,7 +2,9 @@
 /**
  * The runs overview. Deleting a run only moves it to the trash, which is the
  * second tab: nothing of the run is removed, and its share links keep working,
- * so restoring it is one click. The active tab is the `tab` query.
+ * so restoring it is one click. A series goes to the trash with all its
+ * episodes, from its own row or from any episode's, and comes back whole.
+ * The active tab is the `tab` query.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -28,10 +30,12 @@ const route = useRoute()
 const router = useRouter()
 const series = ref<SeriesOut[]>([])
 const trash = ref<RunOut[]>([])
+const trashedSeries = ref<SeriesOut[]>([])
 const trashLoaded = ref(false)
 const trashLoadError = ref('')
-/** The run just trashed, so the notice can offer to take it back. */
-const lastTrashed = ref<RunOut | null>(null)
+type TrashItem = { kind: 'run' | 'series'; id: string; title: string }
+/** What was just trashed, so the notice can offer to take it back. */
+const lastTrashed = ref<TrashItem | null>(null)
 const trashBusy = ref<string | null>(null)
 const trashError = ref('')
 const confirmStop = ref<{ kind: 'run' | 'series'; id: string } | null>(null)
@@ -54,14 +58,32 @@ function selectTab(next: 'runs' | 'trash'): void {
   void router.replace({ name: 'runs', query })
 }
 
-/** A run that is not in progress and not part of a series can go to the trash. */
+const seriesById = computed(() => new Map(series.value.map((row) => [row.id, row])))
+const trashCount = computed(() => trash.value.length + trashedSeries.value.length)
+
+function seriesTone(status: string): string {
+  if (status === 'failed') return 'badge--fail'
+  if (status === 'completed') return 'badge--pass'
+  if (status === 'stopped') return 'badge--idle'
+  return 'badge--mark'
+}
+
+/** A series that is not being worked on goes to the trash with all its episodes. */
+function seriesTrashable(row: SeriesOut | undefined): row is SeriesOut {
+  return !!row && !LIVE_SERIES.has(row.status) && !row.active
+}
+
+/** A run not in progress can go to the trash; an episode only with its series. */
 function trashable(run: RunOut): boolean {
-  return !run.series_id && !STOPPABLE_RUN.has(run.status) && !run.active
+  if (run.series_id) return seriesTrashable(seriesById.value.get(run.series_id))
+  return !STOPPABLE_RUN.has(run.status) && !run.active
 }
 
 async function loadTrash(): Promise<void> {
   try {
-    trash.value = await runs.trashed()
+    const [trashedRuns, trashedRows] = await Promise.all([runs.trashed(), seriesStore.trashed()])
+    trash.value = trashedRuns
+    trashedSeries.value = trashedRows
     trashLoaded.value = true
     trashLoadError.value = ''
   } catch (exc) {
@@ -105,11 +127,14 @@ async function confirm(): Promise<void> {
 }
 
 async function moveToTrash(run: RunOut): Promise<void> {
+  const row = run.series_id ? seriesById.value.get(run.series_id) : undefined
+  if (row) return moveSeriesToTrash(row)
   if (trashBusy.value) return
   trashBusy.value = run.id
   trashError.value = ''
   try {
-    lastTrashed.value = await runs.trash(run.id)
+    const trashed = await runs.trash(run.id)
+    lastTrashed.value = { kind: 'run', id: trashed.id, title: runTitle(trashed) }
     await Promise.all([load(), loadTrash()])
   } catch (exc) {
     trashError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
@@ -118,12 +143,28 @@ async function moveToTrash(run: RunOut): Promise<void> {
   }
 }
 
-async function restore(id: string): Promise<void> {
+async function moveSeriesToTrash(row: SeriesOut): Promise<void> {
+  if (trashBusy.value) return
+  trashBusy.value = row.id
+  trashError.value = ''
+  try {
+    const trashed = await seriesStore.trash(row.id)
+    lastTrashed.value = { kind: 'series', id: trashed.id, title: seriesTitle(trashed) }
+    await Promise.all([load(), loadTrash()])
+  } catch (exc) {
+    trashError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
+  } finally {
+    trashBusy.value = null
+  }
+}
+
+async function restore(kind: TrashItem['kind'], id: string): Promise<void> {
   if (trashBusy.value) return
   trashBusy.value = id
   trashError.value = ''
   try {
-    await runs.restore(id)
+    if (kind === 'series') await seriesStore.restore(id)
+    else await runs.restore(id)
     if (lastTrashed.value?.id === id) lastTrashed.value = null
     await Promise.all([load(), loadTrash()])
   } catch (exc) {
@@ -154,18 +195,20 @@ onUnmounted(() => {
       </button>
       <button class="tab" :class="{ 'tab--on': tab === 'trash' }" data-tab="trash" @click="selectTab('trash')">
         {{ t.run.tabTrash }}
-        <span class="tab__count num">{{ trash.length }}</span>
+        <span class="tab__count num">{{ trashCount }}</span>
       </button>
     </div>
 
     <div v-if="lastTrashed" class="notice trashed" role="status" data-trashed-notice>
-      <span>{{ fill(t.run.trashedNotice, { title: runTitle(lastTrashed) }) }}</span>
+      <span>
+        {{ fill(lastTrashed.kind === 'series' ? t.series.trashedNotice : t.run.trashedNotice, { title: lastTrashed.title }) }}
+      </span>
       <button
         class="btn btn--sm"
         type="button"
         data-undo
         :disabled="trashBusy !== null"
-        @click="restore(lastTrashed.id)"
+        @click="restore(lastTrashed.kind, lastTrashed.id)"
       >
         {{ t.run.undo }}
       </button>
@@ -177,7 +220,46 @@ onUnmounted(() => {
       <p v-if="trashLoadError" class="notice notice--fail" role="alert" data-trash-load-error>
         {{ trashLoadError }}
       </p>
-      <p v-if="trashLoaded && !trashLoadError && !trash.length" class="muted empty">{{ t.run.trashEmpty }}</p>
+      <p v-if="trashLoaded && !trashLoadError && !trashCount" class="muted empty">{{ t.run.trashEmpty }}</p>
+      <table v-if="trashedSeries.length" class="runs" data-trash-series-list>
+        <thead>
+          <tr>
+            <th>{{ t.series.title }}</th>
+            <th>{{ t.run.flow }}</th>
+            <th>Status</th>
+            <th class="right">{{ t.common.cost }}</th>
+            <th class="right">{{ t.run.trashedAt }}</th>
+            <th class="right">{{ t.common.page }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in trashedSeries" :key="row.id">
+            <td>
+              <RouterLink :to="{ name: 'series', params: { id: row.id } }" class="link">
+                {{ seriesTitle(row) }}
+              </RouterLink>
+              <span class="meta block">{{ row.document_title }} · {{ when(row.created_at) }}</span>
+            </td>
+            <td class="meta">{{ row.flow_id }} v{{ row.flow_version }}</td>
+            <td>
+              <span class="badge" :class="seriesTone(row.status)">{{ t.series.status[row.status] }}</span>
+            </td>
+            <td class="right num">${{ row.total_cost_usd.toFixed(4) }}</td>
+            <td class="right meta">{{ row.trashed_at ? when(row.trashed_at) : t.common.none }}</td>
+            <td class="right">
+              <button
+                class="btn btn--sm"
+                type="button"
+                data-restore-series
+                :disabled="trashBusy !== null"
+                @click="restore('series', row.id)"
+              >
+                {{ t.run.restore }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
       <table v-if="trash.length" class="runs" data-trash-list>
         <thead>
           <tr>
@@ -209,7 +291,7 @@ onUnmounted(() => {
                 type="button"
                 data-restore
                 :disabled="trashBusy !== null"
-                @click="restore(run.id)"
+                @click="restore('run', run.id)"
               >
                 {{ t.run.restore }}
               </button>
@@ -228,6 +310,7 @@ onUnmounted(() => {
             <th>Status</th>
             <th class="right">{{ t.common.cost }}</th>
             <th class="right">{{ t.series.count }}</th>
+            <th class="right">{{ t.common.page }}</th>
           </tr>
         </thead>
         <tbody>
@@ -240,18 +323,7 @@ onUnmounted(() => {
             </td>
             <td class="meta">{{ row.flow_id }} v{{ row.flow_version }}</td>
             <td>
-              <span
-                class="badge"
-                :class="
-                  row.status === 'failed'
-                    ? 'badge--fail'
-                    : row.status === 'completed'
-                      ? 'badge--pass'
-                      : row.status === 'stopped'
-                        ? 'badge--idle'
-                        : 'badge--mark'
-                "
-              >
+              <span class="badge" :class="seriesTone(row.status)">
                 {{ t.series.status[row.status] }}
               </span>
               <button
@@ -266,6 +338,19 @@ onUnmounted(() => {
             </td>
             <td class="right num">${{ row.total_cost_usd.toFixed(4) }}</td>
             <td class="right num">{{ row.episodes.length || row.request.episodes || t.common.none }}</td>
+            <td class="right">
+              <button
+                v-if="seriesTrashable(row)"
+                class="btn btn--sm btn--ghost btn--danger"
+                type="button"
+                data-trash-series
+                :title="t.series.trash"
+                :disabled="trashBusy !== null"
+                @click="moveSeriesToTrash(row)"
+              >
+                {{ t.run.delete }}
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -329,7 +414,7 @@ onUnmounted(() => {
                   class="btn btn--sm btn--ghost btn--danger"
                   type="button"
                   data-trash
-                  :title="t.run.trash"
+                  :title="run.series_id ? t.series.trash : t.run.trash"
                   :disabled="trashBusy !== null"
                   @click="moveToTrash(run)"
                 >

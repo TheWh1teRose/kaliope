@@ -639,6 +639,14 @@ class Worker:
     # ---------------------------------------------------------------- series
 
     def submit_series(self, series_id: str) -> Future[Any]:
+        with session_scope() as session:
+            series = session.get(Series, series_id)
+            if series is not None and series.trashed_at is not None:
+                raise problem(
+                    409,
+                    "Series is in the trash",
+                    "Restore the series before starting it again.",
+                )
         self._arm(series_id)
         return self._track(series_id, self.submit(self.execute_series, series_id))
 
@@ -687,6 +695,9 @@ class Worker:
             series = session.get(Series, series_id)
             if series is None:
                 logger.warning("series %s does not exist", series_id)
+                return
+            if series.trashed_at is not None:
+                logger.warning("refusing to drive trashed series %s", series_id)
                 return
             if series.status == "stopped":
                 return
@@ -1099,7 +1110,9 @@ class Worker:
     def _series_should_stop(self, series_id: str) -> bool:
         with session_scope() as session:
             series = session.get(Series, series_id)
-            return series is not None and series.status == "stopped"
+            return series is not None and (
+                series.status == "stopped" or series.trashed_at is not None
+            )
 
     def stop_run(self, run_id: str, user_id: str) -> tuple[str, str]:
         """Stop a queued or running run. Returns ``(status, outcome)``."""

@@ -1138,6 +1138,8 @@ export interface SeriesOut {
   progress: { outlined?: number; written?: number; episodes?: number }
   active: boolean
   stopped_by?: string | null
+  /** Set while the series, with all its episodes, is in the trash. */
+  trashed_at?: string | null
 }
 
 export interface SeriesGraphEpisode {

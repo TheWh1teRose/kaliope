@@ -179,6 +179,11 @@ function resume(): Promise<void> {
   return act(() => seriesStore.resume(props.id))
 }
 
+/** Take the series, with every episode, back out of the trash. */
+function restore(): Promise<void> {
+  return act(() => seriesStore.restore(props.id))
+}
+
 async function stopSeries(): Promise<void> {
   busy.value = true
   error.value = ''
@@ -285,7 +290,7 @@ onUnmounted(() => {
           {{ t.series.stop }}
         </button>
         <button
-          v-if="series.status === 'failed' || series.status === 'stopped' || stuck"
+          v-if="!series.trashed_at && (series.status === 'failed' || series.status === 'stopped' || stuck)"
           class="btn btn--sm btn--primary"
           type="button"
           :disabled="busy"
@@ -297,6 +302,12 @@ onUnmounted(() => {
       </div>
     </header>
 
+    <div v-if="series.trashed_at" class="notice trashed" data-trashed>
+      <span>{{ t.series.trashedDetail }}</span>
+      <button class="btn btn--sm" type="button" :disabled="busy" data-restore @click="restore">
+        {{ t.run.restore }}
+      </button>
+    </div>
     <p v-if="series.status === 'stopped'" class="notice" data-stopped>{{ stoppedNotice }}</p>
     <p v-if="series.error" class="notice notice--fail" data-series-error>{{ series.error }}</p>
     <p v-else-if="stuck" class="notice notice--warn">{{ t.series.stuck }}</p>
@@ -457,7 +468,13 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="series.status === 'planned' || (series.status === 'failed' && !series.episodes.some((e) => e.run_id))" class="sheet">
+      <div
+        v-if="
+          !series.trashed_at &&
+          (series.status === 'planned' || (series.status === 'failed' && !series.episodes.some((e) => e.run_id)))
+        "
+        class="sheet"
+      >
         <div class="row wrap">
           <button
             v-if="series.status === 'planned'"
@@ -651,6 +668,16 @@ onUnmounted(() => {
   background: var(--fail-soft);
   color: var(--fail);
   border: 1px solid var(--fail);
+}
+
+.trashed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  background: var(--sunk);
+  color: var(--ink-2);
 }
 
 .notice--warn {

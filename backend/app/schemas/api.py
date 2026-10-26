@@ -531,6 +531,8 @@ class SeriesOut(BaseModel):
     active: bool = False
     #: Who stopped the series, when it was stopped.
     stopped_by: str | None = None
+    #: When the series was moved to the trash; unset while it is listed normally.
+    trashed_at: str | None = None
 
 
 class SeriesGraphEpisodeOut(BaseModel):

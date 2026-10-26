@@ -29,7 +29,7 @@ from app.db import get_db
 from app.errors import problem
 from app.events import bus
 from app.ingestion import anchors as anchor_tools
-from app.models import Document, GateResult, Run, RunNode, User
+from app.models import Document, GateResult, Run, RunNode, Series, User
 from app.models.base import utcnow
 from app.naming import clean_name
 from app.pipeline import catalogue
@@ -66,6 +66,7 @@ from app.schemas.document import ParsedDocument
 from app.schemas.gates import GateDetail, GateReport, GateSpec
 from app.schemas.pipeline import AudienceSpec, FormatSpec, Script
 from app.security import current_user
+from app.series import restore_series, trash_series
 from app.worker import worker
 
 router = APIRouter(prefix="/api", tags=["runs"])
@@ -229,6 +230,9 @@ def list_runs(
         .order_by(Run.trashed_at.desc() if trashed else Run.created_at.desc())
         .limit(max(1, min(limit, 500)))
     )
+    if trashed:
+        # A trashed series is one entry of GET /api/series?trashed=true, not its episodes.
+        statement = statement.where(Run.series_id.is_(None))
     if document_id:
         statement = statement.where(Run.document_id == document_id)
     return [_run_out(db, run, detailed=False) for run in db.scalars(statement).all()]
@@ -262,11 +266,19 @@ def trash_run(
     """Move a run to the trash: it leaves the lists, and nothing of it is deleted.
 
     Its script, audio and review links stay as they are, so restoring brings it
-    back exactly as it was. A run still in progress, or an episode of a series,
-    cannot be trashed on its own.
+    back exactly as it was. A run still in progress cannot be trashed. An
+    episode is part of its series, so trashing it trashes the whole series.
     """
     run = _require_run(db, run_id)
     if run.trashed_at is not None:
+        return _run_out(db, run, detailed=False)
+    if run.series_id is not None:
+        series = db.get(Series, run.series_id)
+        if series is None:  # pragma: no cover - series rows are never deleted
+            raise problem(404, "No such series", f"Series '{run.series_id}' does not exist.")
+        if series.trashed_at is None:
+            move_series_to_trash(db, series)
+        db.refresh(run)
         return _run_out(db, run, detailed=False)
     trashed = db.execute(
         update(Run)
@@ -283,12 +295,6 @@ def trash_run(
         db.refresh(run)
         if run.trashed_at is not None:
             return _run_out(db, run, detailed=False)
-        if run.series_id is not None:
-            raise problem(
-                409,
-                "Run belongs to a series",
-                "An episode is part of its series and cannot be moved to the trash on its own.",
-            )
         raise problem(
             409,
             "Run is still in progress",
@@ -303,12 +309,40 @@ def trash_run(
 def restore_run(
     run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
 ) -> RunOut:
-    """Take a run back out of the trash. A run that is not in it is left as it is."""
+    """Take a run back out of the trash. A run that is not in it is left as it is.
+
+    An episode comes back with its whole series, as it went.
+    """
     run = _require_run(db, run_id)
-    if run.trashed_at is not None:
+    series = db.get(Series, run.series_id) if run.series_id else None
+    if series is not None and (series.trashed_at is not None or run.trashed_at is not None):
+        restore_series(db, series)
+        db.commit()
+        db.refresh(run)
+    elif run.trashed_at is not None:
         run.trashed_at = None
         db.commit()
     return _run_out(db, run, detailed=False)
+
+
+def move_series_to_trash(db: Session, series: Series) -> None:
+    """Trash ``series`` and its runs, or raise a 409 while any of it is in progress."""
+    busy = worker.series_active(series.id) or any(
+        worker.job_active(run_id)
+        for run_id in db.scalars(select(Run.id).where(Run.series_id == series.id))
+    )
+    if busy or not trash_series(db, series.id):
+        db.rollback()
+        db.refresh(series)
+        if series.trashed_at is not None:
+            return
+        raise problem(
+            409,
+            "Series is still in progress",
+            "Stop the series, or wait for it to finish, before moving it to the trash.",
+        )
+    db.commit()
+    db.refresh(series)
 
 
 @router.get("/runs/{run_id}/events")

@@ -696,7 +696,10 @@ POST   /api/runs        {document_id, flow_id, format_id, target_minutes,
                          audience_spec, language?, force?}
 GET    /api/runs  ·  GET /api/runs/{id}
 POST   /api/runs/{id}/stop                   stop a queued or running run
-POST   /api/runs/{id}/trash  ·  /restore     soft delete; GET /api/runs?trashed=true lists it
+POST   /api/runs/{id}/trash  ·  /restore     soft delete; GET /api/runs?trashed=true lists it;
+                                             an episode goes and comes back with its series
+POST   /api/series/{id}/trash  ·  /restore   the series and all its runs as one;
+                                             GET /api/series?trashed=true lists it
 GET    /api/runs/{id}/events                 SSE progress
 GET    /api/runs/{id}/artifacts/{node_name}
 GET    /api/runs/{id}/script  ·  /gates  ·  /export

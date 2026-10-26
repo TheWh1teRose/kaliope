@@ -15,10 +15,11 @@ import re
 import zipfile
 from collections.abc import Iterator
 from datetime import datetime
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from app.api.documents import load_parsed_document
@@ -30,6 +31,7 @@ from app.api.runs import (
     _to_markdown,
     _topology,
     build_run_graph,
+    move_series_to_trash,
 )
 from app.config import get_settings
 from app.db import get_db
@@ -68,6 +70,7 @@ from app.series import (
     episode_runs,
     load_plan,
     plan_run,
+    restore_series,
     series_channel,
     stage_progress,
 )
@@ -178,10 +181,17 @@ def create_series(
 def list_series(
     document_id: str | None = None,
     limit: int = 100,
+    trashed: bool = False,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[SeriesOut]:
-    statement = select(Series).order_by(Series.created_at.desc()).limit(max(1, min(limit, 500)))
+    """The series, newest first. ``trashed`` lists the trash instead, latest trashed first."""
+    statement = (
+        select(Series)
+        .where(Series.trashed_at.is_not(None) if trashed else Series.trashed_at.is_(None))
+        .order_by(Series.trashed_at.desc() if trashed else Series.created_at.desc())
+        .limit(max(1, min(limit, 500)))
+    )
     if document_id:
         statement = statement.where(Series.document_id == document_id)
     return [_series_out(db, row) for row in db.scalars(statement).all()]
@@ -215,12 +225,13 @@ def approve_plan(
 ) -> SeriesOut:
     """Release a series held at its plan: the episodes are outlined and written."""
     series = _require_series(db, series_id)
+    _refuse_trashed(series)
     if series.status != "planned":
         raise problem(409, "Not waiting for approval", f"The series is '{series.status}'.")
     request = dict(series.request_json or {})
     request["approved"] = True
     series.request_json = request
-    series.status = "queued"
+    _claim_untrashed(db, series)
     db.commit()
     bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
@@ -236,6 +247,7 @@ def replan(
 ) -> SeriesOut:
     """Plan again with another count, length or hint, while the series waits at its plan."""
     series = _require_series(db, series_id)
+    _refuse_trashed(series)
     has_episodes = bool(episode_runs(db, series_id))
     if series.status not in {"planned", "failed"} or has_episodes:
         raise problem(
@@ -256,10 +268,10 @@ def replan(
     _check_request(request.get("episodes"), int(request["minutes_per_episode"]))
     request["approved"] = False
     series.request_json = request
-    series.status = "queued"
     series.error = None
     series.finished_at = None
     _add_plan_run(db, series, _flow(db, series.plan_flow_id))
+    _claim_untrashed(db, series)
     db.commit()
     bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
@@ -272,17 +284,18 @@ def resume_series(
 ) -> SeriesOut:
     """Continue a series that failed or was stopped; finished steps are not repeated."""
     series = _require_series(db, series_id)
+    _refuse_trashed(series)
     if series.status in {"completed", "planned"}:
         raise problem(409, "Nothing to resume", f"The series is '{series.status}'.")
     if worker.series_active(series_id):
         raise problem(409, "Series is running", "It is being worked on right now.")
-    series.status = "queued"
     series.error = None
     series.finished_at = None
     for run in db.scalars(select(Run).where(Run.series_id == series.id, Run.status == "stopped")):
         run.status = "queued"
         run.error = None
         run.finished_at = None
+    _claim_untrashed(db, series)
     db.commit()
     bus.clear(series_channel(series.id))
     worker.submit_series(series.id)
@@ -308,6 +321,33 @@ def stop_series(
         outcome,
         _person(db, who),
     )
+
+
+@router.post("/series/{series_id}/trash", response_model=SeriesOut)
+def trash(
+    series_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
+) -> SeriesOut:
+    """Move a series to the trash with its plan and every episode, as one unit.
+
+    Nothing is deleted: scripts, audio and review links stay, and restoring
+    brings the whole series back. A series still being worked on is refused.
+    """
+    series = _require_series(db, series_id)
+    if series.trashed_at is None:
+        move_series_to_trash(db, series)
+    return _series_out(db, series)
+
+
+@router.post("/series/{series_id}/restore", response_model=SeriesOut)
+def restore(
+    series_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
+) -> SeriesOut:
+    """Take a series and its episodes back out of the trash. One not in it is left as it is."""
+    series = _require_series(db, series_id)
+    if series.trashed_at is not None:
+        restore_series(db, series)
+        db.commit()
+    return _series_out(db, series)
 
 
 @router.get("/series/{series_id}/graph", response_model=SeriesGraphOut)
@@ -542,6 +582,7 @@ def _series_out(db: Session, series: Series) -> SeriesOut:
         progress=stage_progress(db, series),
         active=active,
         stopped_by=_person(db, (series.request_json or {}).get("stopped_by")),
+        trashed_at=_iso(series.trashed_at),
     )
 
 
@@ -557,6 +598,23 @@ def _require_document(db: Session, document_id: str) -> Document:
     if document is None:
         raise problem(404, "No such document", f"Document '{document_id}' does not exist.")
     return document
+
+
+def _refuse_trashed(series: Series) -> None:
+    if series.trashed_at is not None:
+        raise problem(409, "Series is in the trash", "Restore the series before starting it again.")
+
+
+def _claim_untrashed(db: Session, series: Series) -> None:
+    """Queue the series, unless it went to the trash since it was read."""
+    claimed = db.execute(
+        update(Series)
+        .where(Series.id == series.id, Series.trashed_at.is_(None))
+        .values(status="queued")
+    )
+    if cast(CursorResult[Any], claimed).rowcount != 1:
+        db.rollback()
+        raise problem(409, "Series is in the trash", "Restore the series before starting it again.")
 
 
 def _require_series(db: Session, series_id: str) -> Series:
