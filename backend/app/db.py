@@ -95,10 +95,10 @@ def _drop_stale_connections(context: ExceptionContext) -> None:
         logger.warning(
             "sqlite file error, dropping pooled connections: %s", context.original_exception
         )
-        # A disconnect also drops the rest of the pool, which is what is wanted:
-        # every pooled handle predates the replaced file, not only this one. The
-        # hook may set the flag; the type stub's slots do not say so.
+        # Every pooled handle predates the replaced file, not only this one.
+        # The hook may set both flags; the type stub's slots do not say so.
         context.is_disconnect = True  # type: ignore[misc]
+        context.invalidate_pool_on_disconnect = True  # type: ignore[misc]
 
 
 def watch_engine(engine: Engine) -> Engine:

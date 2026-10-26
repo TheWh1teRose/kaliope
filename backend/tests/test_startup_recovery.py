@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.pool import QueuePool
 
 from app.config import Settings, get_settings, set_settings
 from app.db import reset_engine, session_scope, stale_file, watch_engine
@@ -168,19 +169,29 @@ def test_a_stale_database_file_drops_the_pooled_connections(tmp_path: Path) -> N
         opened.append(_Connection(tmp_path / "stale.db", failures))
         return opened[-1]
 
-    engine = watch_engine(create_engine("sqlite://", creator=connect))
-    with engine.connect() as connection:
-        assert connection.execute(text("SELECT 1")).scalar() == 1
-    assert len(opened) == 1
+    engine = watch_engine(create_engine("sqlite://", creator=connect, poolclass=QueuePool))
+    first = engine.connect()
+    second = engine.connect()
+    try:
+        assert first.execute(text("SELECT 1")).scalar() == 1
+        assert second.execute(text("SELECT 1")).scalar() == 1
+        assert len(opened) == 2
+        stale = {id(row) for row in opened}
 
-    failures.append("disk I/O error")
-    with pytest.raises(OperationalError) as caught, engine.connect() as connection:
-        connection.execute(text("SELECT 1"))
-    assert caught.value.connection_invalidated
+        failures.append("disk I/O error")
+        with pytest.raises(OperationalError) as caught:
+            first.execute(text("SELECT 1"))
+        assert caught.value.connection_invalidated
+    finally:
+        first.close()
+        second.close()
 
-    with engine.connect() as connection:
-        assert connection.execute(text("SELECT 1")).scalar() == 1
-    assert len(opened) == 2, "the stale connection was handed out again"
+    with engine.connect() as fresh, engine.connect() as sibling:
+        assert fresh.execute(text("SELECT 1")).scalar() == 1
+        assert sibling.execute(text("SELECT 1")).scalar() == 1
+        assert id(fresh.connection.driver_connection) not in stale
+        assert id(sibling.connection.driver_connection) not in stale
+    assert len(opened) == 4, "a connection from before the error was handed out again"
 
     # An ordinary statement error keeps the connection.
     failures.append("no such table: missing")
@@ -189,7 +200,7 @@ def test_a_stale_database_file_drops_the_pooled_connections(tmp_path: Path) -> N
     assert not caught.value.connection_invalidated
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
-    assert len(opened) == 2
+    assert len(opened) == 4
     engine.dispose()
 
 
