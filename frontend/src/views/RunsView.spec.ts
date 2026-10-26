@@ -174,6 +174,115 @@ describe('runs list', () => {
     }
   })
 
+  it('drops a stale runs failure after a newer load stops the poll', async () => {
+    vi.useFakeTimers()
+    runs.items = [runRow('r-live', 'running')]
+    seriesStore.list.mockResolvedValue([])
+    const wrapper = await mountList()
+    let rejectOld: ((error: unknown) => void) | null = null
+    try {
+      const reads = runs.load.mock.calls.length
+      runs.load.mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectOld = reject
+          }),
+      )
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(runs.load).toHaveBeenCalledTimes(reads + 1)
+
+      runs.load.mockImplementationOnce(async () => {
+        runs.items = [runRow('r-live', 'stopped')]
+      })
+      seriesStore.list.mockResolvedValueOnce([seriesRow('s-new', 'stopped')])
+      await wrapper.get('[data-stop]').trigger('click')
+      document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.find('[data-runs-load-error]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Gestoppt')
+      expect(wrapper.text()).toContain('Serie s-new')
+
+      rejectOld?.(new Error('offline'))
+      rejectOld = null
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.find('[data-runs-load-error]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Serie s-new')
+      const settled = runs.load.mock.calls.length
+      await vi.advanceTimersByTimeAsync(12000)
+      expect(runs.load).toHaveBeenCalledTimes(settled)
+    } finally {
+      rejectOld?.(new Error('offline'))
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a newer runs failure when an older load succeeds last', async () => {
+    vi.useFakeTimers()
+    runs.items = [runRow('r-live', 'running')]
+    seriesStore.list.mockResolvedValue([])
+    const wrapper = await mountList()
+    let resolveOld: (() => void) | null = null
+    try {
+      runs.load.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveOld = resolve
+          }),
+      )
+      await vi.advanceTimersByTimeAsync(4000)
+      runs.load.mockRejectedValueOnce(new ApiError(503, 'Down', 'Läufe nicht geladen.'))
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
+
+      resolveOld?.()
+      resolveOld = null
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
+    } finally {
+      resolveOld?.()
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the newer series when an older load finishes last', async () => {
+    vi.useFakeTimers()
+    runs.items = [runRow('r-live', 'stopped')]
+    seriesStore.list.mockResolvedValue([{ ...seriesRow('s-live', 'writing') }])
+    const wrapper = await mountList()
+    let releaseOld: ((rows: ReturnType<typeof seriesRow>[]) => void) | null = null
+    try {
+      seriesStore.list.mockResolvedValue([seriesRow('s-new', 'stopped')])
+      seriesStore.list.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseOld = resolve
+          }),
+      )
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(releaseOld).not.toBeNull()
+      expect(wrapper.text()).toContain('Serie s-live')
+      expect(wrapper.text()).not.toContain('Serie s-new')
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(wrapper.text()).toContain('Serie s-new')
+      expect(wrapper.text()).not.toContain('Serie s-live')
+
+      releaseOld?.([seriesRow('s-old', 'writing')])
+      releaseOld = null
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.text()).toContain('Serie s-new')
+      expect(wrapper.text()).not.toContain('Serie s-old')
+      const settled = runs.load.mock.calls.length
+      await vi.advanceTimersByTimeAsync(12000)
+      expect(runs.load).toHaveBeenCalledTimes(settled)
+    } finally {
+      releaseOld?.([])
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('shows Gestoppt with a neutral badge and no stop button', async () => {
     const wrapper = await mountList()
     const stoppedRun = wrapper.findAll('.badge').find((badge) => badge.text() === 'Gestoppt')

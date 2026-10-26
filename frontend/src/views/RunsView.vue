@@ -47,6 +47,7 @@ const stopping = ref(false)
 const stopError = ref('')
 let disposed = false
 let timer: ReturnType<typeof setInterval> | null = null
+let loadEpoch = 0
 
 function when(value: string): string {
   return new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
@@ -96,14 +97,23 @@ async function loadTrash(): Promise<void> {
 }
 
 async function load(): Promise<void> {
+  const ticket = ++loadEpoch
+  let failure: unknown
   try {
     await runs.load()
+  } catch (exc) {
+    failure = exc
+  }
+  if (ticket !== loadEpoch) return
+  if (failure) {
+    runsLoadError.value = failure instanceof ApiError ? failure.detail : t.errors.generic
+  } else {
     runsLoaded.value = true
     runsLoadError.value = ''
-  } catch (exc) {
-    runsLoadError.value = exc instanceof ApiError ? exc.detail : t.errors.generic
   }
-  series.value = await seriesStore.list().catch(() => [])
+  const nextSeries = await seriesStore.list().catch(() => [])
+  if (ticket !== loadEpoch) return
+  series.value = nextSeries
   const moving =
     runs.items.some((run) => LIVE_RUN.has(run.status) || run.active) ||
     series.value.some((row) => LIVE_SERIES.has(row.status) || row.active)
