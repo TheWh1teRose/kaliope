@@ -811,6 +811,8 @@ def _series_seed_keys(config: dict[str, Any]) -> tuple[str, ...]:
     series_episode = bool(config.get("episode_brief_artifact"))
     if series_episode:
         keys.append("episode_brief")
+    if config.get("earlier_outlines_artifact"):
+        keys.append("earlier_outlines")
     if series_episode or config.get("series_context_artifact"):
         keys.append("series_context")
     return tuple(keys)
@@ -936,6 +938,7 @@ def _seed_values(db: Session, run: Run) -> dict[str, Any]:
     store = _store()
     for key, field in (
         ("episode_brief", "episode_brief_artifact"),
+        ("earlier_outlines", "earlier_outlines_artifact"),
         ("series_context", "series_context_artifact"),
     ):
         digest = config.get(field)

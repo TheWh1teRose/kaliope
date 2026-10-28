@@ -501,7 +501,9 @@ def _add_plan_run(db: Session, series: Series, plan_flow: Flow) -> Run:
 
 
 def _pending_graph(flow: Flow) -> RunGraphOut:
-    nodes, edges, seeds = _topology(flow, present_seeds=("episode_brief", "series_context"))
+    nodes, edges, seeds = _topology(
+        flow, present_seeds=("episode_brief", "earlier_outlines", "series_context")
+    )
     return RunGraphOut(
         run_id="",
         flow_id=flow.id,

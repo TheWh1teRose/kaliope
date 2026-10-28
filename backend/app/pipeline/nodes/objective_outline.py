@@ -16,11 +16,13 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
-from app.pipeline.nodes.outline import _normalise_budgets
+from app.pipeline.nodes.outline import _episode_lines, _normalise_budgets
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     Beat,
     ContentBudget,
+    EarlierOutlines,
+    EpisodeBrief,
     FormatSpec,
     Objectives,
     Outline,
@@ -86,6 +88,10 @@ class ObjectiveOutlineInput(BaseModel):
     budget: ContentBudget
     format_spec: FormatSpec
     objectives: Objectives
+    #: Set for one episode of a series: where it stands and how it connects.
+    episode_brief: EpisodeBrief | None = None
+    #: Set for a series episode after the first: the earlier episodes' running orders.
+    earlier_outlines: EarlierOutlines | None = None
 
 
 class ObjectiveOutlineNode:
@@ -126,6 +132,12 @@ class ObjectiveOutlineNode:
             "format_spec": "Speakers, register and beat guidance for the chosen format.",
             "objectives": "The listener changes the running order must produce. Every "
             "beat is tagged with the id it serves.",
+            "episode_brief": "Only in a series: the episode's place in it, what to recall "
+            "from earlier episodes, what the next one answers, and the topics the plan "
+            "gave it, took as known or left to a later episode.",
+            "earlier_outlines": "Only in a series, from the second episode on: the running "
+            "orders of the earlier episodes, so this one continues where they stopped "
+            "instead of teaching their beats again.",
         },
         output="An Outline: ordered beats with title, block ids, word budget, the "
         "objective each serves, and a summary.",
@@ -216,7 +228,12 @@ class ObjectiveOutlineNode:
             + f"Target length: {inp.budget.target_minutes:.1f} minutes "
             f"(~{target_words} words). The beat budgets must sum to {target_words}.\n"
             f"Document language: {inp.parsed.language}\n\n"
-            f"Listener objectives — every beat must serve one of these, and no others:\n"
+            + (
+                _episode_lines(inp.episode_brief, inp.earlier_outlines)
+                if inp.episode_brief is not None
+                else ""
+            )
+            + f"Listener objectives — every beat must serve one of these, and no others:\n"
             f"{objectives_block}\n\n"
             f"Selected passages:\n{passages}"
         )

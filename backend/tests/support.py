@@ -259,6 +259,13 @@ class StubProvider:
                     "objectives": [1] if objectives else [],
                     "recap": "Was in der letzten Folge geklärt wurde." if index else "",
                     "preview": "Was als Nächstes kommt." if index < len(chunks) - 1 else "",
+                    "owns": [f"Thema {index + 1}"],
+                    "assumes": [f"Thema {index}"] if index else [],
+                    "leaves_to": (
+                        [{"topic": f"Thema {index + 2}", "episode": index + 2}]
+                        if index < len(chunks) - 1
+                        else []
+                    ),
                 }
             )
         return {

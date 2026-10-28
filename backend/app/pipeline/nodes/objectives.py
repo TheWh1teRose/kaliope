@@ -29,6 +29,7 @@ from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
     ContentBudget,
+    EpisodeBrief,
     Objective,
     Objectives,
 )
@@ -71,6 +72,8 @@ class ObjectivesInput(BaseModel):
     parsed: ParsedDocument
     audience_spec: AudienceSpec
     budget: ContentBudget
+    #: Set for one episode of a series: its goals become the objectives.
+    episode_brief: EpisodeBrief | None = None
 
 
 class ObjectivesNode:
@@ -105,6 +108,10 @@ class ObjectivesNode:
             "labels are discarded (common aliases such as 'analyze' are snapped onto "
             "'analyse'), and the list is capped at the configured maximum. What survives "
             "is what the run publishes.",
+            "In a series the plan already formulated each episode's goals by the same "
+            "rule, split across the episodes so they do not overlap. The node then takes "
+            "the episode's goals as its objectives and makes no call; deriving them again "
+            "from the whole document would give every episode the same objectives.",
         ],
         inputs={
             "audience_spec": "The desired outcome is the source of every objective. "
@@ -114,10 +121,14 @@ class ObjectivesNode:
             "invent one.",
             "budget": "The settled episode length. Caps how ambitious the objectives "
             "may be — only changes a listener can reach in that time.",
+            "episode_brief": "Only in a series: the episode's goals from the plan, taken "
+            "over as its objectives.",
         },
         output="An Objectives artifact: the desired outcome that was used, a rationale, "
         "and the list of objectives with Bloom level and derivation.",
         failure_modes=[
+            "A series episode whose plan has no learning goal. The node does not invent "
+            "one; the plan already asked for a new plan.",
             "The audience spec has no desired outcome — there is nothing to derive from, "
             "so the node refuses rather than inventing goals from the document.",
             "The model returned no usable objective: empty texts, or Bloom labels that "
@@ -193,6 +204,8 @@ class ObjectivesNode:
     ]
 
     def run(self, inp: ObjectivesInput, ctx: NodeContext) -> Objectives:
+        if inp.episode_brief is not None:
+            return _episode_objectives(inp.episode_brief, inp.audience_spec)
         desired = (inp.audience_spec.desired_outcome or "").strip()
         if not desired:
             raise NodeError(
@@ -257,6 +270,29 @@ class ObjectivesNode:
             desired_outcome=desired,
             rationale=str(data.get("rationale", "")).strip(),
         )
+
+
+def _episode_objectives(brief: EpisodeBrief, spec: AudienceSpec) -> Objectives:
+    """A series episode's objectives: the goals its share of the plan carries."""
+    episode = brief.episode
+    if not episode.goals:
+        raise NodeError(f"Folge {episode.index} hat keine verwertbaren Lernziele, bitte neu planen")
+    return Objectives(
+        items=[
+            Objective(
+                id=goal.id,
+                text=goal.text,
+                bloom_level=goal.bloom_level or "understand",
+                derivation=goal.derivation,
+            )
+            for goal in episode.goals
+        ],
+        desired_outcome=(spec.desired_outcome or "").strip(),
+        rationale=(
+            f"Die Lernziele von Folge {episode.index} aus dem Serienplan, "
+            "damit jede Folge ihren eigenen Teil abdeckt."
+        ),
+    )
 
 
 def _user_prompt(

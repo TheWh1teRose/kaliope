@@ -1048,6 +1048,12 @@ export interface EpisodePlan {
   supportable_minutes: number
   recap: string | null
   preview: string | null
+  /** Topics this episode alone explains. Plans made before the contract leave these out. */
+  owns?: string[]
+  /** Topics earlier episodes explained; this one only recalls them. */
+  assumes?: string[]
+  /** Topics left to a later episode, which owns them. */
+  leaves_to?: { topic: string; episode: number }[]
 }
 
 export interface SeriesPlan {

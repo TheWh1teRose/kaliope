@@ -176,9 +176,12 @@ class ScriptNode:
             "format_spec": "Speakers with their voice notes, register, opening and closing "
             "guidance.",
             "audience_spec": "Who is listening, which sets the level of explanation.",
-            "series_context": "Only in a series: the plan, every other episode's running order "
-            "and the full text of the earlier episodes, sent once at the top of every beat's "
-            "message for continuity only.",
+            "series_context": "Only in a series: the plan with each episode's topics, every "
+            "other episode's running order and the full text of the earlier episodes, sent "
+            "once at the top of every beat's message for continuity only. It also sets the "
+            "frame: only the first episode introduces the subject, later ones open with a "
+            "recap, every episode but the last closes on its own goals and the preview, and "
+            "only the last recaps the whole through-line.",
         },
         output="A Script: ordered segments with speaker, text, kind, beat id and anchors.",
         failure_modes=[
@@ -418,12 +421,8 @@ def beat_prompt_fields(
     total = len(beats)
     beat = beats[position]
 
-    opening = ""
-    if position == 0 and inp.format_spec.opening:
-        opening = f"\nThis is the first beat. Opening guidance: {inp.format_spec.opening}\n"
-    closing = ""
-    if position == total - 1 and inp.format_spec.closing:
-        closing = f"\nThis is the final beat. Closing guidance: {inp.format_spec.closing}\n"
+    opening = _opening(inp) if position == 0 else ""
+    closing = _closing(inp) if position == total - 1 else ""
 
     transition = ""
     if written:
@@ -457,6 +456,51 @@ def beat_prompt_fields(
         "transition": transition,
         "passages": "\n\n".join(f"[{b.id}]\n{b.llm_text()}" for b in beat_blocks),
     }
+
+
+def _opening(inp: ScriptInput) -> str:
+    """Guidance for the first beat: only a series' first episode introduces the subject."""
+    context = inp.series_context
+    guidance = inp.format_spec.opening
+    if context is None:
+        return f"\nThis is the first beat. Opening guidance: {guidance}\n" if guidance else ""
+    if context.episode_index == 1:
+        return (
+            "\nThis is the first beat. It opens the series: introduce its subject."
+            + (f" Opening guidance: {guidance}" if guidance else "")
+            + "\n"
+        )
+    return (
+        "\nThis is the first beat. Open with a short recap of the earlier episodes"
+        + (f": {context.recap}" if context.recap else "")
+        + ". Do not introduce the subject anew; the listener heard the earlier episodes.\n"
+    )
+
+
+def _closing(inp: ScriptInput) -> str:
+    """Guidance for the final beat: only a series' last episode recaps the whole through-line."""
+    context = inp.series_context
+    guidance = inp.format_spec.closing
+    if context is None:
+        return f"\nThis is the final beat. Closing guidance: {guidance}\n" if guidance else ""
+    if context.episode_index >= len(context.episodes):
+        return (
+            "\nThis is the final beat. It closes the series: recap the through-line of all "
+            "episodes"
+            + (f" ({context.through_line})" if context.through_line else "")
+            + "."
+            + (f" Closing guidance: {guidance}" if guidance else "")
+            + "\n"
+        )
+    goals = "; ".join(context.goals)
+    return (
+        "\nThis is the final beat. Close this episode only: sum up what the listener can "
+        "now do"
+        + (f" ({goals})" if goals else "")
+        + ", then point ahead to the next episode"
+        + (f": {context.preview}" if context.preview else "")
+        + ". Do not recap the whole series and introduce nothing new.\n"
+    )
 
 
 def _beat_message(
@@ -509,6 +553,15 @@ def series_section(context: SeriesContext) -> str:
             + (f": {episode.summary}" if episode.summary else "")
             + (" (this episode)" if episode.index == context.episode_index else "")
         )
+        if episode.owns:
+            lines.append(f"     explains: {'; '.join(episode.owns)}")
+        if episode.assumes:
+            lines.append(f"     takes as known: {'; '.join(episode.assumes)}")
+        if episode.leaves_to:
+            lines.append(
+                "     leaves to later episodes: "
+                + "; ".join(f"{h.topic} (episode {h.episode})" for h in episode.leaves_to)
+            )
     for outline in context.outlines:
         lines.append(f"\nRunning order of episode {outline.index}: {outline.title}")
         lines.extend(
@@ -529,10 +582,14 @@ def series_section(context: SeriesContext) -> str:
         "an earlier episode covered; a short recap belongs in this episode's first beat only.\n"
         "- Do not cover what a later episode covers. The last beat may point ahead to the "
         "next episode.\n"
-        "- Use the series' terms, not synonyms.\n"
-        "- The opening guidance opens this episode: after the first episode, open with a "
-        "short recap instead of introducing the subject anew. Only the last episode closes "
-        "the whole series."
+        "- Use the series' terms, not synonyms."
+        + (
+            "\n- Keep to the episodes' topics above: explain what this episode explains, "
+            "recall what it takes as known in a sentence at most, and leave the later "
+            "episodes' topics to them."
+            if any(e.owns or e.assumes or e.leaves_to for e in context.episodes)
+            else ""
+        )
     )
     return "\n".join(lines) + "\n\n"
 

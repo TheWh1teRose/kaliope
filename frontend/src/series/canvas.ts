@@ -47,7 +47,12 @@ export const GEOMETRY: Record<CanvasMode, Geometry> = {
 }
 
 /** Inputs that only a series run has; the canvas marks them as new. */
-export const SERIES_INPUTS = new Set(['series_request', 'episode_brief', 'series_context'])
+export const SERIES_INPUTS = new Set([
+  'series_request',
+  'episode_brief',
+  'earlier_outlines',
+  'series_context',
+])
 
 export interface PlacedNode {
   /** `${runId or 'pending-'+episode}:${node name}`, unique on the canvas. */

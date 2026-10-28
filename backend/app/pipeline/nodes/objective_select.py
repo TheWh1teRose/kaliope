@@ -21,10 +21,12 @@ from app.pipeline.nodes.select import (
     _audience_text,
     _candidate_payload,
 )
+from app.pipeline.series_prompt import contract_lines
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
     ContentBudget,
+    EpisodeBrief,
     Objectives,
     SelectedBlock,
     Selection,
@@ -84,6 +86,8 @@ class ObjectiveSelectInput(BaseModel):
     budget: ContentBudget
     audience_spec: AudienceSpec
     objectives: Objectives
+    #: Set for one episode of a series: only its own passages are candidates.
+    episode_brief: EpisodeBrief | None = None
 
 
 class ObjectiveSelectNode:
@@ -98,8 +102,9 @@ class ObjectiveSelectNode:
         summary="Picks the passages the episode will be built from, using the listener "
         "objectives as the only selection criterion.",
         detail=[
-            "Offers the model every narratable block as an id, a weight and its text, "
-            "together with the listener objectives produced upstream. A passage is "
+            "Offers the model every narratable block as an id, a weight and its text — in "
+            "a series, only that episode's passages and its recap passages — together "
+            "with the listener objectives produced upstream. A passage is "
             "worth selecting when it can help produce one of those changes; prominence "
             "is a prior, not an instruction.",
             "The document's own stated objectives are not shown and are not turned into "
@@ -123,6 +128,9 @@ class ObjectiveSelectNode:
             "support for an objective.",
             "objectives": "The listener changes the selection must serve. Every chosen "
             "passage is tagged with the ids it supports.",
+            "episode_brief": "Only in a series: the candidates are the episode's own "
+            "passages plus its recap passages, and the plan's topics for the episode say "
+            "what it explains and what it leaves to others.",
         },
         output="A Selection: the chosen block ids with the objectives each serves, and "
         "the rationale. Learning goals are empty — they are not this node's job.",
@@ -196,6 +204,12 @@ class ObjectiveSelectNode:
             raise NodeError("no listener objectives are available to select against")
 
         candidates = inp.parsed.narratable_blocks()
+        brief = inp.episode_brief
+        recap_ids: set[str] = set()
+        if brief is not None:
+            own = set(brief.episode.block_ids)
+            recap_ids = set(brief.episode.recap_block_ids) - own
+            candidates = [b for b in candidates if b.id in own or b.id in recap_ids]
         if not candidates:
             raise NodeError("no narratable blocks are available to select from")
 
@@ -219,12 +233,14 @@ class ObjectiveSelectNode:
             f"(~{inp.budget.target_words} words at {inp.budget.words_per_minute} wpm).\n"
             f"Available narratable material: {inp.budget.narratable_words} words.\n"
             f"Document language: {inp.parsed.language}\n\n"
-            f"Listener objectives — select passages that serve these, and no others:\n"
+            + (_episode_instruction(brief, recap_ids) if brief is not None else "")
+            + f"Listener objectives — select passages that serve these, and no others:\n"
             f"{objectives_block}\n\n"
             f"Candidate passages ({len(payload)}):\n"
             + "\n".join(
                 f"[{e['id']}] (weight {e['weight']})"
                 + (f" section: {e['section']}" if e["section"] else "")
+                + (" (recap from an earlier episode)" if e["id"] in recap_ids else "")
                 + f"\n{e['text']}"
                 for e in payload
             )
@@ -277,6 +293,25 @@ class ObjectiveSelectNode:
             selected_blocks=selected,
             rationale=str(data.get("rationale", "")).strip(),
         )
+
+
+def _episode_instruction(brief: EpisodeBrief, recap_ids: set[str]) -> str:
+    episode = brief.episode
+    lines = [
+        f"This is episode {episode.index} of {brief.episode_count} of the series "
+        f'"{brief.series_title}": {episode.title}'
+        + (f" ({episode.role})" if episode.role else "")
+        + ".",
+        "The candidates are this episode's own passages. Select from them for this "
+        "episode only; the other episodes cover the rest of the document.",
+    ]
+    if recap_ids:
+        lines.append(
+            "Passages marked as recap belong to earlier episodes. Select one only if a "
+            "short recap at the start needs to cite it."
+        )
+    lines.extend(contract_lines(episode))
+    return "\n".join(lines) + "\n\n"
 
 
 register_node(ObjectiveSelectNode())

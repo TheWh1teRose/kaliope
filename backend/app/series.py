@@ -2,9 +2,10 @@
 
 A series is a planner run (``episode_index`` 0) and one ordinary run per
 episode. This module turns the stored plan and the episode runs into the inputs
-the nodes take — an ``EpisodeBrief`` for the early nodes and a
-``SeriesContext`` for the script — and computes the series-level checks. It
-holds no execution logic; the worker drives the stages.
+the nodes take — an ``EpisodeBrief`` for the early nodes, the earlier
+episodes' outlines for each outline step and a ``SeriesContext`` for the
+script — and computes the series-level checks. It holds no execution logic;
+the worker drives the stages.
 """
 
 from __future__ import annotations
@@ -23,8 +24,10 @@ from app.pipeline.framework.registry import Flow, FlowNode, get_node
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     EarlierEpisode,
+    EarlierOutlines,
     EpisodeBrief,
     EpisodeOutline,
+    EpisodePlan,
     EpisodeSummary,
     Outline,
     Script,
@@ -184,6 +187,35 @@ def context_hash(context: SeriesContext) -> str:
     return hash_payload(context.model_dump(mode="json"))
 
 
+def _episode_outline(
+    session: Session, store: ArtifactStore, run: Run, episode: EpisodePlan
+) -> EpisodeOutline | None:
+    outline = artifact_for(session, store, run, "outline", Outline)
+    if outline is None:
+        return None
+    return EpisodeOutline(
+        index=episode.index,
+        title=episode.title,
+        beats=[(beat.title, beat.summary or "") for beat in outline.beats],
+    )
+
+
+def earlier_outlines_for(
+    session: Session, store: ArtifactStore, series_id: str, plan: SeriesPlan, index: int
+) -> EarlierOutlines:
+    """The outlines of episodes 1 … ``index`` − 1, in order, for episode ``index``'s outline."""
+    runs = episode_runs(session, series_id)
+    outlines: list[EpisodeOutline] = []
+    for episode in plan.episodes:
+        run = runs.get(episode.index)
+        if run is None or episode.index >= index:
+            continue
+        outline = _episode_outline(session, store, run, episode)
+        if outline is not None:
+            outlines.append(outline)
+    return EarlierOutlines(outlines=outlines)
+
+
 def series_context_for(
     session: Session, store: ArtifactStore, series_id: str, plan: SeriesPlan, index: int
 ) -> SeriesContext:
@@ -194,15 +226,9 @@ def series_context_for(
         run = runs.get(episode.index)
         if run is None or episode.index == index:
             continue
-        outline = artifact_for(session, store, run, "outline", Outline)
+        outline = _episode_outline(session, store, run, episode)
         if outline is not None:
-            outlines.append(
-                EpisodeOutline(
-                    index=episode.index,
-                    title=episode.title,
-                    beats=[(beat.title, beat.summary or "") for beat in outline.beats],
-                )
-            )
+            outlines.append(outline)
         if episode.index < index:
             script = final_script(session, store, run)
             if script is not None:
@@ -213,15 +239,27 @@ def series_context_for(
                         lines=[f"{s.speaker}: {s.text}" for s in script.segments],
                     )
                 )
+    this = plan.episode(index)
     return SeriesContext(
         series_title=plan.title,
         through_line=plan.through_line,
         terms=plan.terms,
         episode_index=index,
         episodes=[
-            EpisodeSummary(index=e.index, title=e.title, role=e.role, summary=e.summary)
+            EpisodeSummary(
+                index=e.index,
+                title=e.title,
+                role=e.role,
+                summary=e.summary,
+                owns=e.owns,
+                assumes=e.assumes,
+                leaves_to=e.leaves_to,
+            )
             for e in plan.episodes
         ],
+        goals=[goal.text for goal in this.goals],
+        recap=this.recap,
+        preview=this.preview,
         outlines=outlines,
         earlier=earlier,
     )

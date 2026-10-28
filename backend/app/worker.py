@@ -61,6 +61,7 @@ from app.schemas.audio import AudioRequest, VoiceCast
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
+    EarlierOutlines,
     EpisodeBrief,
     FormatSpec,
     Script,
@@ -72,6 +73,7 @@ from app.series import (
     brief_for,
     context_hash,
     coverage_check,
+    earlier_outlines_for,
     episode_run_name,
     episode_runs,
     final_script,
@@ -809,7 +811,7 @@ class Worker:
             if plan is None:
                 raise RuntimeError("the series plan artifact is missing")
             series.status = "outlining"
-            todo: list[str] = []
+            todo: list[tuple[int, str]] = []
             runs = episode_runs(session, series_id)
             for episode in plan.episodes:
                 run = runs.get(episode.index)
@@ -848,13 +850,28 @@ class Worker:
                 config["stop_after"] = "outline"
                 config.pop("series_context_artifact", None)
                 run.config_json = config
-                todo.append(run.id)
+                todo.append((episode.index, run.id))
         if self._series_should_stop(series_id):
             return
         bus.publish(channel, "series.outlining", {"episodes": len(plan.episodes)})
-        for run_id in todo:
+        for index, run_id in todo:
             if self._series_should_stop(series_id):
                 return
+            # The earlier episodes are outlined by now, so this one's outline
+            # continues from theirs. The seed stays on the run: the script
+            # stage replays the outline from the cache under the same key.
+            with self._gate, session_scope() as session:
+                run = session.get(Run, run_id)
+                if run is None:  # pragma: no cover
+                    continue
+                config = dict(run.config_json or {})
+                config.pop("earlier_outlines_artifact", None)
+                earlier = earlier_outlines_for(session, store, series_id, plan, index)
+                if earlier.outlines:
+                    stored = store.put("earlier_outlines", earlier)
+                    _record_artifact(session, stored.hash, "earlier_outlines", stored.size_bytes)
+                    config["earlier_outlines_artifact"] = stored.hash
+                run.config_json = config
             if not self._run_for_series(series_id, run_id):
                 continue
             if not self._episode_reached(series_id, run_id, {"outlined", *SCRIPT_DONE}):
@@ -1581,12 +1598,14 @@ def _persist_bench_node(bench_id: str, record: NodeRecord) -> None:
 
 
 def _series_seeds(config: dict[str, Any], store: ArtifactStore) -> dict[str, Any]:
-    """The extra seeds of a series run: its request, brief or context."""
+    """The extra seeds of a series run: its request, brief, earlier outlines or context."""
     seeds: dict[str, Any] = {}
     if config.get("series_request"):
         seeds["series_request"] = SeriesRequest.model_validate(config["series_request"])
     if config.get("episode_brief_artifact"):
         seeds["episode_brief"] = store.get(config["episode_brief_artifact"], EpisodeBrief)
+    if config.get("earlier_outlines_artifact"):
+        seeds["earlier_outlines"] = store.get(config["earlier_outlines_artifact"], EarlierOutlines)
     if config.get("series_context_artifact"):
         seeds["series_context"] = store.get(config["series_context_artifact"], SeriesContext)
     return seeds

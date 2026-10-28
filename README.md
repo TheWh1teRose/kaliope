@@ -362,7 +362,7 @@ sized so dialogue has room. Start one with "Serie" on the start screen.
 
 ```
 series_plan_v0:  ingest → content_budget → series_plan     (once; then it waits)
-each episode:    content_budget → select → outline          (all episodes first)
+each episode:    content_budget → select → outline          (all episodes first, in order)
                  → script → gates                           (episodes in order)
 ```
 
@@ -382,19 +382,48 @@ are all unusable is kept as well, with the warning that it needs a new plan;
 selection does not invent goals for it. Episodes keep the
 length that was asked for. The model's split of passages is checked rather
 than trusted.
+
+The plan also gives each episode a **content contract**, so the material is
+split across the episodes and each one builds on the ones before it: the topics
+it `owns` (explains in full), the ones it `assumes` from earlier episodes
+(recalled in a sentence at most) and the ones it `leaves_to` a later episode.
+The contract is settled in code as well: a topic owned twice stays with its
+first episode and the later one assumes it, a topic left to a later episode
+points at the episode that owns it (or becomes the named episode's own when
+nobody owns it), and an episode assumes only what no episode from it on owns.
+Selection, outline, script and the critic get the episode's contract; the plan
+screen shows it before approval. Plans made before the contract existed load
+with none and run as before.
 The series always waits after the plan until someone approves it, and can be
 planned again with another count, length or hint while it waits.
 
 Each episode is an ordinary run (`runs.series_id`, `episode_index`), so review,
 gates, the node inspector and the Markdown export work per episode unchanged.
-Every episode is outlined before any script is written; then the scripts run in
-order, and each one sees the plan, every other episode's running order and the
-full text of the earlier episodes (for continuity only, without block ids — facts
-still come only from its own passages). Two inputs keep the cache precise:
-`episode_brief` (this episode's share of the plan) feeds the early nodes and
-`series_context` feeds only the script. A flow without the planner never has
-either, so its prompts and cache keys are unchanged (pinned by
-`tests/test_series_golden.py`). Series that fail or were stopped resume where
+Every episode is outlined before any script is written, one after another, and
+each outline sees the running orders (beat titles and summaries) of the
+episodes before it, so it continues where they stopped instead of teaching
+their beats again. Then the scripts run in order, and each one sees the plan,
+every other episode's running order and the full text of the earlier episodes
+(for continuity only, without block ids — facts still come only from its own
+passages). The script's frame follows the episode's place: only the first
+episode introduces the subject, later ones open with a short recap, every
+episode but the last closes on its own goals and the preview of the next, and
+only the last recaps the through-line of the whole series. Three inputs keep
+the cache precise: `episode_brief` (this episode's share of the plan) feeds the
+early nodes, `earlier_outlines` (the earlier episodes' running orders) feeds the
+outline, and `series_context` feeds only the script. A flow without the planner
+never has any of them, so its prompts and cache keys are unchanged (pinned by
+`tests/test_series_golden.py`).
+
+Custom episode flows built from the objective nodes work per episode too:
+`objectives` takes the episode's planned goals as its objectives (no call, so
+episodes do not all derive the same objectives from the whole document),
+`objective_select` offers only the episode's own and recap passages, and
+`objective_outline` gets the brief, the contract and the earlier outlines like
+`outline`. In such a flow `ai_critic` knows what the other episodes cover, so
+its notes do not ask to teach their topics again, and an outline note applied by
+`apply_outline_notes` can only cite the episode's own and recap passages. A
+series still refuses a flow that pauses for a person (`human_feedback`). Series that fail or were stopped resume where
 they left off.
 
 Known stop/resume limits: after resuming a series, its stopper label (and that of

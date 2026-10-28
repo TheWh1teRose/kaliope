@@ -481,3 +481,137 @@ def test_an_outlined_episode_graph_keeps_series_context(
     assert single_graph.status_code == 200, single_graph.text
     single_script = next(node for node in single_graph.json()["nodes"] if node["name"] == "script")
     assert "series_context" not in {port["key"] for port in single_script["consumes"]}
+
+
+def _approved_series(client: TestClient, document_id: str, **extra: Any) -> dict[str, Any]:
+    created = client.post(
+        "/api/series",
+        json={
+            "document_id": document_id,
+            "minutes_per_episode": 3,
+            "episodes": 3,
+            # Earlier tests ran the same document; forced, every outline is computed.
+            "force": True,
+            **extra,
+        },
+    )
+    assert created.status_code == 201, created.text
+    series_id = created.json()["id"]
+    held = _wait(client, series_id, {"planned", "failed"})
+    assert held["status"] == "planned", held["error"]
+    approved = client.post(f"/api/series/{series_id}/approve")
+    assert approved.status_code == 200, approved.text
+    done = _wait(client, series_id, {"completed", "failed"})
+    assert done["status"] == "completed", done["error"]
+    return done
+
+
+def _episode_calls(calls: list[CompletionRequest], marker: str, episode: int) -> list[str]:
+    """The prompts of one episode whose system prompt or message holds ``marker``."""
+    return [
+        call.messages[-1].content
+        for call in calls
+        if (marker in (call.system or "") or marker in call.messages[-1].content)
+        and f"This is episode {episode} of 3" in call.messages[-1].content
+    ]
+
+
+def test_each_outline_continues_from_the_earlier_outlines(
+    client: TestClient, document_id: str, provider: SeriesStub
+) -> None:
+    calls_before = len(provider.calls)
+    done = _approved_series(client, document_id)
+    calls = provider.calls[calls_before:]
+    plan = done["plan"]
+    assert [e["owns"] for e in plan["episodes"]] == [["Thema 1"], ["Thema 2"], ["Thema 3"]]
+    assert plan["episodes"][1]["assumes"] == ["Thema 1"]
+    assert plan["episodes"][1]["leaves_to"] == [{"topic": "Thema 3", "episode": 3}]
+
+    outlines = [_episode_calls(calls, "You plan the running order", i) for i in (1, 2, 3)]
+    assert all(len(found) == 1 for found in outlines)
+    first, second, third = (found[0] for found in outlines)
+    # Outlines run in order, each one after the one before it.
+    order = [calls.index(c) for c in calls if "You plan the running order" in (c.system or "")]
+    assert order == sorted(order)
+    assert "already ran in this order" not in first
+    assert "Episode 1: Folge 1: Teil 1" in second and "Episode 2:" not in second
+    assert "Episode 1: Folge 1: Teil 1" in third and "Episode 2: Folge 2: Teil 2" in third
+    assert "Episode 3:" not in third
+    # Every episode's outline holds its contract.
+    assert "explains them: Thema 2." in second and "Thema 3 (episode 3)" in second
+
+    # The outline seed stays on the run, so the script stage replays the outline
+    # from the cache: each episode had exactly one outline call above.
+    episodes = done["episodes"]
+    with session_scope() as session:
+        configs = [session.get(Run, e["run_id"]).config_json for e in episodes]  # type: ignore[union-attr]
+    assert "earlier_outlines_artifact" not in configs[0]
+    assert configs[1]["earlier_outlines_artifact"] and configs[2]["earlier_outlines_artifact"]
+    graph = client.get(f"/api/runs/{episodes[1]['run_id']}/graph").json()
+    outline_node = next(n for n in graph["nodes"] if n["name"] == "outline")
+    assert "earlier_outlines" in {p["key"] for p in outline_node["consumes"]}
+
+    # Only the first episode introduces the subject; only the last recaps the whole
+    # series. Scripts the earlier tests wrote come from the cache here, so every
+    # beat call of the module counts.
+    first_beats, second_beats, third_beats = (_beat_calls(provider, i) for i in (1, 2, 3))
+    assert any("It opens the series" in m for m in first_beats)
+    assert any("Open with a short recap" in m for m in second_beats)
+    assert not any("It opens the series" in m for m in second_beats + third_beats)
+    assert any("Close this episode only" in m for m in first_beats)
+    assert any("It closes the series" in m for m in third_beats)
+    assert not any("Close this episode only" in m for m in third_beats)
+
+
+def test_a_custom_objectives_flow_works_from_each_episodes_share(
+    client: TestClient, document_id: str, provider: SeriesStub
+) -> None:
+    created = client.post(
+        "/api/pipelines",
+        json={
+            "id": "series_objectives",
+            "name": "Hörziele ohne Pause",
+            "version": "1.0",
+            "nodes": [
+                {"node": "ingest"},
+                {"node": "content_budget", "config": {"min_compression": 2.5}},
+                {"node": "objectives", "config": {"model": "claude-opus-5"}},
+                {"node": "objective_select", "config": {"model": "claude-opus-5"}},
+                {"node": "objective_outline", "config": {"model": "claude-opus-5"}},
+                {"node": "script", "config": {"model": "claude-opus-5"}},
+                {"node": "ai_critic", "config": {"model": "claude-opus-5"}},
+                {"node": "apply_notes", "config": {"model": "claude-opus-5"}},
+            ],
+            "gates": ["G0", "G1", "G2"],
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    calls_before = len(provider.calls)
+    done = _approved_series(client, document_id, flow_id="series_objectives")
+    calls = provider.calls[calls_before:]
+    plan = done["plan"]["episodes"]
+
+    # The objectives are the plan's goals: no call derives them from the whole document.
+    assert not [c for c in calls if "You write the learning objectives" in (c.system or "")]
+    for index in (1, 2, 3):
+        episode = plan[index - 1]
+        (selection,) = _episode_calls(calls, "Listener objectives — select passages", index)
+        offered = {
+            line.split("]")[0][1:] for line in selection.splitlines() if line.startswith("[b")
+        }
+        assert offered == set(episode["block_ids"]) | set(episode["recap_block_ids"])
+        for goal in episode["goals"]:
+            assert goal["id"] in selection
+        (outline,) = _episode_calls(calls, "Listener objectives — every beat", index)
+        assert f"explains them: Thema {index}." in outline
+        if index > 1:
+            assert "Episode 1: Folge 1: Teil 1" in outline
+        else:
+            assert "already ran in this order" not in outline
+    critic = [
+        c.messages[-1].content
+        for c in calls
+        if "You review an outline or a script" in (c.system or "")
+    ]
+    assert len(critic) == 3 and all("Do not ask for a topic of an earlier" in m for m in critic)

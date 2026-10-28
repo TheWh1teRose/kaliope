@@ -211,6 +211,21 @@ describe('series view', () => {
     expect(wrapper.get('[data-panel="plan"]').text()).toContain(warning)
   })
 
+  it('shows what each episode explains, takes as known and leaves to a later one', async () => {
+    const planned = series('planned')
+    planned.plan!.episodes[1].owns = ['Meeresspiegel', 'Hitze']
+    planned.plan!.episodes[1].assumes = ['Treibhauseffekt']
+    planned.plan!.episodes[1].leaves_to = [{ topic: 'Klimaschutz', episode: 3 }]
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-contract="owns"]').text()).toBe('Erklärt: Meeresspiegel; Hitze')
+    expect(wrapper.get('[data-contract="assumes"]').text()).toBe('Setzt voraus: Treibhauseffekt')
+    expect(wrapper.get('[data-contract="leaves"]').text()).toBe('Überlässt: Klimaschutz (Folge 3)')
+    // A plan from before the contract shows none.
+    expect(wrapper.findAll('[data-contract]')).toHaveLength(3)
+  })
+
   it('warns when the plan has a different episode count than was asked', async () => {
     const planned = series('planned')
     planned.plan!.budget.requested_episodes = 4
