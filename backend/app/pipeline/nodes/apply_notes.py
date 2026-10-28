@@ -411,9 +411,7 @@ def _apply_outline_note(
 
     block_ids = [str(item) for item in data.get("block_ids", []) if str(item) in allowed]
     if not block_ids:
-        block_ids = [
-            bid for bid in beat.block_ids if inp.episode_brief is None or bid in allowed
-        ]
+        block_ids = [bid for bid in beat.block_ids if inp.episode_brief is None or bid in allowed]
     try:
         word_budget = max(1, int(data.get("word_budget", beat.word_budget)))
     except (TypeError, ValueError):
