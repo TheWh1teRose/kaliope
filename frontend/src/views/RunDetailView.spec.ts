@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError } from '@/api/client'
+import { ApiError, api } from '@/api/client'
 import { sharingApi } from '@/api/sharing'
 import type { RunGraphOut, RunOut, RunStatus } from '@/api/types'
 import { t } from '@/i18n'
@@ -293,7 +293,7 @@ describe('run detail', () => {
     wrapper.unmount()
   })
 
-  it('offers the data download in the graph header, held while the run is in the trash', async () => {
+  it('offers the data download in the graph header, including while the run is in the trash', async () => {
     store.graph.mockImplementation(async () => seriesGraph().episodes[0].graph)
     store.get.mockImplementation(async () => run('completed'))
     const wrapper = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [router()] } })
@@ -306,8 +306,14 @@ describe('run detail', () => {
     store.get.mockImplementation(async () => ({ ...run('completed'), trashed_at: '2026-10-04T09:00:00Z' }))
     const trashed = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [router()] } })
     await flushPromises()
-    expect(trashed.get('[data-bundle]').attributes('disabled')).toBeDefined()
-    expect(trashed.get('[data-bundle]').attributes('title')).toBe(t.graph.bundleTrashed)
+    expect(trashed.get('[data-bundle]').attributes('disabled')).toBeUndefined()
+    const download = vi.spyOn(api, 'download').mockRejectedValue(new Error('Unavailable'))
+    await trashed.get('[data-bundle]').trigger('click')
+    await flushPromises()
+    expect(download).toHaveBeenCalledWith('/api/runs/r1/bundle')
+    expect(trashed.get('[role="alert"]').text()).toBe(t.errors.generic)
+    download.mockRestore()
+    expect(trashed.get('[data-bundle]').attributes('title')).toBe(t.graph.bundleHint)
     trashed.unmount()
     store.graph.mockImplementation(async () => null)
   })

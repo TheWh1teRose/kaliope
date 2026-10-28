@@ -43,6 +43,8 @@ from app.db import get_db
 from app.errors import ProblemException, problem
 from app.models import Document, Run, Series, User
 from app.pipeline.framework.artifacts import ArtifactStore
+from app.pipeline.framework.registry import get_node
+from app.pipeline.framework.spec import node_params
 from app.schemas.api import RunGraphNodeOut, RunGraphOut
 from app.security import current_user
 from app.series import episode_runs, load_plan, plan_run
@@ -114,8 +116,6 @@ def run_bundle(
     run = db.get(Run, run_id)
     if run is None:
         raise problem(404, "No such run", f"Run '{run_id}' does not exist.")
-    if run.trashed_at is not None:
-        raise problem(409, "Run is in the trash", "Restore the run before downloading its data.")
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("README.md", _RUN_README)
@@ -131,10 +131,6 @@ def series_bundle(
     series = db.get(Series, series_id)
     if series is None:
         raise problem(404, "No such series", f"Series '{series_id}' does not exist.")
-    if series.trashed_at is not None:
-        raise problem(
-            409, "Series is in the trash", "Restore the series before downloading its data."
-        )
     store = _store()
     plan = load_plan(store, series)
     planner = plan_run(db, series.id)
@@ -234,6 +230,10 @@ def write_run(archive: zipfile.ZipFile, prefix: str, db: Session, run: Run) -> N
             output_file = f"nodes/{position:02d}-{node.name}.json"
             archive.writestr(prefix + output_file, _dump(payload))
             files[node.name] = output_file
+        config = {**node.config, **(node_config.get(node.name) or {})}
+        for param in node_params(get_node(node.name)):
+            if param.type == "prompt":
+                config[param.key] = config.get(param.key) or param.default
         nodes.append(
             {
                 "position": position,
@@ -241,10 +241,7 @@ def write_run(archive: zipfile.ZipFile, prefix: str, db: Session, run: Run) -> N
                 "version": node.version,
                 "description": node.description,
                 "status": node.status,
-                "config": {
-                    **node.config,
-                    **(node_config.get(node.name) or {}),
-                },
+                "config": config,
                 "inputs": [
                     {
                         "key": port.key,

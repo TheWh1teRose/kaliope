@@ -70,8 +70,8 @@ describe('data bundle button', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        new Response(JSON.stringify({ title: 'Run is in the trash', detail: 'Restore the run first.' }), {
-          status: 409,
+        new Response(JSON.stringify({ title: 'Download failed', detail: 'Please try again.' }), {
+          status: 500,
           headers: { 'content-type': 'application/problem+json' },
         }),
       ),
@@ -81,21 +81,8 @@ describe('data bundle button', () => {
     })
     await wrapper.get('[data-bundle]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toBe('Restore the run first.')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Please try again.')
     expect(saved).toEqual([])
     expect(wrapper.get('[data-bundle]').attributes('disabled')).toBeUndefined()
-  })
-
-  it('stays disabled while the run is in the trash', async () => {
-    const fetch = vi.fn()
-    vi.stubGlobal('fetch', fetch)
-    const wrapper = mount(DataBundleButton, {
-      props: { path: '/api/runs/r1/bundle', hint: t.graph.bundleHint, trashed: true },
-    })
-    const button = wrapper.get('[data-bundle]')
-    expect(button.attributes('disabled')).toBeDefined()
-    expect(button.attributes('title')).toBe(t.graph.bundleTrashed)
-    await button.trigger('click')
-    expect(fetch).not.toHaveBeenCalled()
   })
 })

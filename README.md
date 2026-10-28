@@ -589,7 +589,7 @@ inputs, complete output, status, model, tokens, cost, duration, errors and gate
 findings (`run.md` to read, `run.json` structured, `nodes/` and `seeds/` with the
 values), plus the script with the reviewers' edits. A series adds its plan with
 terms and episode outlines. Reviewer comments and anything naming a person stay
-out. A run or series in the trash is refused until it is restored.
+out.
 
 Other endpoints worth knowing:
 

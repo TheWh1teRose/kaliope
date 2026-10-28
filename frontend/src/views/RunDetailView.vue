@@ -291,7 +291,6 @@ onUnmounted(() => {
           <DataBundleButton
             :path="`/api/runs/${run.id}/bundle`"
             :hint="t.graph.bundleHint"
-            :trashed="Boolean(run.trashed_at)"
           />
         </div>
       </div>

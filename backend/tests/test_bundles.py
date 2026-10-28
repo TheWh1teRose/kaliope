@@ -18,6 +18,8 @@ from app.llm import registry
 from app.main import create_app
 from app.models import Document, Run, User
 from app.pipeline.formats import DEFAULT_AUDIENCE, get_format
+from app.pipeline.framework.registry import get_node
+from app.pipeline.framework.spec import node_params
 from app.security import hash_password
 from app.worker import worker
 from tests.support import StubProvider, write_learning_pdf
@@ -91,6 +93,43 @@ def _zip(response: Any) -> zipfile.ZipFile:
     return zipfile.ZipFile(io.BytesIO(response.content))
 
 
+def _assert_prompts(archive: zipfile.ZipFile, prefix: str) -> None:
+    data = json.loads(archive.read(prefix + "run.json"))
+    markdown = archive.read(prefix + "run.md").decode()
+    prompts = []
+    for node in data["nodes"]:
+        for param in node_params(get_node(node["name"])):
+            if param.type == "prompt":
+                assert node["config"][param.key] == param.default
+                assert json.dumps(param.default, ensure_ascii=False) in markdown
+                prompts.append(param.key)
+    assert prompts
+
+
+@pytest.mark.parametrize("prompt", ["Custom export prompt", "", None])
+def test_run_bundle_resolves_prompt_overrides(
+    client: TestClient, run_id: str, prompt: str | None
+) -> None:
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run is not None
+        original = run.config_json
+        run.config_json = {**original, "node_config": {"outline": {"system_prompt": prompt}}}
+    try:
+        archive = _zip(client.get(f"/api/runs/{run_id}/bundle"))
+        nodes = json.loads(archive.read("run.json"))["nodes"]
+        outline = next(node for node in nodes if node["name"] == "outline")
+        default = next(p.default for p in node_params(get_node("outline")) if p.type == "prompt")
+        expected = prompt or default
+        assert outline["config"]["system_prompt"] == expected
+        assert json.dumps(expected, ensure_ascii=False) in archive.read("run.md").decode()
+    finally:
+        with session_scope() as session:
+            run = session.get(Run, run_id)
+            assert run is not None
+            run.config_json = original
+
+
 def _edit_and_comment(client: TestClient, run_id: str) -> dict[str, Any]:
     client.post(f"/api/runs/{run_id}/review/start")
     segment = client.get(f"/api/runs/{run_id}/script").json()["segments"][0]
@@ -153,7 +192,8 @@ def test_a_run_bundle_walks_the_graph_node_by_node(client: TestClient, run_id: s
 
     # Node config as the inspector shows it.
     io_ = client.get(f"/api/runs/{run_id}/nodes/script/io").json()
-    assert script_node["config"] == io_["config"]
+    assert script_node["config"].items() >= io_["config"].items()
+    _assert_prompts(archive, "")
 
     # Gates carry their rule and their result.
     assert data["gates"] and all("spec" in g for g in data["gates"])
@@ -173,11 +213,10 @@ def test_a_run_bundle_walks_the_graph_node_by_node(client: TestClient, run_id: s
         assert f". {node['name']} (v{node['version']})" in readable
 
 
-def test_a_trashed_run_exports_only_after_restore(client: TestClient, run_id: str) -> None:
+def test_a_trashed_run_still_exports(client: TestClient, run_id: str) -> None:
     assert client.post(f"/api/runs/{run_id}/trash").status_code == 200
-    refused = client.get(f"/api/runs/{run_id}/bundle")
-    assert refused.status_code == 409
-    assert refused.json()["title"] == "Run is in the trash"
+    archive = _zip(client.get(f"/api/runs/{run_id}/bundle"))
+    assert json.loads(archive.read("run.json"))["run"]["id"] == run_id
 
     assert client.post(f"/api/runs/{run_id}/restore").status_code == 200
     assert client.get(f"/api/runs/{run_id}/bundle").status_code == 200
@@ -217,6 +256,7 @@ def test_a_series_bundle_holds_the_plan_and_every_episode(client: TestClient) ->
     # A planned series already exports its plan and its planner run.
     archive = _zip(client.get(f"/api/series/{series_id}/bundle"))
     assert "plan/run.json" in archive.namelist()
+    _assert_prompts(archive, "plan/")
     assert not any(name.startswith("episode-") for name in archive.namelist())
 
     assert client.post(f"/api/series/{series_id}/approve").status_code == 200
@@ -235,6 +275,7 @@ def test_a_series_bundle_holds_the_plan_and_every_episode(client: TestClient) ->
     for episode in data["episodes"]:
         folder = episode["folder"]
         assert {f"{folder}run.json", f"{folder}run.md", f"{folder}script.md"} <= names
+        _assert_prompts(archive, folder)
         run = json.loads(archive.read(f"{folder}run.json"))
         assert run["run"]["id"] == episode["run_id"]
         assert run["run"]["episode_index"] == episode["index"]
@@ -247,10 +288,9 @@ def test_a_series_bundle_holds_the_plan_and_every_episode(client: TestClient) ->
         assert term["term"] in readable
 
     assert client.post(f"/api/series/{series_id}/trash").status_code == 200
-    refused = client.get(f"/api/series/{series_id}/bundle")
-    assert refused.status_code == 409
-    assert refused.json()["title"] == "Series is in the trash"
+    trashed = _zip(client.get(f"/api/series/{series_id}/bundle"))
+    assert json.loads(trashed.read("series.json")) == data
     # An episode of a trashed series is trashed with it.
-    assert client.get(f"/api/runs/{data['episodes'][0]['run_id']}/bundle").status_code == 409
+    assert client.get(f"/api/runs/{data['episodes'][0]['run_id']}/bundle").status_code == 200
     assert client.post(f"/api/series/{series_id}/restore").status_code == 200
     assert client.get(f"/api/series/{series_id}/bundle").status_code == 200

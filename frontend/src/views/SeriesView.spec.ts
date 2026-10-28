@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError } from '@/api/client'
+import { ApiError, api } from '@/api/client'
 import type { SeriesOut } from '@/api/types'
 import { t } from '@/i18n'
 import { seriesGraph } from '@/series/fixtures'
@@ -423,7 +423,13 @@ describe('series view', () => {
     store.get.mockImplementation(async () => ({ ...series('stopped'), trashed_at: '2026-10-04T09:00:00Z' }))
     const trashed = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
     await flushPromises()
-    expect(trashed.get('[data-bundle]').attributes('disabled')).toBeDefined()
+    expect(trashed.get('[data-bundle]').attributes('disabled')).toBeUndefined()
+    const download = vi.spyOn(api, 'download').mockRejectedValue(new Error('Unavailable'))
+    await trashed.get('[data-bundle]').trigger('click')
+    await flushPromises()
+    expect(download).toHaveBeenCalledWith('/api/series/s1/bundle')
+    expect(trashed.get('[role="alert"]').text()).toBe(t.errors.generic)
+    download.mockRestore()
     trashed.unmount()
   })
 })

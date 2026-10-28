@@ -13,14 +13,13 @@ const props = defineProps<{
   /** The bundle endpoint, such as `/api/runs/<id>/bundle`. */
   path: string
   hint: string
-  trashed?: boolean
 }>()
 
 const building = ref(false)
 const error = ref('')
 
 async function download(): Promise<void> {
-  if (building.value || props.trashed) return
+  if (building.value) return
   building.value = true
   error.value = ''
   try {
@@ -47,9 +46,9 @@ async function download(): Promise<void> {
       class="btn btn--sm"
       type="button"
       data-bundle
-      :disabled="building || trashed"
+      :disabled="building"
       :aria-busy="building"
-      :title="trashed ? t.graph.bundleTrashed : hint"
+      :title="hint"
       @click="download"
     >
       <span v-if="building" class="spinner" aria-hidden="true" />
