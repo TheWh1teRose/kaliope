@@ -15,8 +15,10 @@ from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
 from app.pipeline.notes import merge_notes, new_note_id, resolve_subject
+from app.pipeline.series_prompt import contract_lines
 from app.schemas.pipeline import (
     AudienceSpec,
+    EpisodeBrief,
     FormatSpec,
     Note,
     Notes,
@@ -76,6 +78,8 @@ class CriticInput(BaseModel):
     format_spec: FormatSpec | None = None
     audience_spec: AudienceSpec | None = None
     notes: Notes | None = None
+    #: Set for one episode of a series: what it explains and what it leaves to others.
+    episode_brief: EpisodeBrief | None = None
 
 
 class AiCriticNode:
@@ -106,6 +110,9 @@ class AiCriticNode:
             "format_spec": "Speakers and register, so the critic can judge voice.",
             "audience_spec": "Who is listening, so the critic can judge level.",
             "notes": "Notes already collected; new ones are appended.",
+            "episode_brief": "Only in a series: the episode's place and the topics the plan "
+            "gave it, took as known or left to a later episode, so no note asks to teach "
+            "again what an earlier episode taught or to cover a later episode's topic.",
         },
         output="A Notes list: each item has text, a beat or segment target, and a criterion.",
         failure_modes=[
@@ -227,6 +234,8 @@ class AiCriticNode:
 
 def _prompt(inp: CriticInput, subject: str, criteria: str) -> str:
     parts = [f"Review the {subject} against these criteria:\n{criteria}\n"]
+    if inp.episode_brief is not None:
+        parts.append(_series_lines(inp.episode_brief))
     if inp.audience_spec:
         parts.append(f"Audience: {inp.audience_spec.description}")
     if inp.format_spec:
@@ -243,6 +252,19 @@ def _prompt(inp: CriticInput, subject: str, criteria: str) -> str:
             preview = segment.text if len(segment.text) <= 280 else segment.text[:277] + "…"
             parts.append(f"- [{segment.id}] beat={segment.beat_id} {segment.speaker}: {preview}")
     return "\n".join(parts)
+
+
+def _series_lines(brief: EpisodeBrief) -> str:
+    episode = brief.episode
+    lines = [
+        f"This is episode {episode.index} of {brief.episode_count} of the series "
+        f'"{brief.series_title}": {episode.title}. The other episodes cover the rest of '
+        "the material. Do not ask for a topic of an earlier or a later episode to be "
+        "explained here, and do not ask to introduce the subject again after the first "
+        "episode.",
+        *contract_lines(episode),
+    ]
+    return "\n".join(lines) + "\n"
 
 
 register_node(AiCriticNode())

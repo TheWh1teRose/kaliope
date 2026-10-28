@@ -14,6 +14,7 @@ from app.pipeline.nodes.script import _closest_speaker, _resolve_citations
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
+    EpisodeBrief,
     FormatSpec,
     Note,
     Notes,
@@ -123,6 +124,8 @@ class ApplyOutlineNotesInput(BaseModel):
     notes: Notes
     outline: Outline
     parsed: ParsedDocument | None = None
+    #: Set for one episode of a series: a revised beat stays on its own passages.
+    episode_brief: EpisodeBrief | None = None
 
 
 class ApplyNotesNode:
@@ -242,6 +245,8 @@ class ApplyOutlineNotesNode:
             "notes": "The notes to apply, in order.",
             "outline": "The outline being revised.",
             "parsed": "Passage ids that a revised beat may cite.",
+            "episode_brief": "Only in a series: a revised beat may cite only the episode's "
+            "own and recap passages, so a note cannot pull another episode's content in.",
         },
         output="An Outline: the previous outline with each beat note applied in turn.",
         failure_modes=["Applying the notes left the outline with no beats."],
@@ -388,6 +393,9 @@ def _apply_outline_note(
 
     beat = outline.beats[index]
     allowed = {block.id for block in inp.parsed.blocks} if inp.parsed else set(beat.block_ids)
+    if inp.episode_brief is not None:
+        episode = inp.episode_brief.episode
+        allowed &= {*episode.block_ids, *episode.recap_block_ids}
     data = ctx.llm.complete(
         CompletionRequest(
             model=ctx.model("claude-opus-5"),
@@ -403,7 +411,7 @@ def _apply_outline_note(
 
     block_ids = [str(item) for item in data.get("block_ids", []) if str(item) in allowed]
     if not block_ids:
-        block_ids = list(beat.block_ids)
+        block_ids = [bid for bid in beat.block_ids if inp.episode_brief is None or bid in allowed]
     try:
         word_budget = max(1, int(data.get("word_budget", beat.word_budget)))
     except (TypeError, ValueError):

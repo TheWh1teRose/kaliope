@@ -16,10 +16,12 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
+from app.pipeline.series_prompt import contract_lines, earlier_outline_lines
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     Beat,
     ContentBudget,
+    EarlierOutlines,
     EpisodeBrief,
     FormatSpec,
     Outline,
@@ -82,6 +84,8 @@ class OutlineInput(BaseModel):
     format_spec: FormatSpec
     #: Set for one episode of a series: where it stands and how it connects.
     episode_brief: EpisodeBrief | None = None
+    #: Set for a series episode after the first: the earlier episodes' running orders.
+    earlier_outlines: EarlierOutlines | None = None
 
 
 class OutlineNode:
@@ -115,7 +119,11 @@ class OutlineNode:
             "budget": "The target word count the beat budgets must sum to.",
             "format_spec": "Speakers, register and beat guidance for the chosen format.",
             "episode_brief": "Only in a series: the episode's place in it, what to recall from "
-            "earlier episodes and what the next one answers.",
+            "earlier episodes, what the next one answers, and the topics the plan gave it, "
+            "took as known or left to a later episode.",
+            "earlier_outlines": "Only in a series, from the second episode on: the running "
+            "orders of the earlier episodes, so this one continues where they stopped "
+            "instead of teaching their beats again.",
         },
         output="An Outline: ordered beats with title, block ids, word budget, goal and summary.",
         failure_modes=[
@@ -166,6 +174,10 @@ class OutlineNode:
 
     def run(self, inp: OutlineInput, ctx: NodeContext) -> Outline:
         blocks = {b.id: b for b in inp.parsed.blocks}
+        if inp.episode_brief is not None:
+            episode = inp.episode_brief.episode
+            allowed = {*episode.block_ids, *episode.recap_block_ids}
+            blocks = {bid: block for bid, block in blocks.items() if bid in allowed}
         selected_ids = [s.block_id for s in inp.selection.selected_blocks if s.block_id in blocks]
         if not selected_ids:
             raise NodeError("the selection contains no block ids that exist in the parse")
@@ -186,7 +198,11 @@ class OutlineNode:
             + f"Target length: {inp.budget.target_minutes:.1f} minutes "
             f"(~{target_words} words). The beat budgets must sum to {target_words}.\n"
             f"Document language: {inp.parsed.language}\n\n"
-            + (_episode_lines(inp.episode_brief) if inp.episode_brief is not None else "")
+            + (
+                _episode_lines(inp.episode_brief, inp.earlier_outlines)
+                if inp.episode_brief is not None
+                else ""
+            )
             + f"Learning goals:\n{goals}\n\n"
             f"Selected passages:\n{passages}"
         )
@@ -234,7 +250,8 @@ class OutlineNode:
         return Outline(beats=beats)
 
 
-def _episode_lines(brief: EpisodeBrief) -> str:
+def _episode_lines(brief: EpisodeBrief, earlier: EarlierOutlines | None = None) -> str:
+    """The series block of an episode's outline prompt."""
     episode = brief.episode
     first = episode.index == 1
     last = episode.index == brief.episode_count
@@ -257,6 +274,11 @@ def _episode_lines(brief: EpisodeBrief) -> str:
         lines.append("The last beat closes the series.")
     elif episode.preview:
         lines.append(f"The last beat points ahead to the next episode: {episode.preview}")
+    lines.extend(contract_lines(episode))
+    previous = earlier_outline_lines(earlier)
+    if previous:
+        lines.append("")
+        lines.extend(previous)
     return "\n".join(lines) + "\n\n"
 
 

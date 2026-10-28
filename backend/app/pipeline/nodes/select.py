@@ -21,6 +21,7 @@ from app.llm.base import CompletionRequest, Message
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.framework.registry import register_node
 from app.pipeline.framework.spec import NodeDoc, NodeParam
+from app.pipeline.series_prompt import contract_lines
 from app.schemas.document import ParsedDocument
 from app.schemas.pipeline import (
     AudienceSpec,
@@ -135,7 +136,8 @@ class SelectNode:
             "select.",
             "audience_spec": "Who is listening, which shifts what counts as worth selecting.",
             "episode_brief": "Only in a series: the candidates are the episode's own passages "
-            "plus its recap passages, and the learning goals are the ones the plan fixed.",
+            "plus its recap passages, the learning goals are the ones the plan fixed, and the "
+            "plan's topics for the episode say what it explains and what it leaves to others.",
         },
         output="A Selection: learning goals, the chosen block ids with the goals each serves, "
         "and the rationale.",
@@ -367,6 +369,7 @@ def _episode_instruction(brief: EpisodeBrief, recap_ids: set[str]) -> str:
         "The series plan fixed this episode's learning goals. Return exactly these, with these ids:"
     )
     lines.extend(f"- {goal.id}: {goal.text}" for goal in episode.goals)
+    lines.extend(contract_lines(episode))
     return "\n".join(lines)
 
 

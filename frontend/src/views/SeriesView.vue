@@ -474,6 +474,16 @@ onUnmounted(() => {
             </ul>
             <p v-if="episode.recap" class="line">{{ t.series.recap }}: {{ episode.recap }}</p>
             <p v-if="episode.preview" class="line">{{ t.series.preview }}: {{ episode.preview }}</p>
+            <p v-if="episode.owns?.length" class="line" data-contract="owns">
+              {{ t.series.owns }}: {{ episode.owns.join('; ') }}
+            </p>
+            <p v-if="episode.assumes?.length" class="line" data-contract="assumes">
+              {{ t.series.assumes }}: {{ episode.assumes.join('; ') }}
+            </p>
+            <p v-if="episode.leaves_to?.length" class="line" data-contract="leaves">
+              {{ t.series.leavesTo }}:
+              {{ episode.leaves_to.map((h) => fill(t.series.leftTo, { topic: h.topic, n: h.episode })).join('; ') }}
+            </p>
           </article>
         </div>
         <div v-if="plan.terms.length" class="terms">

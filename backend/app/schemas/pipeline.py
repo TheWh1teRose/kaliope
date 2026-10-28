@@ -258,6 +258,18 @@ class SeriesTerm(BaseModel):
     first_episode: int = 1
 
 
+class TopicHandoff(BaseModel):
+    """A topic one episode leaves to a later episode, which explains it."""
+
+    topic: str
+    #: 1-based index of the later episode that owns the topic.
+    episode: int
+
+
+#: The content contract of an episode. Plans made before it existed have none.
+CONTRACT_FIELDS: tuple[str, ...] = ("owns", "assumes", "leaves_to")
+
+
 class EpisodePlan(BaseModel):
     """One episode's share of the document, as the planner decided it."""
 
@@ -279,6 +291,25 @@ class EpisodePlan(BaseModel):
     #: What to recall from earlier episodes, and what the next one answers.
     recap: str | None = None
     preview: str | None = None
+    #: Topics this episode alone explains in full; no other episode owns them.
+    owns: list[str] = Field(default_factory=list)
+    #: Topics earlier episodes explained; this one recalls them at most briefly.
+    assumes: list[str] = Field(default_factory=list)
+    #: Topics this episode leaves to a later one, which owns them.
+    leaves_to: list[TopicHandoff] = Field(default_factory=list)
+
+    def has_contract(self) -> bool:
+        return bool(self.owns or self.assumes or self.leaves_to)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_contract(self, handler: Any) -> Any:
+        # A plan without a contract must dump as it did before the contract
+        # existed, or the brief of every older series episode changes its hash
+        # and its cached select and outline run again.
+        dumped = handler(self)
+        if not isinstance(dumped, dict):
+            return dumped
+        return {key: value for key, value in dumped.items() if key not in CONTRACT_FIELDS or value}
 
 
 class UnassignedBlock(BaseModel):
@@ -347,6 +378,9 @@ class EpisodeSummary(BaseModel):
     title: str
     role: str = ""
     summary: str | None = None
+    owns: list[str] = Field(default_factory=list)
+    assumes: list[str] = Field(default_factory=list)
+    leaves_to: list[TopicHandoff] = Field(default_factory=list)
 
 
 class EpisodeOutline(BaseModel):
@@ -354,6 +388,12 @@ class EpisodeOutline(BaseModel):
     title: str
     #: ``(title, summary)`` per beat.
     beats: list[tuple[str, str]] = Field(default_factory=list)
+
+
+class EarlierOutlines(BaseModel):
+    """The running orders of the episodes before this one, for its outline step."""
+
+    outlines: list[EpisodeOutline] = Field(default_factory=list)
 
 
 class EarlierEpisode(BaseModel):
@@ -371,6 +411,10 @@ class SeriesContext(BaseModel):
     terms: list[SeriesTerm] = Field(default_factory=list)
     episode_index: int
     episodes: list[EpisodeSummary]
+    #: This episode's goals, recap and preview, for its opening and closing.
+    goals: list[str] = Field(default_factory=list)
+    recap: str | None = None
+    preview: str | None = None
     #: The outlines of the other episodes.
     outlines: list[EpisodeOutline] = Field(default_factory=list)
     #: The full text of the episodes before this one, in order.

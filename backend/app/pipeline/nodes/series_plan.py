@@ -13,6 +13,10 @@ source instead of shortening every episode. If that plan does not have the
 asked-for number of episodes, the model is asked once more; a count that still
 differs is kept.
 
+Each episode also gets a content contract — the topics it owns, the ones it
+takes as known from earlier episodes and the ones it leaves to later ones —
+which is checked the same way so that no topic has two homes.
+
 The planner writes no facts. Titles, summaries and goals describe the material;
 the episodes' scripts still take every fact from their own passages.
 """
@@ -55,6 +59,7 @@ from app.schemas.pipeline import (
     SeriesPlan,
     SeriesRequest,
     SeriesTerm,
+    TopicHandoff,
     UnassignedBlock,
 )
 
@@ -66,6 +71,8 @@ MIN_EPISODES = 2
 MAX_RECAP_BLOCKS = 3
 #: Characters of each passage shown to the planner.
 PASSAGE_CHARS = 600
+#: Most topics one episode lists under each part of its content contract.
+MAX_CONTRACT_TOPICS = 8
 #: Why a passage the model skipped stays out once an episode is full.
 LEFT_OUT_FOR_DIALOGUE = "Left out to leave room for dialogue."
 
@@ -103,6 +110,16 @@ Rules:
   episodes (recap) and up to three earlier passage ids that the recap may cite
   (recap_block_ids). For every episode but the last, name what the next episode
   will answer (preview).
+- Give each episode a content contract, so no two episodes explain the same
+  thing and each one builds on the ones before it:
+  owns: the topics this episode alone explains, as short noun phrases. No topic
+  is owned by two episodes.
+  assumes: topics an earlier episode owns that this one builds on. It recalls
+  them in a sentence at most and does not teach them again. The first episode
+  assumes nothing.
+  leaves_to: topics this episode touches but leaves to a later episode, with
+  that episode's number. That episode lists the topic under owns.
+  Spell a topic the same way wherever it appears.
 - Give the series a title and a through-line: one or two sentences on how the
   episodes build on each other.
 - List the key terms with a short gloss and the episode that introduces each
@@ -155,8 +172,22 @@ _SCHEMA: dict[str, Any] = {
                     "objectives": {"type": "array", "items": {"type": "integer"}},
                     "recap": {"type": "string"},
                     "preview": {"type": "string"},
+                    "owns": {"type": "array", "items": {"type": "string"}},
+                    "assumes": {"type": "array", "items": {"type": "string"}},
+                    "leaves_to": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "topic": {"type": "string"},
+                                "episode": {"type": "integer"},
+                            },
+                            "required": ["topic", "episode"],
+                            "additionalProperties": False,
+                        },
+                    },
                 },
-                "required": ["title", "block_ids", "goals"],
+                "required": ["title", "block_ids", "goals", "owns", "assumes", "leaves_to"],
                 "additionalProperties": False,
             },
         },
@@ -186,7 +217,7 @@ class SeriesPlanInput(BaseModel):
 class SeriesPlanNode:
     name = "series_plan"
     title = "Folgen planen"
-    version = "1.3"
+    version = "1.4"
     Input: type[BaseModel] = SeriesPlanInput
     Output: type[BaseModel] = SeriesPlan
     produces = "series_plan"
@@ -201,7 +232,10 @@ class SeriesPlanNode:
             "The model sees every narratable passage, grouped by section, with its id, "
             "weight, word count and the start of its text. It returns the episodes with "
             "their passages, learning goals, role, recap and preview, plus the series title, "
-            "through-line and key terms. Each goal is formulated by the same rule as the "
+            "through-line and key terms. Each episode also gets a content contract: the "
+            "topics it alone explains, the ones it takes as known from earlier episodes, "
+            "and the ones it leaves to a later episode. Each goal is formulated by the "
+            "same rule as the "
             "objectives node: a checkable change derived from the desired outcome, limited "
             "to the episode's time, at the lowest honest Bloom level. If that answer does "
             "not have the asked-for number of episodes, it is asked once more; a count that "
@@ -214,7 +248,10 @@ class SeriesPlanNode:
             "passages and is named in a warning. An episode left with no usable learning "
             "goal is kept and named in a warning. An episode below three supportable "
             "minutes is merged into its smaller neighbour. Episodes keep the requested "
-            "length.",
+            "length. The contract is settled the same way: a topic owned twice stays with "
+            "its first episode and the later one takes it as known, a topic left to a later "
+            "episode moves to the episode that owns it or becomes that episode's own, and "
+            "an episode takes as known only what an earlier episode owns.",
             "The planner writes no facts. Each episode later selects, outlines and writes "
             "from its own passages through the normal nodes.",
         ],
@@ -491,7 +528,7 @@ def build_plan(
             if block_id in known and block_id not in homes:
                 homes[block_id] = len(drafts)
                 ids.append(block_id)
-        drafts.append({"entry": entry, "ids": ids})
+        drafts.append({"entry": entry, "ids": ids, "positions": [len(drafts) + 1]})
 
     unassigned: list[UnassignedBlock] = []
     for item in data.get("unassigned", []) or []:
@@ -574,6 +611,7 @@ def build_plan(
         drafts[keep]["ids"] = sorted(
             drafts[keep]["ids"] + drafts[drop]["ids"], key=lambda block_id: order[block_id]
         )
+        drafts[keep]["positions"] += drafts[drop]["positions"]
         del drafts[drop]
         merged = True
 
@@ -635,6 +673,8 @@ def build_plan(
             )
         )
 
+    _settle_contracts(episodes, drafts, raw_episodes)
+
     terms = []
     for item in data.get("terms", []) or []:
         if not isinstance(item, dict) or not str(item.get("term", "")).strip():
@@ -688,6 +728,90 @@ def build_plan(
             explanation=explanation,
         ),
     )
+
+
+def _topic_key(topic: str) -> str:
+    return " ".join(topic.casefold().split())
+
+
+def _topics(values: Any) -> list[str]:
+    topics: list[str] = []
+    seen: set[str] = set()
+    for value in values if isinstance(values, list) else []:
+        topic = " ".join(str(value).split())
+        if topic and _topic_key(topic) not in seen:
+            seen.add(_topic_key(topic))
+            topics.append(topic)
+    return topics[:MAX_CONTRACT_TOPICS]
+
+
+def _settle_contracts(
+    episodes: list[EpisodePlan], drafts: list[dict[str, Any]], raw: list[dict[str, Any]]
+) -> None:
+    """Give each episode its content contract, checked against the others.
+
+    The model numbers its episodes in the order it returned them; a merge or a
+    dropped episode moves that numbering, so a reference is mapped onto the
+    episode that now holds that position. A topic owned twice stays with its
+    first episode and the later one takes it as known. A topic left to a later
+    episode points at the episode that owns it; when no episode owns it, the
+    named later episode does. A topic left to the same or an earlier episode is
+    dropped. An episode takes as known only what an earlier episode owns, and
+    the first episode takes nothing as known.
+    """
+    episode_at = {
+        position: index + 1 for index, draft in enumerate(drafts) for position in draft["positions"]
+    }
+    handoffs: list[list[tuple[str, int | None]]] = []
+    for episode, draft in zip(episodes, drafts, strict=True):
+        entries = [raw[position - 1] for position in draft["positions"]]
+        episode.owns = _topics([t for entry in entries for t in entry.get("owns") or []])
+        episode.assumes = _topics([t for entry in entries for t in entry.get("assumes") or []])
+        pairs: list[tuple[str, int | None]] = []
+        for entry in entries:
+            for item in entry.get("leaves_to") or []:
+                if not isinstance(item, dict):
+                    continue
+                topic = " ".join(str(item.get("topic", "")).split())
+                try:
+                    target = episode_at.get(int(item.get("episode", 0)))
+                except (TypeError, ValueError):
+                    target = None
+                if topic:
+                    pairs.append((topic, target))
+        handoffs.append(pairs)
+
+    owner: dict[str, int] = {}
+    for episode in episodes:
+        kept: list[str] = []
+        for topic in episode.owns:
+            if _topic_key(topic) in owner:
+                episode.assumes.append(topic)
+            else:
+                owner[_topic_key(topic)] = episode.index
+                kept.append(topic)
+        episode.owns = kept
+
+    for episode, pairs in zip(episodes, handoffs, strict=True):
+        left: list[TopicHandoff] = []
+        for topic, target in pairs:
+            key = _topic_key(topic)
+            home = owner.get(key)
+            if home is None and target is not None and target > episode.index:
+                episodes[target - 1].owns.append(topic)
+                owner[key] = home = target
+            known = any(_topic_key(h.topic) == key for h in left)
+            if home is not None and home > episode.index and not known:
+                left.append(TopicHandoff(topic=topic, episode=home))
+        episode.leaves_to = left[:MAX_CONTRACT_TOPICS]
+
+    for episode in episodes:
+        if episode.index == 1:
+            episode.assumes = []
+            continue
+        episode.assumes = _topics(
+            [t for t in episode.assumes if 0 < owner.get(_topic_key(t), 0) < episode.index]
+        )
 
 
 register_node(SeriesPlanNode())
