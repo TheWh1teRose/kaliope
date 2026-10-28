@@ -393,7 +393,7 @@ points at the episode that owns it (or becomes the named episode's own when
 nobody owns it), and an episode assumes only what an earlier episode owns.
 Selection, outline, script and the critic get the episode's contract; the plan
 screen shows it before approval. Plans made before the contract existed load
-with none and run as before.
+without one; the series framing and earlier-outline context still apply.
 The series always waits after the plan until someone approves it, and can be
 planned again with another count, length or hint while it waits.
 
@@ -420,11 +420,12 @@ Custom episode flows built from the objective nodes work per episode too:
 episodes do not all derive the same objectives from the whole document),
 `objective_select` offers only the episode's own and recap passages, and
 `objective_outline` gets the brief, the contract and the earlier outlines like
-`outline`. In such a flow `ai_critic` knows what the other episodes cover, so
+`outline`. Both outline nodes admit only the episode's own and recap passage
+ids. In such a flow `ai_critic` knows what the other episodes cover, so
 its notes do not ask to teach their topics again, and an outline note applied by
 `apply_outline_notes` can only cite the episode's own and recap passages. A
-series still refuses a flow that pauses for a person (`human_feedback`). Series that fail or were stopped resume where
-they left off.
+series still refuses a flow that pauses for a person (`human_feedback`). Series
+that fail or were stopped resume where they left off.
 
 Known stop/resume limits: after resuming a series, its stopper label (and that of
 queued episodes) can still name the previous stopper; resumed run-node accounting

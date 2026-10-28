@@ -1,9 +1,9 @@
 """Prompt lines a series episode's nodes share: its content contract and the
 running orders of the episodes before it.
 
-Each helper returns no lines when there is nothing to say, so a plan made
-before the contract existed, or the first episode, sends the prompt it sent
-before.
+Contract lines are omitted when the episode has no contract; earlier-outline
+lines are omitted when no earlier outlines are supplied. These helpers leave
+the rest of the episode prompt to the caller.
 """
 
 from __future__ import annotations
