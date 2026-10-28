@@ -397,6 +397,10 @@ without one; the series framing and earlier-outline context still apply.
 The series always waits after the plan until someone approves it, and can be
 planned again with another count, length or hint while it waits.
 
+In the series view's **Folgenplan**, **Begriffe** and **Nicht zugeordnet**
+start collapsed. Each header shows the number of entries; click it to expand
+or collapse that list independently. Empty lists are hidden.
+
 Each episode is an ordinary run (`runs.series_id`, `episode_index`), so review,
 gates, the node inspector and the Markdown export work per episode unchanged.
 Every episode is outlined before any script is written, one after another, and
