@@ -579,7 +579,19 @@ GET  /api/format-specs                            # same shape, for format specs
 GET /api/runs/{id}/export?format=md     # script as Markdown, citations as footnotes
 GET /api/series/{id}/export?format=zip  # one Markdown file per finished episode, plus the plan
 GET /api/exports/edit-events.jsonl      # every edit event, one JSON object per line
+GET /api/runs/{id}/bundle               # the run's data as a zip, to hand to a model
+GET /api/series/{id}/bundle             # the same for a series: plan, planner run, every episode
 ```
+
+The data download (**Daten für KI herunterladen** in the graph header of a run
+and of a series) holds everything the graph shows: per node its settings
+(including effective default prompts and overrides),
+inputs, complete output, status, model, tokens, cost, duration, errors and gate
+findings (`run.md` to read, `run.json` structured, `nodes/` and `seeds/` with the
+values), plus the script with the reviewers' edits. A series adds its plan with
+terms and episode outlines. Reviewer comments and account metadata are omitted;
+document content, prompts, outputs, names of runs and series, and script edits
+are exported without redaction.
 
 Other endpoints worth knowing:
 

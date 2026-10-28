@@ -397,6 +397,12 @@ export default {
     checkedBy: 'Geprüft von',
     noFindings: 'Keine Befunde an diesem Knoten.',
     errorHere: 'Hier ist der Lauf abgebrochen.',
+    bundle: 'Daten für KI herunterladen',
+    bundleBuilding: 'Wird erstellt …',
+    bundleHint:
+      'Alles aus dieser Ansicht als ZIP: jeder Knoten mit Einstellungen, Ein- und Ausgaben, Status, Kosten und Befunden, dazu das Skript mit den Änderungen. Zum Weitergeben an ein KI-Modell.',
+    bundleSeriesHint:
+      'Alles aus dieser Ansicht als ZIP: Serienplan mit Begriffen und Folgen, dazu jeder Lauf Knoten für Knoten. Zum Weitergeben an ein KI-Modell.',
     status: {
       pending: 'Wartet',
       running: 'Läuft',

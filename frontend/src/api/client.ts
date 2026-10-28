@@ -25,15 +25,32 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isJson = (response.headers.get('content-type') ?? '').includes('json')
   const payload = isJson ? await response.json() : await response.text()
 
-  if (!response.ok) {
-    const body = typeof payload === 'string' ? { title: payload } : payload
-    throw new ApiError(
-      response.status,
-      body?.title ?? t.errors.generic,
-      body?.detail ?? body?.title ?? t.errors.generic,
-    )
-  }
+  if (!response.ok) throw problem(response.status, payload)
   return payload as T
+}
+
+function problem(status: number, payload: unknown): ApiError {
+  const body = (typeof payload === 'string' ? { title: payload } : payload) as {
+    title?: string
+    detail?: string
+  } | null
+  return new ApiError(
+    status,
+    body?.title ?? t.errors.generic,
+    body?.detail ?? body?.title ?? t.errors.generic,
+  )
+}
+
+/** A file the server builds on request, with the name it suggests for saving it. */
+async function download(path: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(path, { credentials: 'same-origin' })
+  if (!response.ok) {
+    const isJson = (response.headers.get('content-type') ?? '').includes('json')
+    throw problem(response.status, isJson ? await response.json() : await response.text())
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? path.split('/').pop() ?? 'download'
+  return { blob: await response.blob(), filename }
 }
 
 export const api = {
@@ -53,4 +70,5 @@ export const api = {
     form.append('file', file)
     return request<T>(path, { method: 'POST', body: form })
   },
+  download,
 }

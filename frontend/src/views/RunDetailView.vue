@@ -5,6 +5,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { ApiError } from '@/api/client'
 import type { FeedbackOut, NodeIOOut, Note, RunGraphOut, RunOut } from '@/api/types'
 import AudioPanel from '@/components/AudioPanel.vue'
+import DataBundleButton from '@/components/DataBundleButton.vue'
 import FeedbackBoard from '@/components/FeedbackBoard.vue'
 import FlowGraph from '@/components/FlowGraph.vue'
 import GateList from '@/components/GateList.vue'
@@ -286,7 +287,13 @@ onUnmounted(() => {
     <section v-if="graph" class="sheet">
       <div class="spread">
         <h2 class="h-section">{{ t.graph.title }}</h2>
-        <span class="meta">{{ graph.flow_id }} v{{ graph.flow_version }}</span>
+        <div class="row">
+          <span class="meta">{{ graph.flow_id }} v{{ graph.flow_version }}</span>
+          <DataBundleButton
+            :path="`/api/runs/${run.id}/bundle`"
+            :hint="t.graph.bundleHint"
+          />
+        </div>
       </div>
       <p class="muted hint">{{ t.graph.lead }}</p>
       <FlowGraph
