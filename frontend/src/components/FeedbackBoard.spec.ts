@@ -106,6 +106,51 @@ describe('FeedbackBoard', () => {
     expect(second.text()).toContain('Noch keine')
   })
 
+  it('groups by state, keeps Aktiv first, and preserves order inside each group', async () => {
+    const expired = {
+      ...runRow,
+      id: 'link-expired',
+      title: 'Lunge',
+      status: 'expired' as const,
+      responses: 1,
+    }
+    const revokedEarly = { ...seriesRow, id: 'link-revoked-early', title: 'Knochen' }
+    const activeLater = { ...runRow, id: 'link-active-later', title: 'Blut' }
+    vi.mocked(sharingApi.all).mockResolvedValue({
+      links: [revokedEarly, expired, seriesRow, runRow, activeLater],
+    })
+    const w = board()
+    await flushPromises()
+    const groups = w.findAll('[data-group]')
+    expect(groups.map((group) => group.attributes('data-group'))).toEqual([
+      'active',
+      'expired',
+      'revoked',
+    ])
+    const heading = (group: (typeof groups)[number]) =>
+      group.find('.group__title').text().replace(/\s+/g, ' ').trim()
+    expect(groups.map(heading)).toEqual(['Aktiv 2', 'Abgelaufen 1', 'Widerrufen 2'])
+    const titles = (group: (typeof groups)[number]) =>
+      group.findAll('[data-link]').map((row) => row.find('.link').text())
+    expect(titles(groups[0])).toEqual(['Herz und Kreislauf', 'Blut'])
+    expect(titles(groups[1])).toEqual(['Lunge'])
+    expect(titles(groups[2])).toEqual(['Knochen', 'Die Niere'])
+  })
+
+  it('groups a run’s own feedback the same way and omits empty states', async () => {
+    const expired = { ...runRow, id: 'link-expired', title: 'Lunge', status: 'expired' as const }
+    vi.mocked(sharingApi.all).mockResolvedValue({ links: [expired, seriesRow] })
+    const w = board({ run: { id: 'run-one', ready: true } })
+    await flushPromises()
+    const groups = w.findAll('[data-group]')
+    expect(groups.map((group) => group.attributes('data-group'))).toEqual(['expired', 'revoked'])
+    expect(groups[0].find('[data-link] .link').text()).toBe('Lunge')
+    expect(groups[1].find('[data-link] .link').text()).toBe('Die Niere')
+    expect(w.find('[data-group="active"]').exists()).toBe(false)
+    expect(w.findAll('.badge').map((badge) => badge.text())).toEqual(['Abgelaufen', 'Widerrufen'])
+    expect(w.find('[data-create]').exists()).toBe(false)
+  })
+
   it('says so when nothing is shared yet and when the list fails', async () => {
     vi.mocked(sharingApi.all).mockResolvedValueOnce({ links: [] })
     const empty = board()

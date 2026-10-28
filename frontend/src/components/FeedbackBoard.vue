@@ -29,6 +29,17 @@ const shareable = computed(() => runs.items.filter((run) => READY.has(run.status
 const pickerError = ref('')
 const runsLoaded = ref(false)
 
+const STATUS_ORDER: ReviewLinkRow['status'][] = ['active', 'expired', 'revoked']
+
+/** Non-empty state groups. "Aktiv" stays first; order inside a group is the list order. */
+const groups = computed(() => {
+  const rows = links.value ?? []
+  return STATUS_ORDER.flatMap((status) => {
+    const items = rows.filter((row) => row.status === status)
+    return items.length ? [{ status, items }] : []
+  })
+})
+
 function when(value: string): string {
   return new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
 }
@@ -85,63 +96,76 @@ onMounted(load)
     <p v-else-if="!links.length" class="muted empty" data-empty>
       {{ props.run ? t.feedbackBoard.emptyRun : t.feedbackBoard.empty }}
     </p>
-    <div v-else class="frame">
-      <table class="links">
-        <thead>
-          <tr>
-            <th>{{ t.feedbackBoard.stand }}</th>
-            <th v-if="!props.run">{{ t.feedbackBoard.source }}</th>
-            <th>{{ t.feedbackBoard.status }}</th>
-            <th class="right">{{ t.feedbackBoard.responses }}</th>
-            <th>{{ t.feedbackBoard.lastActivity }}</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in links" :key="row.id" :data-link="row.id">
-            <td>
-              <RouterLink :to="{ name: 'shared-feedback', params: { id: row.id } }" class="link">
-                {{ row.title || t.sharing.sharedStand }}
-              </RouterLink>
-              <span class="meta block">
-                <template v-if="row.episodes.length > 1">
-                  {{ fill(t.sharing.episodes, { n: row.episodes.length }) }} ·
-                </template>
-                <template v-else-if="row.episodes[0] && row.episodes[0] !== row.title">
-                  {{ row.episodes[0] }} ·
-                </template>
-                {{ when(row.created_at) }}
-              </span>
-            </td>
-            <td v-if="!props.run">
-              <RouterLink v-if="row.target_title" :to="source(row)" class="link">
-                {{ row.target_title }}
-              </RouterLink>
-              <span v-else class="muted">{{ t.feedbackBoard.gone }}</span>
-              <span v-if="row.target_kind === 'series'" class="badge badge--mark kind">
-                {{ t.feedbackBoard.series }}
-              </span>
-            </td>
-            <td>
-              <span class="badge" :class="row.status === 'active' ? 'badge--pass' : 'badge--idle'">
-                {{ t.sharing.status[row.status] }}
-              </span>
-            </td>
-            <td class="right num">{{ row.responses }}</td>
-            <td class="meta">
-              {{ row.last_activity ? when(row.last_activity) : t.feedbackBoard.noActivity }}
-            </td>
-            <td class="right">
-              <RouterLink
-                class="btn btn--sm"
-                :to="{ name: 'shared-feedback', params: { id: row.id } }"
-              >
-                {{ t.sharing.viewInScript }}
-              </RouterLink>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else class="groups">
+      <section
+        v-for="group in groups"
+        :key="group.status"
+        class="group"
+        :data-group="group.status"
+      >
+        <h3 class="group__title">
+          {{ t.sharing.status[group.status] }}
+          <span class="group__count num">{{ group.items.length }}</span>
+        </h3>
+        <div class="frame">
+          <table class="links">
+            <thead>
+              <tr>
+                <th>{{ t.feedbackBoard.stand }}</th>
+                <th v-if="!props.run">{{ t.feedbackBoard.source }}</th>
+                <th>{{ t.feedbackBoard.status }}</th>
+                <th class="right">{{ t.feedbackBoard.responses }}</th>
+                <th>{{ t.feedbackBoard.lastActivity }}</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in group.items" :key="row.id" :data-link="row.id">
+                <td>
+                  <RouterLink :to="{ name: 'shared-feedback', params: { id: row.id } }" class="link">
+                    {{ row.title || t.sharing.sharedStand }}
+                  </RouterLink>
+                  <span class="meta block">
+                    <template v-if="row.episodes.length > 1">
+                      {{ fill(t.sharing.episodes, { n: row.episodes.length }) }} ·
+                    </template>
+                    <template v-else-if="row.episodes[0] && row.episodes[0] !== row.title">
+                      {{ row.episodes[0] }} ·
+                    </template>
+                    {{ when(row.created_at) }}
+                  </span>
+                </td>
+                <td v-if="!props.run">
+                  <RouterLink v-if="row.target_title" :to="source(row)" class="link">
+                    {{ row.target_title }}
+                  </RouterLink>
+                  <span v-else class="muted">{{ t.feedbackBoard.gone }}</span>
+                  <span v-if="row.target_kind === 'series'" class="badge badge--mark kind">
+                    {{ t.feedbackBoard.series }}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge" :class="row.status === 'active' ? 'badge--pass' : 'badge--idle'">
+                    {{ t.sharing.status[row.status] }}
+                  </span>
+                </td>
+                <td class="right num">{{ row.responses }}</td>
+                <td class="meta">
+                  {{ row.last_activity ? when(row.last_activity) : t.feedbackBoard.noActivity }}
+                </td>
+                <td class="right">
+                  <RouterLink
+                    class="btn btn--sm"
+                    :to="{ name: 'shared-feedback', params: { id: row.id } }"
+                  >
+                    {{ t.sharing.viewInScript }}
+                  </RouterLink>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <section v-if="props.run" class="share">
@@ -212,6 +236,28 @@ onMounted(load)
 
 .empty {
   padding: var(--s5) 0;
+}
+
+.groups {
+  display: grid;
+  gap: var(--s5);
+}
+
+.group__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  font-size: var(--t-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.group__count {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
 }
 
 .frame {
