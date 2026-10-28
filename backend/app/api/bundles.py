@@ -4,8 +4,8 @@ The script export hands over the finished text. This one hands over how it was
 made — every node with its settings, what it was given, what it produced, what
 it cost and what the gates found — so the whole run can be given to a model to
 read. It reads only what the graph view already reads: the run's node rows,
-its manifest and the artifact store. Nothing about the people involved goes in:
-no account ids, names or e-mail addresses, and no reviewer comments.
+its manifest and the artifact store. For the user-facing contents and privacy
+scope, see the README's Exports section.
 
 A bundle holds, per run:
 

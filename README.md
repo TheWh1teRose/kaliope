@@ -584,12 +584,14 @@ GET /api/series/{id}/bundle             # the same for a series: plan, planner r
 ```
 
 The data download (**Daten für KI herunterladen** in the graph header of a run
-and of a series) holds everything the graph shows: per node its settings,
+and of a series) holds everything the graph shows: per node its settings
+(including effective default prompts and overrides),
 inputs, complete output, status, model, tokens, cost, duration, errors and gate
 findings (`run.md` to read, `run.json` structured, `nodes/` and `seeds/` with the
 values), plus the script with the reviewers' edits. A series adds its plan with
-terms and episode outlines. Reviewer comments and anything naming a person stay
-out.
+terms and episode outlines. Reviewer comments and account metadata are omitted;
+document content, prompts, outputs, names of runs and series, and script edits
+are exported without redaction.
 
 Other endpoints worth knowing:
 
