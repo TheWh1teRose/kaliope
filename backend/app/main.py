@@ -24,6 +24,7 @@ from app.api import (
     auth,
     authoring,
     bench,
+    bundles,
     documents,
     experiments,
     feedback,
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router)
     app.include_router(runs.router)
     app.include_router(series.router)
+    app.include_router(bundles.router)
     app.include_router(review.router)
     app.include_router(authoring.router)
     app.include_router(bench.router)

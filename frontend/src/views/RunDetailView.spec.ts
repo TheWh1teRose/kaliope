@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@/api/client'
 import { sharingApi } from '@/api/sharing'
-import type { RunOut, RunStatus } from '@/api/types'
+import type { RunGraphOut, RunOut, RunStatus } from '@/api/types'
 import { t } from '@/i18n'
+import { seriesGraph } from '@/series/fixtures'
 
 import RunDetailView from './RunDetailView.vue'
 
@@ -37,7 +38,7 @@ function run(status: RunStatus): RunOut {
 
 const store = {
   get: vi.fn(async () => run('running')),
-  graph: vi.fn(async () => null),
+  graph: vi.fn(async (): Promise<RunGraphOut | null> => null),
   watch: vi.fn(),
   stopWatching: vi.fn(),
   stop: vi.fn(async () => ({
@@ -290,5 +291,24 @@ describe('run detail', () => {
     expect(wrapper.find('[data-loading]').exists()).toBe(false)
     expect(wrapper.find('h1').exists()).toBe(true)
     wrapper.unmount()
+  })
+
+  it('offers the data download in the graph header, held while the run is in the trash', async () => {
+    store.graph.mockImplementation(async () => seriesGraph().episodes[0].graph)
+    store.get.mockImplementation(async () => run('completed'))
+    const wrapper = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    const button = wrapper.get('.sheet .spread [data-bundle]')
+    expect(button.text()).toBe(t.graph.bundle)
+    expect(button.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+
+    store.get.mockImplementation(async () => ({ ...run('completed'), trashed_at: '2026-10-04T09:00:00Z' }))
+    const trashed = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(trashed.get('[data-bundle]').attributes('disabled')).toBeDefined()
+    expect(trashed.get('[data-bundle]').attributes('title')).toBe(t.graph.bundleTrashed)
+    trashed.unmount()
+    store.graph.mockImplementation(async () => null)
   })
 })

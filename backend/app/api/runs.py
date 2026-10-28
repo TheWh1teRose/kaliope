@@ -411,9 +411,13 @@ def get_gate_detail(
     the method with the numbers the gate computed is what makes the check
     inspectable instead.
     """
-    run = _require_run(db, run_id)
+    return gate_details(db, _require_run(db, run_id))
+
+
+def gate_details(db: Session, run: Run) -> list[GateDetail]:
+    """Every gate of the run's flow, with the result it recorded in ``run``."""
     flow = catalogue.flows(db).get(run.flow_id)
-    reports = {report.id: report for report in _gate_reports(db, run_id)}
+    reports = {report.id: report for report in _gate_reports(db, run.id)}
     specs = gate_catalogue((flow.gates or None) if flow else None)
 
     detail = [GateDetail(spec=spec, report=reports.get(spec.id)) for spec in specs]

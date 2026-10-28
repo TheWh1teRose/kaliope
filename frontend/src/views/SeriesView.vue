@@ -8,6 +8,7 @@ import type { NodeIOOut, SeriesEvent, SeriesGraphOut, SeriesOut } from '@/api/ty
 import AudioPanel from '@/components/AudioPanel.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
+import DataBundleButton from '@/components/DataBundleButton.vue'
 import PipelineCanvas from '@/components/PipelineCanvas.vue'
 import SeriesAudio from '@/components/SeriesAudio.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -368,7 +369,14 @@ onUnmounted(() => {
     <section v-if="graph" class="sheet">
       <div class="spread">
         <h2 class="h-section">{{ t.series.canvas }}</h2>
-        <span class="meta">{{ money(series.total_cost_usd) }}</span>
+        <div class="row">
+          <span class="meta">{{ money(series.total_cost_usd) }}</span>
+          <DataBundleButton
+            :path="`/api/series/${series.id}/bundle`"
+            :hint="t.graph.bundleSeriesHint"
+            :trashed="Boolean(series.trashed_at)"
+          />
+        </div>
       </div>
       <p class="muted hint">{{ t.series.canvasLead }}</p>
       <PipelineCanvas
