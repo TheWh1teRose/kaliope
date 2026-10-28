@@ -189,6 +189,67 @@ describe('series view', () => {
     })
   })
 
+  it('folds terms and unassigned passages until the header is opened', async () => {
+    const planned = series('planned')
+    planned.plan!.terms = [
+      { term: 'Kipppunkt', gloss: 'Punkt ohne Rückkehr', first_episode: 2 },
+      { term: 'Albedo', gloss: '', first_episode: 1 },
+    ]
+    planned.plan!.unassigned = [
+      { block_id: 'b9', reason: 'zu kurz' },
+      { block_id: 'b10', reason: 'ohne Ziel' },
+    ]
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+
+    const terms = wrapper.get('[data-terms-toggle]')
+    expect(terms.element.tagName).toBe('BUTTON')
+    expect(terms.attributes('type')).toBe('button')
+    expect(terms.attributes('aria-expanded')).toBe('false')
+    expect(terms.text()).toContain(t.series.terms)
+    expect(terms.text()).toContain('2')
+    expect(terms.text()).toContain('+')
+    expect(wrapper.find('[data-terms]').exists()).toBe(false)
+
+    await terms.trigger('click')
+    expect(terms.attributes('aria-expanded')).toBe('true')
+    expect(terms.text()).toContain('−')
+    expect(wrapper.get('[data-terms]').text()).toContain('Kipppunkt')
+    expect(wrapper.get('[data-terms]').text()).toContain('Punkt ohne Rückkehr')
+    expect(wrapper.get('[data-terms]').text()).toContain('Albedo')
+
+    const unassigned = wrapper.get('[data-unassigned-toggle]')
+    expect(unassigned.element.tagName).toBe('BUTTON')
+    expect(unassigned.attributes('aria-expanded')).toBe('false')
+    expect(unassigned.text()).toContain(t.series.unassigned)
+    expect(unassigned.text()).toContain('2')
+    expect(unassigned.text()).toContain('+')
+    expect(wrapper.find('[data-unassigned]').exists()).toBe(false)
+
+    await unassigned.trigger('click')
+    expect(unassigned.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-unassigned]').text()).toContain('b9 (zu kurz)')
+    expect(wrapper.get('[data-unassigned]').text()).toContain('b10 (ohne Ziel)')
+
+    await terms.trigger('click')
+    await unassigned.trigger('click')
+    expect(terms.attributes('aria-expanded')).toBe('false')
+    expect(unassigned.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('[data-terms]').exists()).toBe(false)
+    expect(wrapper.find('[data-unassigned]').exists()).toBe(false)
+  })
+
+  it('hides the folds when the plan has no terms and no unassigned passages', async () => {
+    const planned = series('planned')
+    planned.plan!.terms = []
+    store.get.mockResolvedValueOnce(planned)
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.find('[data-terms-toggle]').exists()).toBe(false)
+    expect(wrapper.find('[data-unassigned-toggle]').exists()).toBe(false)
+  })
+
   it('shows a source-budget warning and keeps it on the plan', async () => {
     const planned = series('planned')
     const warning = 'Folge 1 übersteigt das Quellbudget um 30 Wörter, mehr Folgen wählen'
