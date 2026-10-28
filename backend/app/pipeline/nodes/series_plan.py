@@ -251,7 +251,7 @@ class SeriesPlanNode:
             "length. The contract is settled the same way: a topic owned twice stays with "
             "its first episode and the later one takes it as known, a topic left to a later "
             "episode moves to the episode that owns it or becomes that episode's own, and "
-            "an episode takes as known only what no later episode owns.",
+            "an episode takes as known only what an earlier episode owns.",
             "The planner writes no facts. Each episode later selects, outlines and writes "
             "from its own passages through the normal nodes.",
         ],
@@ -756,7 +756,7 @@ def _settle_contracts(
     first episode and the later one takes it as known. A topic left to a later
     episode points at the episode that owns it; when no episode owns it, the
     named later episode does. A topic left to the same or an earlier episode is
-    dropped. An episode takes as known only what no episode from it on owns, and
+    dropped. An episode takes as known only what an earlier episode owns, and
     the first episode takes nothing as known.
     """
     episode_at = {
@@ -810,7 +810,7 @@ def _settle_contracts(
             episode.assumes = []
             continue
         episode.assumes = _topics(
-            [t for t in episode.assumes if owner.get(_topic_key(t), 0) < episode.index]
+            [t for t in episode.assumes if 0 < owner.get(_topic_key(t), 0) < episode.index]
         )
 
 

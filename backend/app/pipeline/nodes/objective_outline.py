@@ -196,6 +196,10 @@ class ObjectiveOutlineNode:
             raise NodeError("no listener objectives are available to plan against")
 
         blocks = {b.id: b for b in inp.parsed.blocks}
+        if inp.episode_brief is not None:
+            episode = inp.episode_brief.episode
+            allowed = {*episode.block_ids, *episode.recap_block_ids}
+            blocks = {bid: block for bid, block in blocks.items() if bid in allowed}
         selected = [s for s in inp.selection.selected_blocks if s.block_id in blocks]
         if not selected:
             raise NodeError("the selection contains no block ids that exist in the parse")

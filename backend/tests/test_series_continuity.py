@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.llm.base import LLMClient
+from app.llm.base import CompletionRequest, LLMClient
 from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
 from app.pipeline.framework.node import NodeContext, NodeError
 from app.pipeline.nodes.ai_critic import AiCriticNode, CriticInput
@@ -19,7 +19,7 @@ from app.pipeline.nodes.objective_select import ObjectiveSelectInput, ObjectiveS
 from app.pipeline.nodes.objectives import ObjectivesInput, ObjectivesNode
 from app.pipeline.nodes.outline import OutlineInput, OutlineNode
 from app.pipeline.nodes.script import ScriptInput, beat_prompt_fields, series_section
-from app.pipeline.nodes.series_plan import _SCHEMA, _SYSTEM, build_plan
+from app.pipeline.nodes.series_plan import SeriesPlanInput, SeriesPlanNode, build_plan
 from app.schemas.pipeline import (
     Beat,
     ContentBudget,
@@ -38,6 +38,7 @@ from app.schemas.pipeline import (
     Selection,
     SeriesContext,
     SeriesPlan,
+    SeriesRequest,
     TopicHandoff,
 )
 from tests.series_support import AUDIENCE, FORMAT, learning_document
@@ -138,10 +139,33 @@ EARLIER = EarlierOutlines(
 # ------------------------------------------------------------ the contract
 
 
-def test_the_planner_asks_for_a_content_contract() -> None:
-    episode = _SCHEMA["properties"]["episodes"]["items"]
+def test_the_planner_asks_for_a_content_contract(tmp_path: Path) -> None:
+    provider = StubProvider()
+    plan = SeriesPlanNode().run(
+        SeriesPlanInput(
+            parsed=DOC,
+            budget=_budget(),
+            format_spec=FORMAT,
+            audience_spec=AUDIENCE,
+            series_request=SeriesRequest(episodes=3, minutes_per_episode=5),
+        ),
+        _context(provider, tmp_path),
+    )
+    request = provider.calls[-1]
+    assert request.json_schema is not None
+    assert request.system is not None
+    episode = request.json_schema["properties"]["episodes"]["items"]
     assert {"owns", "assumes", "leaves_to"} <= set(episode["required"])
-    assert "owns:" in _SYSTEM and "assumes:" in _SYSTEM and "leaves_to:" in _SYSTEM
+    assert "owns:" in request.system
+    assert "assumes:" in request.system
+    assert "leaves_to:" in request.system
+    assert len(plan.episodes) == 3
+    for index, episode in enumerate(plan.episodes, 1):
+        assert episode.owns == [f"Thema {index}"]
+        assert episode.assumes == ([f"Thema {index - 1}"] if index > 1 else [])
+        assert episode.leaves_to == (
+            [TopicHandoff(topic=f"Thema {index + 1}", episode=index + 1)] if index < 3 else []
+        )
 
 
 def test_the_contract_is_read_and_each_topic_has_one_home() -> None:
@@ -192,6 +216,16 @@ def test_a_merge_moves_the_contract_with_the_passages() -> None:
     assert first.owns == ["A", "B"]
     assert first.leaves_to == [TopicHandoff(topic="C", episode=2)]
     assert second.owns == ["C"] and second.assumes == ["A", "B"]
+
+
+def test_assumptions_require_an_owner_in_an_earlier_surviving_episode() -> None:
+    plan = _plan(
+        _raw(IDS[:10], owns=["A"]),
+        _raw(["missing"], owns=["X"]),
+        _raw(IDS[10:], owns=["C"], assumes=["A", "X", "unknown", "C"]),
+    )
+    assert len(plan.episodes) == 2
+    assert plan.episodes[1].assumes == ["A"]
 
 
 def test_a_plan_without_a_contract_loads_and_dumps_as_before() -> None:
@@ -509,3 +543,80 @@ def test_an_outline_note_cannot_pull_in_another_episodes_passages(tmp_path: Path
     message = provider.calls[-1].messages[-1].content
     allowed = message.split("Passage ids you may use: ", 1)[1].split(", ")
     assert set(allowed) == {*IDS[8:12], IDS[0]}
+
+
+class PassageProvider(StubProvider):
+    def __init__(self, ids: list[str]) -> None:
+        super().__init__()
+        self.ids = ids
+
+    def _respond(self, request: CompletionRequest) -> Any:
+        beat = {
+            "title": "Revised",
+            "block_ids": self.ids,
+            "word_budget": 100,
+            "objective_id": "ep02-g0",
+        }
+        return {"beats": [beat], **beat}
+
+
+@pytest.mark.parametrize("objective", [False, True])
+@pytest.mark.parametrize("series", [False, True])
+def test_outline_producers_admit_only_episode_and_recap_passages(
+    tmp_path: Path, objective: bool, series: bool
+) -> None:
+    provider = PassageProvider([IDS[8], IDS[0], IDS[15]])
+    selection = Selection(
+        learning_goals=[],
+        selected_blocks=[SelectedBlock(block_id=bid) for bid in provider.ids],
+        rationale="",
+    )
+    inputs = dict(
+        parsed=DOC,
+        selection=selection,
+        budget=_budget(),
+        format_spec=FORMAT,
+        episode_brief=_brief() if series else None,
+    )
+    if objective:
+        outline = ObjectiveOutlineNode().run(
+            ObjectiveOutlineInput(**inputs, objectives=OBJECTIVES), _context(provider, tmp_path)
+        )
+    else:
+        outline = OutlineNode().run(OutlineInput(**inputs), _context(provider, tmp_path))
+    assert outline.beats[0].block_ids == ([IDS[8], IDS[0]] if series else provider.ids)
+    message = provider.calls[-1].messages[-1].content
+    assert (f"[{IDS[15]}]" in message) is not series
+
+
+@pytest.mark.parametrize("series", [False, True])
+@pytest.mark.parametrize("response", ["mixed", "foreign", "empty"])
+def test_outline_revisions_filter_responses_and_fallback_passages(
+    tmp_path: Path, series: bool, response: str
+) -> None:
+    ids = {"mixed": [IDS[0], IDS[15]], "foreign": [IDS[15]], "empty": []}[response]
+    provider = PassageProvider(ids)
+    outline = Outline(
+        beats=[Beat(id="beat000", title="A", block_ids=[IDS[8], IDS[15]], word_budget=9)]
+    )
+    notes = Notes(
+        items=[
+            Note(
+                id="n1",
+                text="Mehr Beispiele",
+                target={"kind": "beat", "id": "beat000"},
+                source="human",
+            )
+        ],
+        subject="outline",
+    )
+    revised = ApplyOutlineNotesNode().run(
+        ApplyOutlineNotesInput(
+            notes=notes, outline=outline, parsed=DOC, episode_brief=_brief() if series else None
+        ),
+        _context(provider, tmp_path),
+    )
+    expected = [IDS[0]] if response == "mixed" else [IDS[8]]
+    if not series:
+        expected = ids or outline.beats[0].block_ids
+    assert revised.beats[0].block_ids == expected

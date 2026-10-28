@@ -394,9 +394,8 @@ def _apply_outline_note(
     beat = outline.beats[index]
     allowed = {block.id for block in inp.parsed.blocks} if inp.parsed else set(beat.block_ids)
     if inp.episode_brief is not None:
-        # Another episode's passages would bring its content into this one.
         episode = inp.episode_brief.episode
-        allowed &= {*episode.block_ids, *episode.recap_block_ids, *beat.block_ids}
+        allowed &= {*episode.block_ids, *episode.recap_block_ids}
     data = ctx.llm.complete(
         CompletionRequest(
             model=ctx.model("claude-opus-5"),
@@ -412,7 +411,9 @@ def _apply_outline_note(
 
     block_ids = [str(item) for item in data.get("block_ids", []) if str(item) in allowed]
     if not block_ids:
-        block_ids = list(beat.block_ids)
+        block_ids = [
+            bid for bid in beat.block_ids if inp.episode_brief is None or bid in allowed
+        ]
     try:
         word_budget = max(1, int(data.get("word_budget", beat.word_budget)))
     except (TypeError, ValueError):

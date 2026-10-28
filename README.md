@@ -390,7 +390,7 @@ it `owns` (explains in full), the ones it `assumes` from earlier episodes
 The contract is settled in code as well: a topic owned twice stays with its
 first episode and the later one assumes it, a topic left to a later episode
 points at the episode that owns it (or becomes the named episode's own when
-nobody owns it), and an episode assumes only what no episode from it on owns.
+nobody owns it), and an episode assumes only what an earlier episode owns.
 Selection, outline, script and the critic get the episode's contract; the plan
 screen shows it before approval. Plans made before the contract existed load
 with none and run as before.
