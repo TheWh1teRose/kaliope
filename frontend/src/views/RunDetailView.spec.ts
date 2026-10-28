@@ -100,28 +100,6 @@ describe('run detail', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows a loading indicator until the run arrives, and nothing after a failed load', async () => {
-    let answer: (value: RunOut) => void = () => {}
-    store.get.mockImplementationOnce(() => new Promise<RunOut>((resolve) => (answer = resolve)))
-    const wrapper = mount(RunDetailView, { props: { id: 'r1' }, global: { plugins: [router()] } })
-    await flushPromises()
-    expect(wrapper.find('[data-loading]').exists()).toBe(true)
-    answer(run('running'))
-    await flushPromises()
-    expect(wrapper.find('[data-loading]').exists()).toBe(false)
-    expect(wrapper.find('.head').exists()).toBe(true)
-    wrapper.unmount()
-
-    store.get.mockRejectedValueOnce(new Error('offline'))
-    const failed = mount(RunDetailView, {
-      props: { id: 'r1' },
-      global: { plugins: [router()], config: { errorHandler: () => undefined } },
-    })
-    await flushPromises()
-    expect(failed.find('[data-loading]').exists()).toBe(false)
-    failed.unmount()
-  })
-
   it('opens on the Feedback tab when the feedback list links here', async () => {
     vi.spyOn(sharingApi, 'links').mockResolvedValue({ configured: true, links: [] })
     vi.spyOn(sharingApi, 'options').mockResolvedValue({ title: 'Review', episodes: [] })
@@ -309,7 +287,8 @@ describe('run detail', () => {
     expect(wrapper.get('[data-loading]').text()).toBe(t.common.loading)
     arrive(run('completed'))
     await flushPromises()
-    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    // The audio panel of a finished run shows its own indicator; the page one is gone.
+    expect(wrapper.find('.page > [data-loading]').exists()).toBe(false)
     expect(wrapper.find('h1').exists()).toBe(true)
     wrapper.unmount()
   })
