@@ -11,6 +11,7 @@ import {
   type SharePreview,
   type ShareSelection,
 } from '@/api/sharing'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 
 import { fill, t } from '@/i18n'
@@ -216,7 +217,7 @@ const statusLabel = t.sharing.status
     wide
     @close="close"
   >
-    <p v-if="loading" role="status">{{ t.sharing.loadingShare }}</p>
+    <LoadingState v-if="loading" :label="t.sharing.loadingShare" />
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
     <button v-if="error && !management" class="btn" @click="show">
       {{ t.common.retry }}

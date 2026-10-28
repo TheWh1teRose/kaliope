@@ -11,6 +11,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { RunOut, SeriesOut } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
@@ -29,6 +30,9 @@ const seriesStore = useSeriesStore()
 const route = useRoute()
 const router = useRouter()
 const series = ref<SeriesOut[]>([])
+/** False until a load succeeds. A failure keeps the error up, and later polls refresh silently. */
+const runsLoaded = ref(false)
+const runsLoadError = ref('')
 const trash = ref<RunOut[]>([])
 const trashedSeries = ref<SeriesOut[]>([])
 const trashLoaded = ref(false)
@@ -43,6 +47,7 @@ const stopping = ref(false)
 const stopError = ref('')
 let disposed = false
 let timer: ReturnType<typeof setInterval> | null = null
+let loadEpoch = 0
 
 function when(value: string): string {
   return new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
@@ -92,8 +97,23 @@ async function loadTrash(): Promise<void> {
 }
 
 async function load(): Promise<void> {
-  await runs.load()
-  series.value = await seriesStore.list().catch(() => [])
+  const ticket = ++loadEpoch
+  let failure: unknown
+  try {
+    await runs.load()
+  } catch (exc) {
+    failure = exc
+  }
+  if (ticket !== loadEpoch) return
+  if (failure) {
+    runsLoadError.value = failure instanceof ApiError ? failure.detail : t.errors.generic
+  } else {
+    runsLoaded.value = true
+    runsLoadError.value = ''
+  }
+  const nextSeries = await seriesStore.list().catch(() => [])
+  if (ticket !== loadEpoch) return
+  series.value = nextSeries
   const moving =
     runs.items.some((run) => LIVE_RUN.has(run.status) || run.active) ||
     series.value.some((row) => LIVE_SERIES.has(row.status) || row.active)
@@ -220,6 +240,7 @@ onUnmounted(() => {
       <p v-if="trashLoadError" class="notice notice--fail" role="alert" data-trash-load-error>
         {{ trashLoadError }}
       </p>
+      <LoadingState v-if="!trashLoaded && !trashLoadError" class="empty" />
       <p v-if="trashLoaded && !trashLoadError && !trashCount" class="muted empty">{{ t.run.trashEmpty }}</p>
       <table v-if="trashedSeries.length" class="runs" data-trash-series-list>
         <thead>
@@ -302,6 +323,9 @@ onUnmounted(() => {
     </template>
 
     <template v-else>
+      <p v-if="runsLoadError" class="notice notice--fail" role="alert" data-runs-load-error>
+        {{ runsLoadError }}
+      </p>
       <table v-if="series.length" class="runs">
         <thead>
           <tr>
@@ -355,9 +379,10 @@ onUnmounted(() => {
         </tbody>
       </table>
 
-      <p v-if="!runs.items.length" class="muted empty">{{ t.run.empty }}</p>
+      <LoadingState v-if="!runsLoaded && !runsLoadError && !runs.items.length" class="empty" />
+      <p v-else-if="runsLoaded && !runsLoadError && !runs.items.length" class="muted empty">{{ t.run.empty }}</p>
 
-      <table v-else class="runs">
+      <table v-else-if="runs.items.length" class="runs">
         <thead>
           <tr>
             <th>{{ t.run.document }}</th>
@@ -530,6 +555,10 @@ onUnmounted(() => {
 .empty {
   padding: var(--s8);
   text-align: center;
+}
+
+.loading.empty {
+  justify-content: center;
 }
 
 .lead {

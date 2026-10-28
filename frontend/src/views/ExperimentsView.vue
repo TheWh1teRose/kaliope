@@ -12,6 +12,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { ExperimentSummary } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import { experimentViews } from '@/experiments'
 import { listExperiments } from '@/experiments/api'
 import { t } from '@/i18n'
@@ -95,7 +96,7 @@ onMounted(async () => {
 
     <div v-else class="grid">
       <p v-if="error" class="banner">{{ error }}</p>
-      <p v-if="loading" class="muted">{{ t.common.loading }}</p>
+      <LoadingState v-if="loading" />
       <template v-else>
         <component
           :is="experimentViews[item.key] ? RouterLink : 'div'"

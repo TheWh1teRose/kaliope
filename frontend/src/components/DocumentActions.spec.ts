@@ -735,6 +735,129 @@ describe('document screens', () => {
     }
   })
 
+  it('keeps the structure spinner until the newer read finishes', async () => {
+    const pending: Array<(body: StructureOut) => void> = []
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        const body = typeof init?.body === 'string' ? init.body : undefined
+        calls.push({ url, method, body })
+        if (url.endsWith('/structure')) {
+          const parsed = await new Promise<StructureOut>((resolve) => {
+            pending.push(resolve)
+          })
+          return json(parsed)
+        }
+        if (method === 'PATCH') {
+          const title = JSON.parse(body ?? '{}').title as string
+          return json(documentSummary({ title }))
+        }
+        if (url === '/api/documents') return json([documentSummary()])
+        if (url === '/api/folders') return json([folder()])
+        return json(documentSummary())
+      }),
+    )
+    const router = await routerAt('/documents/doc-1')
+    const wrapper = mount(DocumentDetailView, {
+      props: { id: 'doc-1' },
+      attachTo: document.body,
+      global: { plugins: [pinia, router] },
+    })
+    cleanups.push(() => wrapper.unmount())
+    await flushPromises()
+
+    expect(pending).toHaveLength(1)
+    expect(wrapper.find('[data-loading]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('erster Text')
+
+    await wrapper.get('[data-action="rename"]').trigger('click')
+    await nextTick()
+    const input = document.body.querySelector('input') as HTMLInputElement
+    setControlValue(input, 'Neuer Name')
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm"]')?.click()
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    pending.shift()?.(structure('erster Text'))
+    await flushPromises()
+
+    expect(wrapper.find('[data-loading]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('erster Text')
+    expect(wrapper.text()).not.toContain('zweiter Text')
+
+    pending.shift()?.(structure('zweiter Text'))
+    await flushPromises()
+
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('zweiter Text')
+    expect(wrapper.text()).not.toContain('erster Text')
+  })
+
+  it('hides the structure spinner when a newer read finds the document unparsed', async () => {
+    const pending: Array<(body: StructureOut) => void> = []
+    let status: DocumentSummary['parse_status'] = 'parsed'
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
+        if (method === 'POST' && url.endsWith('/reparse')) {
+          status = 'pending'
+          return json(documentSummary({ parse_status: 'pending', parse_error: null, report: null }))
+        }
+        if (url.endsWith('/structure')) {
+          const parsed = await new Promise<StructureOut>((resolve) => {
+            pending.push(resolve)
+          })
+          return json(parsed)
+        }
+        const summary = documentSummary({
+          parse_status: status,
+          parse_error: null,
+          report: status === 'parsed' ? ingestion('Grund') : null,
+        })
+        if (url === '/api/documents') return json([summary])
+        if (url === '/api/folders') return json([folder()])
+        return json(summary)
+      }),
+    )
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const router = await routerAt('/documents/doc-1')
+      const wrapper = mount(DocumentDetailView, {
+        props: { id: 'doc-1' },
+        attachTo: document.body,
+        global: { plugins: [pinia, router] },
+      })
+      cleanups.push(() => wrapper.unmount())
+      await flushPromises()
+
+      expect(pending).toHaveLength(1)
+      expect(wrapper.find('[data-loading]').exists()).toBe(true)
+
+      await wrapper.get('[data-action="reparse"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Wartet')
+      expect(wrapper.find('[data-loading]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('alter Text')
+
+      pending.shift()?.(structure('alter Text'))
+      await flushPromises()
+
+      expect(wrapper.find('[data-loading]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('alter Text')
+      expect(wrapper.text()).toContain('Wartet')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps the newer structure read when an older refresh finishes last', async () => {
     let releaseDetail = (): void => {}
     let holdNextDetail = false

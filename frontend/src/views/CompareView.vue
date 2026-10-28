@@ -12,6 +12,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ApiError } from '@/api/client'
 import type { ExperimentOutput, ExperimentSummary } from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import OutputCard, { type OutputView } from '@/components/experiments/OutputCard.vue'
 import OutputDecision from '@/components/experiments/OutputDecision.vue'
 import OutputText from '@/components/experiments/OutputText.vue'
@@ -136,7 +137,7 @@ onMounted(load)
       <p v-if="missing.length && !loading" class="notice" role="status">
         {{ labels.missing }} {{ missing.length }}
       </p>
-      <p v-if="loading" class="muted">{{ t.common.loading }}</p>
+      <LoadingState v-if="loading" />
       <p v-else-if="outputs.length < 2" class="empty">{{ labels.tooFew }}</p>
 
       <template v-else>

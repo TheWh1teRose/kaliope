@@ -287,7 +287,8 @@ describe('run detail', () => {
     expect(wrapper.get('[data-loading]').text()).toBe(t.common.loading)
     arrive(run('completed'))
     await flushPromises()
-    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    // The audio panel of a finished run shows its own indicator; the page one is gone.
+    expect(wrapper.find('.page > [data-loading]').exists()).toBe(false)
     expect(wrapper.find('h1').exists()).toBe(true)
     wrapper.unmount()
   })

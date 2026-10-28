@@ -174,6 +174,117 @@ describe('runs list', () => {
     }
   })
 
+  it('drops a stale runs failure after a newer load stops the poll', async () => {
+    vi.useFakeTimers()
+    runs.items = [runRow('r-live', 'running')]
+    seriesStore.list.mockResolvedValue([])
+    const wrapper = await mountList()
+    const stale: { reject: ((error: unknown) => void) | null } = { reject: null }
+    try {
+      const reads = runs.load.mock.calls.length
+      runs.load.mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            stale.reject = reject
+          }),
+      )
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(runs.load).toHaveBeenCalledTimes(reads + 1)
+
+      runs.load.mockImplementationOnce(async () => {
+        runs.items = [runRow('r-live', 'stopped')]
+      })
+      seriesStore.list.mockResolvedValueOnce([seriesRow('s-new', 'stopped')])
+      await wrapper.get('[data-stop]').trigger('click')
+      document.body.querySelector<HTMLButtonElement>('[data-action="confirm-stop"]')?.click()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.find('[data-runs-load-error]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Gestoppt')
+      expect(wrapper.text()).toContain('Serie s-new')
+
+      stale.reject?.(new Error('offline'))
+      stale.reject = null
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.find('[data-runs-load-error]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('Serie s-new')
+      const settled = runs.load.mock.calls.length
+      await vi.advanceTimersByTimeAsync(12000)
+      expect(runs.load).toHaveBeenCalledTimes(settled)
+    } finally {
+      stale.reject?.(new Error('offline'))
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a newer runs failure when an older load succeeds last', async () => {
+    vi.useFakeTimers()
+    runs.items = [runRow('r-live', 'running')]
+    seriesStore.list.mockResolvedValue([])
+    const wrapper = await mountList()
+    const stale: { resolve: (() => void) | null } = { resolve: null }
+    try {
+      runs.load.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            stale.resolve = resolve
+          }),
+      )
+      await vi.advanceTimersByTimeAsync(4000)
+      runs.load.mockRejectedValueOnce(new ApiError(503, 'Down', 'Läufe nicht geladen.'))
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
+
+      stale.resolve?.()
+      stale.resolve = null
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
+    } finally {
+      stale.resolve?.()
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the newer series when an older load finishes last', async () => {
+    vi.useFakeTimers()
+    runs.items = [runRow('r-live', 'stopped')]
+    seriesStore.list.mockResolvedValue([{ ...seriesRow('s-live', 'writing') }])
+    const wrapper = await mountList()
+    const stale: { release: ((rows: ReturnType<typeof seriesRow>[]) => void) | null } = {
+      release: null,
+    }
+    try {
+      seriesStore.list.mockResolvedValue([seriesRow('s-new', 'stopped')])
+      seriesStore.list.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            stale.release = resolve
+          }),
+      )
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(stale.release).not.toBeNull()
+      expect(wrapper.text()).toContain('Serie s-live')
+      expect(wrapper.text()).not.toContain('Serie s-new')
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(wrapper.text()).toContain('Serie s-new')
+      expect(wrapper.text()).not.toContain('Serie s-live')
+
+      stale.release?.([seriesRow('s-old', 'writing')])
+      stale.release = null
+      await vi.advanceTimersByTimeAsync(0)
+      expect(wrapper.text()).toContain('Serie s-new')
+      expect(wrapper.text()).not.toContain('Serie s-old')
+      const settled = runs.load.mock.calls.length
+      await vi.advanceTimersByTimeAsync(12000)
+      expect(runs.load).toHaveBeenCalledTimes(settled)
+    } finally {
+      stale.release?.([])
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('shows Gestoppt with a neutral badge and no stop button', async () => {
     const wrapper = await mountList()
     const stoppedRun = wrapper.findAll('.badge').find((badge) => badge.text() === 'Gestoppt')
@@ -273,6 +384,69 @@ describe('runs trash', () => {
     expect(wrapper.get('[data-trash-load-error]').text()).toContain('Papierkorb nicht geladen.')
     expect(wrapper.findAll('[data-trash-list] tbody tr')).toHaveLength(1)
     expect(wrapper.text()).not.toContain(t.run.trashEmpty)
+    wrapper.unmount()
+  })
+
+  it('shows a runs load failure instead of an empty list', async () => {
+    runs.items = []
+    seriesStore.list.mockResolvedValue([seriesRow('s-live', 'writing')])
+    runs.load.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = await mountList()
+    expect(wrapper.get('[data-runs-load-error]').text()).toContain(t.errors.generic)
+    expect(wrapper.text()).not.toContain(t.run.empty)
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Serie s-live')
+    wrapper.unmount()
+  })
+
+  it('keeps a loaded runs list when a later load fails', async () => {
+    const wrapper = await mountList()
+    const rows = wrapper.findAll('[data-trash]').length
+    expect(rows).toBeGreaterThan(0)
+    runs.load.mockRejectedValueOnce(new ApiError(503, 'Down', 'Läufe nicht geladen.'))
+    await wrapper.get('[data-trash]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-runs-load-error]').text()).toContain('Läufe nicht geladen.')
+    expect(wrapper.findAll('[data-trash]')).toHaveLength(rows)
+    expect(wrapper.text()).not.toContain(t.run.empty)
+    wrapper.unmount()
+  })
+
+  it('shows a loading indicator instead of the empty list until the runs arrive', async () => {
+    runs.items = []
+    let answer: () => void = () => {}
+    runs.load.mockImplementationOnce(() => new Promise<void>((resolve) => (answer = resolve)))
+    const wrapper = await mountList()
+    expect(wrapper.find('[data-loading]').exists()).toBe(true)
+    expect(wrapper.text()).toContain(t.common.loading)
+    expect(wrapper.text()).not.toContain(t.run.empty)
+    answer()
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(t.run.empty)
+    wrapper.unmount()
+  })
+
+  it('keeps the list in place while a later load refreshes it', async () => {
+    const wrapper = await mountList()
+    runs.load.mockImplementationOnce(() => new Promise<void>(() => {}))
+    await wrapper.get('[data-trash]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-trash]').length).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
+  it('shows a loading indicator instead of an empty trash until it arrives', async () => {
+    let answer: (rows: ReturnType<typeof runRow>[]) => void = () => {}
+    runs.trashed.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+    const wrapper = await mountList('/runs?tab=trash')
+    expect(wrapper.find('[data-loading]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain(t.run.trashEmpty)
+    answer([])
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(t.run.trashEmpty)
     wrapper.unmount()
   })
 

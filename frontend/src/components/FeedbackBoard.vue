@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import { sharingApi, type ReviewLinkRow } from '@/api/sharing'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import ReviewLinkButton from '@/components/ReviewLinkButton.vue'
 import { fill, t } from '@/i18n'
@@ -28,6 +29,7 @@ const chosen = ref('')
 const shareable = computed(() => runs.items.filter((run) => READY.has(run.status)))
 const pickerError = ref('')
 const runsLoaded = ref(false)
+let createEpoch = 0
 
 const STATUS_ORDER: ReviewLinkRow['status'][] = ['active', 'expired', 'revoked']
 
@@ -61,14 +63,17 @@ async function load(): Promise<void> {
 }
 
 async function startCreate(): Promise<void> {
+  const ticket = ++createEpoch
   chosen.value = ''
   pickerError.value = ''
   runsLoaded.value = false
   creating.value = true
   try {
     await runs.load(undefined, 500)
+    if (ticket !== createEpoch) return
     runsLoaded.value = true
   } catch (exc) {
+    if (ticket !== createEpoch) return
     pickerError.value =
       exc instanceof ApiError && exc.detail ? exc.detail : t.feedbackBoard.runsError
   }
@@ -92,7 +97,7 @@ onMounted(load)
     </div>
 
     <p v-if="error" class="notice notice--fail" role="alert">{{ error }}</p>
-    <p v-else-if="!links" class="muted" role="status">{{ t.common.loading }}</p>
+    <LoadingState v-else-if="!links" />
     <p v-else-if="!links.length" class="muted empty" data-empty>
       {{ props.run ? t.feedbackBoard.emptyRun : t.feedbackBoard.empty }}
     </p>
@@ -196,7 +201,8 @@ onMounted(load)
             {{ runTitle(run) }} · {{ when(run.created_at) }}
           </option>
         </select>
-        <p v-if="!pickerError && runsLoaded && !shareable.length" class="muted hint">
+        <LoadingState v-if="!pickerError && !runsLoaded" class="hint" />
+        <p v-else-if="!pickerError && !shareable.length" class="muted hint">
           {{ t.feedbackBoard.noRuns }}
         </p>
       </div>

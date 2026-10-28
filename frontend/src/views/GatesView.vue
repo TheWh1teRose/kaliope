@@ -15,6 +15,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import type { GateDetail, GateSpec, RunOut } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { t, tt } from '@/i18n'
 import { runTitle } from '@/titles'
@@ -126,7 +127,7 @@ onMounted(load)
       {{ t.gate.filterFindings }}
     </label>
 
-    <p v-if="loading" class="muted pad">{{ t.common.loading }}</p>
+    <LoadingState v-if="loading" class="pad" />
 
     <ul v-else class="gates">
       <li

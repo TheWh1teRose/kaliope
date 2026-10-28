@@ -8,6 +8,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 
 import type { Member } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import { t } from '@/i18n'
 import { useMembersStore } from '@/stores/members'
 import { MIN_PASSWORD_LENGTH, accountError, copyText, generatePassword } from './accounts'
@@ -209,7 +210,7 @@ onMounted(load)
         </div>
       </div>
 
-      <p v-if="loading" class="muted">{{ t.common.loading }}</p>
+      <LoadingState v-if="loading" />
       <ul v-else class="cards">
         <li v-for="member in members" :key="member.id" class="card item">
           <div class="item__row">

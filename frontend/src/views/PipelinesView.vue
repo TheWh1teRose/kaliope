@@ -14,6 +14,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
 import type { FormatSpec, FormatSummary, NodeSpecOut, PipelineSummary } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
 import { t } from '@/i18n'
@@ -231,7 +232,7 @@ onMounted(load)
     </div>
 
     <p v-if="error" class="banner banner--fail">{{ error }}</p>
-    <p v-if="loading" class="muted pad">{{ t.common.loading }}</p>
+    <LoadingState v-if="loading" class="pad" />
 
     <!-- ------------------------------------------------------- pipelines -->
     <div v-else-if="tab === 'pipelines'" class="groups">

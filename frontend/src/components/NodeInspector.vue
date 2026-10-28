@@ -13,6 +13,7 @@ import type { NodeIOOut, NodeValueOut } from '@/api/types'
 import { t } from '@/i18n'
 
 import ArtifactView from './ArtifactView.vue'
+import LoadingState from './LoadingState.vue'
 
 const props = defineProps<{ io: NodeIOOut | null; loading?: boolean }>()
 
@@ -52,7 +53,7 @@ function configRows(config: Record<string, unknown>): { key: string; text: strin
 </script>
 
 <template>
-  <div v-if="loading" class="muted pad">{{ t.common.loading }}</div>
+  <LoadingState v-if="loading" class="pad" />
 
   <div v-else-if="io" class="inspector">
     <dl class="facts">

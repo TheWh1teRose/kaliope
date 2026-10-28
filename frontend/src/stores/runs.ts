@@ -50,14 +50,18 @@ export const useRunsStore = defineStore('runs', () => {
   const progress = ref<ProgressLine[]>([])
   const reconnecting = ref(false)
   let stream: StreamHandle | null = null
+  let loadEpoch = 0
 
   async function load(documentId?: string, limit?: number): Promise<void> {
+    const ticket = ++loadEpoch
     const params = [
       documentId ? `document_id=${encodeURIComponent(documentId)}` : '',
       limit != null ? `limit=${encodeURIComponent(String(limit))}` : '',
     ].filter((part) => part !== '')
     const query = params.length ? `?${params.join('&')}` : ''
-    items.value = await api.get<RunOut[]>(`/api/runs${query}`)
+    const next = await api.get<RunOut[]>(`/api/runs${query}`)
+    if (ticket !== loadEpoch) return
+    items.value = next
   }
 
   /** Standalone runs in the trash, latest trashed first. */

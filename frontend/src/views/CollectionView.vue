@@ -20,6 +20,7 @@ import type {
 } from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
 import FolderTree from '@/components/FolderTree.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import MoveToFolderDialog from '@/components/experiments/MoveToFolderDialog.vue'
 import OutputCard, { type OutputView } from '@/components/experiments/OutputCard.vue'
@@ -382,7 +383,8 @@ async function confirmPrompt(): Promise<void> {
         </span>
       </div>
 
-      <p v-if="!items.length && !loading" class="empty">
+      <LoadingState v-if="loading && !items.length" class="empty" />
+      <p v-else-if="!items.length" class="empty">
         {{ allCount ? labels.empty : labels.emptyAll }}
       </p>
 
@@ -699,6 +701,10 @@ a.btn {
 .folderchip:hover {
   border-color: var(--mark);
   color: var(--mark-deep);
+}
+
+.loading.empty {
+  justify-content: center;
 }
 
 .empty {

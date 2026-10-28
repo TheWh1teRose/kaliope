@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { audioApi, takeActive } from '@/api/audio'
 import type { AudioTakeOut, ExperimentRun, ExperimentSource, ExperimentSourceMeta, SpeechVoice, VoiceCast } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import SourceLoader from '@/components/experiments/SourceLoader.vue'
 import { getExperiment, listRuns, startRun, waitForRun } from '@/experiments/api'
 
@@ -96,7 +97,7 @@ onUnmounted(() => { gone = true; clearTimeout(timer) })
   <section class="stack">
     <h1>{{ labels.title }}</h1>
     <p>{{ labels.lead }}</p>
-    <p v-if="loading" role="status">{{ t.common.loading }}</p>
+    <LoadingState v-if="loading" />
     <p v-if="error" role="alert">{{ error }}</p>
     <SourceLoader :experiment-key="KEY" :source="source" :lead="labels.sourceLead" :selection-label="labels.selection" :reset-label="labels.reset" hide-word-budget :sample-label="labels.noSource" @loaded="loaded" @error="fail" @sample="source = null; lines = []; setup.artifact_hash = ''" />
     <div v-if="lines.length">

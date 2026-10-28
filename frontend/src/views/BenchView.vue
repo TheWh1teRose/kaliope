@@ -22,6 +22,7 @@ import type {
 } from '@/api/types'
 import ArtifactView from '@/components/ArtifactView.vue'
 import BenchValueCard from '@/components/BenchValueCard.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeDocPanel from '@/components/NodeDocPanel.vue'
 import NodeParams from '@/components/NodeParams.vue'
@@ -600,7 +601,7 @@ onBeforeRouteLeave(() => {
 
     <div class="body">
     <p v-if="error" class="banner">{{ error }}</p>
-    <p v-if="loading" class="muted pad">{{ t.common.loading }}</p>
+    <LoadingState v-if="loading" class="pad" />
 
     <div v-if="!loading" class="work">
       <!-- ----------------------------------------------------------- chain -->
@@ -921,7 +922,7 @@ onBeforeRouteLeave(() => {
           @submit="submitBenchNotes"
         />
         <p v-else-if="error" class="notice notice--fail">{{ error }}</p>
-        <p v-else class="muted pad">{{ t.common.loading }}</p>
+        <LoadingState v-else class="pad" />
       </div>
     </Teleport>
 

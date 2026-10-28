@@ -22,6 +22,7 @@ import type {
   ModelSettings as SharedSettings,
   VSSetup,
 } from '@/api/types'
+import LoadingState from '@/components/LoadingState.vue'
 import CollectFolder from '@/components/experiments/CollectFolder.vue'
 import CollectionList from '@/components/experiments/CollectionList.vue'
 import ExperimentFrame from '@/components/experiments/ExperimentFrame.vue'
@@ -478,7 +479,7 @@ onBeforeRouteLeave(() => {
     </template>
 
     <template #setup>
-      <p v-if="loading" class="muted">{{ t.common.loading }}</p>
+      <LoadingState v-if="loading" />
       <template v-else-if="setup">
         <div class="spread">
           <p class="eyebrow">{{ labels.setup }}</p>

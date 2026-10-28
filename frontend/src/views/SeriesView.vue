@@ -6,6 +6,7 @@ import { audioApi } from '@/api/audio'
 import { ApiError } from '@/api/client'
 import type { NodeIOOut, SeriesEvent, SeriesGraphOut, SeriesOut } from '@/api/types'
 import AudioPanel from '@/components/AudioPanel.vue'
+import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import PipelineCanvas from '@/components/PipelineCanvas.vue'
@@ -632,7 +633,7 @@ onUnmounted(() => {
       <span>{{ t.series.loadError }} {{ loadError }}</span>
       <button class="btn btn--sm" type="button" data-retry @click="load">{{ t.common.retry }}</button>
     </div>
-    <p v-else class="muted" role="status" data-loading>{{ t.common.loading }}</p>
+    <LoadingState v-else />
   </div>
 </template>
 
