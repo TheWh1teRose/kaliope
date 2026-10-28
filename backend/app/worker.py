@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select as sa_select
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -92,6 +93,8 @@ _SERIES_STOPPABLE = frozenset({"queued", "planning", "outlining", "writing"})
 #: Take states a stop can still change. ``paused`` is the approval hold:
 #: stopping there spends nothing further.
 _TAKE_STOPPABLE = frozenset({"queued", "running", "paused"})
+#: Note stored when a previous process left a run or series mid-way.
+INTERRUPTED = "interrupted by a restart of the app; resume or start it again"
 
 
 class StopFlag:
@@ -131,6 +134,36 @@ class Worker:
         self._gate = threading.RLock()
 
     # ------------------------------------------------------------ lifecycle
+
+    def mark_interrupted(self) -> tuple[int, int]:
+        """Close the runs and series a previous process left mid-way.
+
+        Runs at startup, before any job is queued, so nothing can still be
+        driving them; left alone they would read as running forever. A series
+        left mid-way is failed, and so is a run of a series that was still
+        queued or running. A series resumes where it stopped. A standalone run
+        is stopped, with the same interrupted note, so it can be started again.
+        Returns ``(runs, series)`` marked.
+        """
+        now = datetime.now(UTC)
+        with session_scope() as session:
+            series = session.execute(
+                sa_update(Series)
+                .where(Series.status.in_(tuple(_SERIES_STOPPABLE)))
+                .values(status="failed", error=INTERRUPTED, finished_at=now)
+            )
+            standalone = session.execute(
+                sa_update(Run)
+                .where(Run.status.in_(tuple(_RUN_STOPPABLE)), Run.series_id.is_(None))
+                .values(status="stopped", error=INTERRUPTED, finished_at=now)
+            )
+            belonging = session.execute(
+                sa_update(Run)
+                .where(Run.status.in_(tuple(_RUN_STOPPABLE)), Run.series_id.is_not(None))
+                .values(status="failed", error=INTERRUPTED, finished_at=now)
+            )
+            runs = int(getattr(standalone, "rowcount", 0)) + int(getattr(belonging, "rowcount", 0))
+            return runs, int(getattr(series, "rowcount", 0))
 
     def start(self) -> None:
         if self._pool is None:
@@ -660,6 +693,14 @@ class Worker:
     def series_active(self, series_id: str) -> bool:
         with self._lock:
             return series_id in self._active_series
+
+    def series_driven(self, series_id: str) -> bool:
+        """Whether a job for the series is queued or running."""
+        return self.series_active(series_id) or self.job_active(series_id)
+
+    def run_driven(self, run_id: str, series_id: str | None = None) -> bool:
+        """Whether a job runs ``run_id``, or drives the series it belongs to."""
+        return self.job_active(run_id) or (series_id is not None and self.series_driven(series_id))
 
     def execute_series(self, series_id: str) -> None:
         """Drive a series as far as it can go: plan, outlines, then scripts in order.

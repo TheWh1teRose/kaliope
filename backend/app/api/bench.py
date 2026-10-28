@@ -7,12 +7,10 @@ never appear in the production run list.
 
 from __future__ import annotations
 
-import queue
-from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
-from app.events import bus
+from app.events import bus, closing_frame, seen_until
 from app.llm import registry as llm_registry
 from app.models import BenchNode, BenchRun, Document, User
 from app.pipeline import catalogue
@@ -54,7 +52,6 @@ from app.worker import worker
 
 router = APIRouter(prefix="/api/bench", tags=["bench"])
 
-_HEARTBEAT_SECONDS = 15.0
 _TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.paused"})
 
 
@@ -200,36 +197,26 @@ def get_run(
 
 @router.get("/runs/{bench_id}/events")
 def run_events(
-    bench_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
+    bench_id: str,
+    after: int | None = None,
+    last_event_id: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
 ) -> StreamingResponse:
     row = _require(db, bench_id)
-    terminal = row.status in {"completed", "failed", "paused"}
-    subscriber, replay = bus.subscribe(bench_id)
-
-    def stream() -> Iterator[str]:
-        try:
-            yield ": connected\n\n"
-            for event in replay:
-                yield event.to_sse()
-                if event.type in _TERMINAL_EVENTS:
-                    return
-            if terminal:
-                yield f'event: run.{row.status}\ndata: {{"run_id": "{bench_id}"}}\n\n'
-                return
-            while True:
-                try:
-                    event = subscriber.get(timeout=_HEARTBEAT_SECONDS)
-                except queue.Empty:
-                    yield ": heartbeat\n\n"
-                    continue
-                yield event.to_sse()
-                if event.type in _TERMINAL_EVENTS:
-                    return
-        finally:
-            bus.unsubscribe(bench_id, subscriber)
-
+    status = row.status
+    # The stream stays open for minutes; it must not hold a pooled connection.
+    db.close()
+    closing = None
+    if status in {"completed", "failed", "paused"}:
+        closing = closing_frame(f"run.{status}", run_id=bench_id)
     return StreamingResponse(
-        stream(),
+        bus.follow(
+            bench_id,
+            terminal=_TERMINAL_EVENTS,
+            closing=closing,
+            after=seen_until(after, last_event_id),
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

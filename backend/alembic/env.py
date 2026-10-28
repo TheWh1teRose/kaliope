@@ -18,7 +18,9 @@ from app.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # The app migrates in its own lifespan too; disabling the loggers that already
+    # exist there would silence uvicorn's error log, tracebacks included.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 settings = get_settings()
 settings.ensure_dirs()

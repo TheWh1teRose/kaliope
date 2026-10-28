@@ -34,6 +34,8 @@ const io = ref<NodeIOOut | null>(null)
 const ioLoading = ref(false)
 const busy = ref(false)
 const error = ref('')
+/** Why the series could not be loaded; the page offers to try again. */
+const loadError = ref('')
 const replanCount = ref<number | null>(null)
 const replanMinutes = ref<number | null>(null)
 const replanHint = ref<string | null>(null)
@@ -154,6 +156,10 @@ function follow(): void {
     onReconnect: () => {
       reload()
     },
+    // Nothing drives the series: show where it stands, without following again.
+    onIdle: () => {
+      reload()
+    },
   })
 }
 
@@ -236,15 +242,24 @@ function closeInspector(): void {
   io.value = null
 }
 
-onMounted(async () => {
-  await reload()
+/** The first load, and the retry after it failed: a failure is shown, not a blank page. */
+async function load(): Promise<void> {
+  loadError.value = ''
+  try {
+    await reload()
+  } catch (exc) {
+    loadError.value = exc instanceof ApiError && exc.detail ? exc.detail : t.errors.generic
+    return
+  }
   follow()
   // The episodes share one format; its voices are the default for every episode.
   audioApi
     .series(props.id)
     .then((audio) => (audioFormat.value = audio.format_id))
     .catch(() => undefined)
-})
+}
+
+onMounted(load)
 
 onUnmounted(() => {
   disposed = true
@@ -610,6 +625,14 @@ onUnmounted(() => {
         </button>
       </template>
     </ModalDialog>
+  </div>
+  <div v-else class="page">
+    <RouterLink :to="{ name: 'runs' }" class="eyebrow back">← {{ t.nav.runs }}</RouterLink>
+    <div v-if="loadError" class="notice notice--fail spread" role="alert" data-load-error>
+      <span>{{ t.series.loadError }} {{ loadError }}</span>
+      <button class="btn btn--sm" type="button" data-retry @click="load">{{ t.common.retry }}</button>
+    </div>
+    <p v-else class="muted" role="status" data-loading>{{ t.common.loading }}</p>
   </div>
 </template>
 

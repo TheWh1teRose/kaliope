@@ -5,6 +5,12 @@
  * others; either way a page that stopped on the first `onerror` kept showing
  * "running" until it was reloaded. This reopens the stream itself with a
  * growing pause and tells the page, so it can reload what it may have missed.
+ *
+ * The server closes a stream after two minutes with `stream.renew`, so an
+ * open stream never holds one of its few request slots for long; that one is
+ * reopened at once and quietly. `stream.idle` means nothing drives the job any
+ * more, so there is nothing left to follow. Each reopened stream asks only for
+ * the events after the last one it saw.
  */
 
 export type StreamState = 'open' | 'reconnecting' | 'closed'
@@ -19,6 +25,8 @@ export interface StreamOptions {
   onTerminal?: () => void
   /** Called after a dropped stream is open again. */
   onReconnect?: () => void
+  /** Called when the server says nothing drives the job; defaults to `onTerminal`. */
+  onIdle?: () => void
   onState?: (state: StreamState) => void
   /** For tests: how to build the EventSource. */
   create?: (url: string) => EventSource
@@ -40,6 +48,13 @@ export function openStream(options: StreamOptions): StreamHandle {
   let timer: ReturnType<typeof setTimeout> | null = null
   let closed = false
   let dropped = false
+  let lastId: string | null = null
+
+  const url = () => {
+    if (lastId === null) return options.url
+    const separator = options.url.includes('?') ? '&' : '?'
+    return `${options.url}${separator}after=${encodeURIComponent(lastId)}`
+  }
 
   const finish = () => {
     closed = true
@@ -51,7 +66,7 @@ export function openStream(options: StreamOptions): StreamHandle {
   }
 
   const connect = () => {
-    source = create(options.url)
+    source = create(url())
     source.onopen = () => {
       delay = first
       options.onState?.('open')
@@ -61,6 +76,7 @@ export function openStream(options: StreamOptions): StreamHandle {
       }
     }
     const handle = (message: MessageEvent) => {
+      if (message.lastEventId) lastId = message.lastEventId
       let payload: { type: string } & Record<string, unknown>
       try {
         payload = JSON.parse(message.data)
@@ -74,6 +90,17 @@ export function openStream(options: StreamOptions): StreamHandle {
       }
     }
     for (const type of options.types) source.addEventListener(type, handle as EventListener)
+    source.addEventListener('stream.renew', () => {
+      if (closed) return
+      source?.close()
+      connect()
+    })
+    source.addEventListener('stream.idle', () => {
+      if (closed) return
+      finish()
+      const idle = options.onIdle ?? options.onTerminal
+      idle?.()
+    })
     source.onerror = () => {
       if (closed) return
       source?.close()

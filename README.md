@@ -432,6 +432,13 @@ with the same text, voices and settings to reuse its cached chunks. The accepted
 series attribution and run accounting limits are described under
 [Series of episodes](#series-of-episodes).
 
+A restart of the app (a deploy, for one) ends whatever the worker was doing.
+On startup, a series left queued, planning, outlining or writing is marked
+**failed**, and so is a run of a series left queued or running, with
+"interrupted by a restart of the app; resume or start it again". **Fortsetzen**
+picks a series up where it stopped. A standalone run left queued or running is
+marked **stopped** with the same note, and **Erneut starten** starts it again.
+
 ### Gates
 
 | ID | Rule | On violation |
@@ -660,6 +667,17 @@ Storage bucket mounted at `/data`. WAL does not work on that network mount
 (logins fail with `stale file handle` on `kalliope.db-wal`). Local development
 stays on WAL. Accepted values are `WAL`, `DELETE`, `TRUNCATE` or `PERSIST`; a
 leftover `-wal` is checkpointed into the database on the next start.
+
+Live progress streams (`GET /api/runs/{id}/events`, `/api/series/{id}/events`,
+`/api/bench/runs/{id}/events`) hold no database connection while open and close
+after two minutes with `stream.renew`. Run and series pages reopen that stream
+at once, asking only for events after the last id they saw. A run or series
+whose status still says it is in progress also closes its stream with
+`stream.idle` once no worker job drives it. Each open stream is a request in
+flight on the single instance, so they must not pile up against the service's
+concurrency limit. If the file behind a pooled database connection is replaced
+(another instance writing during a rollout), SQLite reports a disk I/O error;
+the pool is then dropped and the next request opens fresh connections.
 
 Setup (service account, Workload Identity pool, repo variables), rollback and
 manual deploy are described in [AGENTS.md](AGENTS.md#deploy).

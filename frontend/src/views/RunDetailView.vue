@@ -31,6 +31,8 @@ const feedback = ref<FeedbackOut | null>(null)
 const draftNotes = ref<Note[]>([])
 const notesBusy = ref(false)
 const notesError = ref('')
+/** Why the run could not be loaded; the page offers to try again. */
+const loadError = ref('')
 
 const live = computed(() =>
   ['queued', 'running', 'outlined'].includes(run.value?.status ?? ''),
@@ -194,10 +196,19 @@ function closeInspector(): void {
   io.value = null
 }
 
-onMounted(async () => {
-  await reload()
+/** The first load, and the retry after it failed: a failure is shown, not a blank page. */
+async function load(): Promise<void> {
+  loadError.value = ''
+  try {
+    await reload()
+  } catch (exc) {
+    loadError.value = exc instanceof ApiError && exc.detail ? exc.detail : t.errors.generic
+    return
+  }
   follow()
-})
+}
+
+onMounted(load)
 
 onUnmounted(() => {
   disposed = true
@@ -446,6 +457,14 @@ onUnmounted(() => {
         </button>
       </template>
     </ModalDialog>
+  </div>
+  <div v-else class="page">
+    <RouterLink :to="{ name: 'runs' }" class="eyebrow back">← {{ t.nav.runs }}</RouterLink>
+    <div v-if="loadError" class="notice notice--fail spread" role="alert" data-load-error>
+      <span>{{ t.run.loadError }} {{ loadError }}</span>
+      <button class="btn btn--sm" type="button" data-retry @click="load">{{ t.common.retry }}</button>
+    </div>
+    <p v-else class="muted" role="status" data-loading>{{ t.common.loading }}</p>
   </div>
 </template>
 

@@ -10,14 +10,12 @@ from __future__ import annotations
 
 import io
 import json
-import queue
 import re
 import zipfile
-from collections.abc import Iterator
 from datetime import datetime
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Header, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
@@ -36,7 +34,7 @@ from app.api.runs import (
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
-from app.events import bus
+from app.events import bus, closing_frame, seen_until
 from app.lang.resources import words_per_minute
 from app.models import Document, Run, Series, User
 from app.naming import clean_name
@@ -78,7 +76,6 @@ from app.worker import worker
 
 router = APIRouter(prefix="/api", tags=["series"])
 
-_HEARTBEAT_SECONDS = 15.0
 #: Series events after which the stream closes itself.
 _TERMINAL_EVENTS = frozenset(
     {"series.completed", "series.failed", "series.planned", "series.stopped"}
@@ -388,39 +385,28 @@ def series_graph(
 
 @router.get("/series/{series_id}/events")
 def series_events(
-    series_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
+    series_id: str,
+    after: int | None = None,
+    last_event_id: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
 ) -> StreamingResponse:
     """Every event of the series and of its runs, each tagged with its episode."""
     series = _require_series(db, series_id)
-    idle = series.status in SERIES_IDLE and not worker.series_active(series_id)
     status = series.status
-    channel = series_channel(series_id)
-    subscriber, replay = bus.subscribe(channel)
-
-    def stream() -> Iterator[str]:
-        try:
-            yield ": connected\n\n"
-            for event in replay:
-                yield event.to_sse()
-                if event.type in _TERMINAL_EVENTS:
-                    return
-            if idle:
-                yield f'event: series.{status}\ndata: {{"series_id": "{series_id}"}}\n\n'
-                return
-            while True:
-                try:
-                    event = subscriber.get(timeout=_HEARTBEAT_SECONDS)
-                except queue.Empty:
-                    yield ": heartbeat\n\n"
-                    continue
-                yield event.to_sse()
-                if event.type in _TERMINAL_EVENTS:
-                    return
-        finally:
-            bus.unsubscribe(channel, subscriber)
-
+    # The stream stays open for minutes; it must not hold a pooled connection.
+    db.close()
+    closing = None
+    if status in SERIES_IDLE and not worker.series_driven(series_id):
+        closing = closing_frame(f"series.{status}", series_id=series_id)
     return StreamingResponse(
-        stream(),
+        bus.follow(
+            series_channel(series_id),
+            terminal=_TERMINAL_EVENTS,
+            closing=closing,
+            after=seen_until(after, last_event_id),
+            live=lambda: worker.series_driven(series_id),
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

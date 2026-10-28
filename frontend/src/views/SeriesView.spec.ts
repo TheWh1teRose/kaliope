@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '@/api/client'
 import type { SeriesOut } from '@/api/types'
 import { t } from '@/i18n'
 import { seriesGraph } from '@/series/fixtures'
@@ -361,6 +362,52 @@ describe('series view', () => {
     expect(store.restore).toHaveBeenCalledWith('s1')
     expect(wrapper.find('[data-trashed]').exists()).toBe(false)
     expect(wrapper.find('[data-resume]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows why the series could not be loaded instead of a blank page, and retries', async () => {
+    store.get.mockRejectedValueOnce(new ApiError(500, 'Internal Server Error', 'Internal Server Error'))
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    const failure = wrapper.get('[data-load-error]')
+    expect(failure.attributes('role')).toBe('alert')
+    expect(failure.text()).toContain(t.series.loadError)
+    expect(failure.text()).toContain('Internal Server Error')
+    expect(wrapper.find('h1').exists()).toBe(false)
+
+    await wrapper.get('[data-retry]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-load-error]').exists()).toBe(false)
+    expect(wrapper.find('h1').text()).toBe('Klimawandel verstehen')
+    wrapper.unmount()
+  })
+
+  it('says it is loading until the series arrives', async () => {
+    let arrive: (value: SeriesOut) => void = () => undefined
+    store.get.mockImplementationOnce(() => new Promise<SeriesOut>((resolve) => (arrive = resolve)))
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(wrapper.get('[data-loading]').text()).toBe(t.common.loading)
+    arrive(series('planned'))
+    await flushPromises()
+    expect(wrapper.find('[data-loading]').exists()).toBe(false)
+    expect(wrapper.find('h1').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('reloads without following again when nothing drives the series any more', async () => {
+    store.get.mockResolvedValueOnce(series('writing'))
+    const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
+    await flushPromises()
+    expect(store.watch).toHaveBeenCalledOnce()
+    const onIdle = store.watch.mock.calls[0][1].onIdle as () => void
+    store.watch.mockClear()
+    const reads = store.get.mock.calls.length
+    store.get.mockResolvedValueOnce(series('writing'))
+    onIdle()
+    await flushPromises()
+    expect(store.get).toHaveBeenCalledTimes(reads + 1)
+    expect(store.watch).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

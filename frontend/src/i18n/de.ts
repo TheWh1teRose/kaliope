@@ -296,6 +296,7 @@ export default {
     objectives: 'Lernziele im Dokument',
   },
   run: {
+    loadError: 'Der Lauf konnte nicht geladen werden.',
     title: 'Lauf',
     newTitle: 'Neuen Lauf starten',
     document: 'Dokument',
@@ -507,6 +508,7 @@ export default {
     beatWriting: 'Beat {k} von {n}',
     beatReused: 'Beat {k} von {n} übernommen',
     stuck: 'Die Serie steht, ohne dass gerade etwas läuft. „Fortsetzen“ nimmt sie wieder auf.',
+    loadError: 'Die Serie konnte nicht geladen werden.',
     coverage: 'S1 Abdeckung {share} %',
     coverageUncited: 'Nicht zitiert: {sections}',
     canvas: 'Ablauf der Serie',

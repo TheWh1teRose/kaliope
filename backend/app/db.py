@@ -6,19 +6,28 @@ SQLite, so they belong on the ``connect`` event rather than in a migration.
 
 The journal mode is ``SQLITE_JOURNAL_MODE`` (default WAL). WAL does not work on
 a Cloud Storage FUSE mount, so the container image sets DELETE (see README).
+
+On that mount a connection's file handle goes stale once another writer replaces
+the file (a second instance during a deploy, for one). SQLite then reports a
+disk I/O error on every read through it, so such an error drops the pooled
+connections and the next request opens fresh ones.
 """
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.engine import ExceptionContext
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
+
+logger = logging.getLogger("kalliope")
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
@@ -71,6 +80,33 @@ def _configure_connection(dbapi_connection: Any, record: Any) -> None:
     cursor.close()
 
 
+def stale_file(exc: BaseException | None) -> bool:
+    """Whether SQLite failed on the file itself rather than on the statement."""
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    code = getattr(exc, "sqlite_errorcode", None)
+    if isinstance(code, int):
+        return code & 0xFF == sqlite3.SQLITE_IOERR
+    return "disk I/O error" in str(exc)
+
+
+def _drop_stale_connections(context: ExceptionContext) -> None:
+    if stale_file(context.original_exception):
+        logger.warning(
+            "sqlite file error, dropping pooled connections: %s", context.original_exception
+        )
+        # Every pooled handle predates the replaced file, not only this one.
+        context.is_disconnect = True
+        context.invalidate_pool_on_disconnect = True
+
+
+def watch_engine(engine: Engine) -> Engine:
+    """The per-connection PRAGMAs, and recovery from a stale database file."""
+    event.listen(engine, "connect", _configure_connection)
+    event.listen(engine, "handle_error", _drop_stale_connections)
+    return engine
+
+
 def get_engine() -> Engine:
     global _engine
     if _engine is None:
@@ -82,7 +118,7 @@ def get_engine() -> Engine:
             # The background worker touches the DB from pool threads.
             connect_args={"check_same_thread": False, "timeout": 30},
         )
-        event.listen(_engine, "connect", _configure_connection)
+        watch_engine(_engine)
     return _engine
 
 

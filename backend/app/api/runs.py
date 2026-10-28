@@ -9,12 +9,10 @@ the top of the page; the graph is what turns that into a place.
 from __future__ import annotations
 
 import json
-import queue
-from collections.abc import Iterator
 from datetime import datetime
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Header, Response
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import CursorResult, select, update
@@ -27,7 +25,7 @@ from app.api.review import edited_texts, segment_states
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
-from app.events import bus
+from app.events import bus, closing_frame, seen_until
 from app.ingestion import anchors as anchor_tools
 from app.models import Document, GateResult, Run, RunNode, Series, User
 from app.models.base import utcnow
@@ -77,8 +75,6 @@ _PREVIEW_CHARS = 40_000
 #: Longest single string kept inside a summary sample.
 _SAMPLE_CHARS = 240
 
-#: Seconds between SSE heartbeats when nothing is happening.
-_HEARTBEAT_SECONDS = 15.0
 #: Statuses in which a run is still being worked on and so cannot be trashed.
 _LIVE_STATUSES = frozenset({"queued", "running"})
 #: Events after which the stream closes itself.
@@ -351,39 +347,28 @@ def move_series_to_trash(db: Session, series: Series) -> None:
 
 @router.get("/runs/{run_id}/events")
 def run_events(
-    run_id: str, db: Session = Depends(get_db), _user: User = Depends(current_user)
+    run_id: str,
+    after: int | None = None,
+    last_event_id: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
 ) -> StreamingResponse:
     run = _require_run(db, run_id)
-    terminal = run.status in {"completed", "failed", "reviewed", "paused", "stopped"}
-    subscriber, replay = bus.subscribe(run_id)
-
-    def stream() -> Iterator[str]:
-        try:
-            yield ": connected\n\n"
-            for event in replay:
-                yield event.to_sse()
-                # A terminal event in the replay means the run is over; holding
-                # the connection open after it would leave the client waiting
-                # on heartbeats forever.
-                if event.type in _TERMINAL_EVENTS:
-                    return
-            if terminal:
-                yield f'event: run.{run.status}\ndata: {{"run_id": "{run_id}"}}\n\n'
-                return
-            while True:
-                try:
-                    event = subscriber.get(timeout=_HEARTBEAT_SECONDS)
-                except queue.Empty:
-                    yield ": heartbeat\n\n"
-                    continue
-                yield event.to_sse()
-                if event.type in _TERMINAL_EVENTS:
-                    return
-        finally:
-            bus.unsubscribe(run_id, subscriber)
-
+    status = run.status
+    series_id = run.series_id
+    # The stream stays open for minutes; it must not hold a pooled connection.
+    db.close()
+    closing = None
+    if status in {"completed", "failed", "reviewed", "paused", "stopped"}:
+        closing = closing_frame(f"run.{status}", run_id=run_id)
     return StreamingResponse(
-        stream(),
+        bus.follow(
+            run_id,
+            terminal=_TERMINAL_EVENTS,
+            closing=closing,
+            after=seen_until(after, last_event_id),
+            live=lambda: worker.run_driven(run_id, series_id),
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -900,6 +885,8 @@ def _node_status(row: RunNode | None, *, reached: bool, run_status: str) -> Node
     if row.error:
         return "failed"
     if row.finished_at is None:
+        if run_status == "failed":
+            return "blocked"
         return "paused" if run_status == "paused" else "running"
     return "cached" if row.cache_hit else "ok"
 
