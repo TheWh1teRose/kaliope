@@ -42,6 +42,9 @@ const replanCount = ref<number | null>(null)
 const replanMinutes = ref<number | null>(null)
 const replanHint = ref<string | null>(null)
 const confirmStop = ref(false)
+/** Begriffe and unassigned passages start folded; both lists can run long. */
+const termsOpen = ref(false)
+const unassignedOpen = ref(false)
 
 const IDLE = new Set(['planned', 'completed', 'failed', 'stopped'])
 
@@ -486,18 +489,46 @@ onUnmounted(() => {
             </p>
           </article>
         </div>
-        <div v-if="plan.terms.length" class="terms">
-          <span class="eyebrow">{{ t.series.terms }}</span>
-          <span v-for="term in plan.terms" :key="term.term" class="small">
-            <b>{{ term.term }}</b> ({{ fill(t.series.termFrom, { n: term.first_episode }) }})<template
-              v-if="term.gloss"
-              >: {{ term.gloss }}</template
-            >
-          </span>
+        <div v-if="plan.terms.length" class="disclosure">
+          <button
+            type="button"
+            class="fold"
+            :aria-expanded="termsOpen"
+            data-terms-toggle
+            @click="termsOpen = !termsOpen"
+          >
+            <span class="eyebrow">{{ t.series.terms }}</span>
+            <span class="meta">{{ plan.terms.length }}</span>
+            <span class="grow" />
+            <span class="chev" aria-hidden="true">{{ termsOpen ? '−' : '+' }}</span>
+          </button>
+          <div v-if="termsOpen" class="terms" data-terms>
+            <span v-for="term in plan.terms" :key="term.term" class="small">
+              <b>{{ term.term }}</b> ({{ fill(t.series.termFrom, { n: term.first_episode }) }})<template
+                v-if="term.gloss"
+                >: {{ term.gloss }}</template
+              >
+            </span>
+          </div>
         </div>
-        <div v-if="plan.unassigned.length" class="small muted">
-          {{ t.series.unassigned }}:
-          {{ plan.unassigned.map((u) => `${u.block_id} (${u.reason})`).join(', ') }}
+        <div v-if="plan.unassigned.length" class="disclosure">
+          <button
+            type="button"
+            class="fold"
+            :aria-expanded="unassignedOpen"
+            data-unassigned-toggle
+            @click="unassignedOpen = !unassignedOpen"
+          >
+            <span class="eyebrow">{{ t.series.unassigned }}</span>
+            <span class="meta">{{ plan.unassigned.length }}</span>
+            <span class="grow" />
+            <span class="chev" aria-hidden="true">{{ unassignedOpen ? '−' : '+' }}</span>
+          </button>
+          <ul v-if="unassignedOpen" class="unassigned" data-unassigned>
+            <li v-for="(item, index) in plan.unassigned" :key="`${item.block_id}-${index}`">
+              {{ item.block_id }} ({{ item.reason }})
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -911,11 +942,47 @@ onUnmounted(() => {
   padding-left: var(--s2);
 }
 
+.disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+.fold {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2) 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fold .eyebrow {
+  margin: 0;
+}
+
+.chev {
+  color: var(--ink-4);
+  width: 1em;
+  text-align: center;
+}
+
 .terms {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s2) var(--s4);
   align-items: baseline;
+}
+
+.unassigned {
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
 }
 
 .stepper {
