@@ -255,7 +255,9 @@ def make_voice_sample(
             except SpeechError as exc:
                 raise problem(502, "Sample failed", str(exc)) from exc
             blob = store.put_blob(result.audio, ".mp3")
-            store.put_step(key, store.put_raw("voice_sample", {"blob": blob, "suffix": ".mp3"}).hash)
+            store.put_step(
+                key, store.put_raw("voice_sample", {"blob": blob, "suffix": ".mp3"}).hash
+            )
             cost = client.total_cost_usd
     return VoiceSampleOut(
         url=f"/api/audio/voices/{voice_id}/sample?model_id={payload.model_id}",

@@ -1,12 +1,8 @@
 <script setup lang="ts">
 /**
- * Experiment "ElevenLabs ausprobieren": speak a prepared audio script again.
- *
- * Same page as the other experiments: left the setup in three tabs (the
- * script segment by segment, the voices with a sample each, the model), right
- * the current audio and the earlier attempts. The script comes from a take
- * that was already tagged; segments can be chosen and their text edited, the
- * stored artifact never changes. Only "Audio generieren" spends credits.
+ * Selection and edits belong to the setup; the retained source artifact must
+ * stay immutable so saved attempts can reload it. See README.md, Audio pipelines,
+ * for the experiment's usage and credit rules.
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'

@@ -191,9 +191,10 @@ price of the selection. A segment's tagged text can be edited while its speaker
 and position stay; each edit, or all at once, resets to the prepared text, and
 the stored artifact itself never changes. Every account voice can be heard
 before it is chosen: the preview ElevenLabs provides, or, for a voice without
-one, a short sentence spoken once on request (`POST
-/api/audio/voices/{id}/sample`, cached and served by the matching `GET`, which
-never spends credits). One sample plays at a time and nothing plays by itself.
+one, a short sentence generated on request with the selected model. Generating
+it spends credits once per voice and model (`POST /api/audio/voices/{id}/sample`);
+subsequent requests reuse the cached sample, served by the matching `GET`, which
+never spends credits. One sample plays at a time and nothing plays by itself.
 Choose voices for the speakers of the selection, a supported dialogue model,
 stability (0, 0.5 or 1) and an optional seed. Loading, selecting, editing and
 changing settings never synthesize audio. **Audio generieren** is the explicit
@@ -207,8 +208,8 @@ retained prepared script, including an experiment take, can be loaded as a
 source. Saved attempts can reload the same script, selection, edits and
 settings for another test.
 
-A take is a **one-minute sample** (whole lines up to about 1,000 characters,
-about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,
+In the run view, a take is a **one-minute sample** (whole lines up to about
+1,000 characters, about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,
 about $1.15). A take that fails part-way keeps its approval and **resumes** at
 the first chunk without audio, so nothing is paid for twice.
 
