@@ -233,7 +233,6 @@ def test_selected_and_edited_segments_leave_the_prepared_script_alone(client, ru
     speech_registry.reset_provider()
 
 
-
 def test_only_selected_speakers_need_available_voices(client, run_id):  # noqa: F811
     speech = StubSpeech()
     speech_registry.register_provider(speech)
@@ -263,10 +262,14 @@ def test_only_selected_speakers_need_available_voices(client, run_id):  # noqa: 
         }
         invalid = json.loads(json.dumps(body))
         invalid["setup"]["segment_ids"] = None
-        assert client.post("/api/experiments/audio_generation/runs", json=invalid).status_code == 422
+        assert (
+            client.post("/api/experiments/audio_generation/runs", json=invalid).status_code == 422
+        )
         invalid = json.loads(json.dumps(body))
         invalid["setup"]["voice_cast"]["voices"][0]["voice_id"] = ""
-        assert client.post("/api/experiments/audio_generation/runs", json=invalid).status_code == 422
+        assert (
+            client.post("/api/experiments/audio_generation/runs", json=invalid).status_code == 422
+        )
         assert not speech.requests
         response = client.post("/api/experiments/audio_generation/runs", json=body)
         assert response.status_code == 201, response.text
