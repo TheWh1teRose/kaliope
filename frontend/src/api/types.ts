@@ -1210,6 +1210,13 @@ export interface SpeechVoice {
   preview_url: string | null
 }
 
+export interface VoiceSample {
+  url: string
+  characters: number
+  /** What making it cost; 0 when it was made before. */
+  cost_usd: number
+}
+
 export interface AudioStatus {
   configured: boolean
   /** How to set it up, when nothing can be generated yet. */

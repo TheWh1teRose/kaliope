@@ -184,18 +184,32 @@ reused and left out of the price.
 `audio_script` from a run's audio take, including its tags, spoken forms and
 speaker structure. Choose the run and prepared take with the existing source
 chooser. A raw script is not accepted or regenerated: if there is no prepared
-artifact, prepare an audio take in the run view first. The experiment stores the
-source take, immutable artifact hash, pipeline version and chosen configuration
-with each attempt. Select available account voices per speaker, a supported
-dialogue model, stability (0, 0.5 or 1) and an optional seed. Loading a source or
-changing settings never synthesizes audio. **Audio generieren (Credits)** is the
-explicit go-ahead to synthesize the whole prepared script without tagging again
-or going through a review pipeline. Attempts reuse the existing chunk cache,
-progress, error, stop/resume and authenticated playback interfaces. Saved
-attempts can reload the same script and settings for another test.
+artifact, prepare an audio take in the run view first. The script is shown
+segment by segment. Tick segments (Shift-click ticks a stretch), pick a range
+or the first minute; a live estimate shows segments, characters, length and
+price of the selection. A segment's tagged text can be edited while its speaker
+and position stay; each edit, or all at once, resets to the prepared text, and
+the stored artifact itself never changes. Every account voice can be heard
+before it is chosen: the preview ElevenLabs provides, or, for a voice without
+one, a short sentence generated on request with the selected model. Generating
+it spends credits once per voice and model (`POST /api/audio/voices/{id}/sample`);
+subsequent requests reuse the cached sample, served by the matching `GET`, which
+never spends credits. One sample plays at a time and nothing plays by itself.
+Choose voices for the speakers of the selection, a supported dialogue model,
+stability (0, 0.5 or 1) and an optional seed. Loading, selecting, editing and
+changing settings never synthesize audio. **Audio generieren** is the explicit
+go-ahead to synthesize the selection with its edits, without tagging again or
+going through a review pipeline; a changed selection is stored as its own
+`audio_script` artifact for the take. The experiment stores the source take,
+immutable artifact hash, selection, edits, pipeline version and chosen
+configuration with each attempt. Attempts reuse the existing chunk cache,
+progress, error, stop/resume, playback and download interfaces. Any take with a
+retained prepared script, including an experiment take, can be loaded as a
+source. Saved attempts can reload the same script, selection, edits and
+settings for another test.
 
-A take is a **one-minute sample** (whole lines up to about 1,000 characters,
-about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,
+In the run view, a take is a **one-minute sample** (whole lines up to about
+1,000 characters, about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,
 about $1.15). A take that fails part-way keeps its approval and **resumes** at
 the first chunk without audio, so nothing is paid for twice.
 

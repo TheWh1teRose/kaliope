@@ -1,4 +1,9 @@
-"""Synthesis experiments import retained prepared artifacts, never raw scripts."""
+"""Synthesis experiments import retained prepared artifacts, never raw scripts.
+
+The prepared script is the source. A setup may pick which of its segments are
+spoken and replace a segment's tagged text; speaker, order and the stored
+artifact itself never change, so the original stays one reset away.
+"""
 
 from __future__ import annotations
 
@@ -21,16 +26,48 @@ from app.experiments.base import (
 )
 from app.experiments.registry import register_experiment
 from app.llm.base import LLMClient
-from app.models import AudioTake, Run
+from app.models import AudioTake, Document, Run
+from app.pipeline.audio_tags import strip_tags, tags_of
 from app.pipeline.framework.artifacts import ArtifactStore
 from app.schemas.audio import AudioScript, VoiceCast
-from app.speech.base import DIALOGUE_MODELS
+from app.speech.base import DIALOGUE_MODELS, VOICE_SAMPLE_TEXT
 from app.speech.registry import SETUP_MESSAGE, speech_provider
+
+#: Speaking pace for the duration estimate: about 14,000 characters make 15 minutes.
+CHARACTERS_PER_SECOND = 15.5
 
 
 class SynthesisSetup(BaseModel):
     artifact_hash: str = ""
     voice_cast: VoiceCast = Field(default_factory=VoiceCast)
+    #: Segments to speak, by id; ``None`` speaks the whole prepared script.
+    segment_ids: list[str] | None = None
+    #: Replacement tagged text by segment id. The speaker stays the source's.
+    edits: dict[str, str] = Field(default_factory=dict)
+
+
+def synthesis_script(script: AudioScript, setup: SynthesisSetup) -> AudioScript:
+    """The prepared script as this setup speaks it: chosen segments, edits applied."""
+    known = {line.segment_id for line in script.lines}
+    unknown = sorted({*(setup.segment_ids or []), *setup.edits} - known)
+    if unknown:
+        raise ValueError("Unknown segments: " + ", ".join(unknown))
+    chosen = known if setup.segment_ids is None else set(setup.segment_ids)
+    lines = []
+    for line in script.lines:
+        if line.segment_id not in chosen:
+            continue
+        tagged = setup.edits.get(line.segment_id)
+        if tagged is not None and tagged != line.tagged:
+            line = line.model_copy(
+                update={"tagged": tagged, "spoken": strip_tags(tagged), "tags": tags_of(tagged)}
+            )
+        if not line.tagged.strip():
+            raise ValueError(f"Segment {line.segment_id} has no text")
+        lines.append(line)
+    if not lines:
+        raise ValueError("Select at least one segment")
+    return script.model_copy(update={"lines": lines})
 
 
 def prepared_source(db: Session, store: ArtifactStore, source: SourceIn) -> SourceOut:
@@ -57,6 +94,7 @@ def prepared_source(db: Session, store: ArtifactStore, source: SourceIn) -> Sour
     if source.beat_id and source.beat_id != take.id:
         raise LookupError("Prepared take does not exist")
     script = AudioScript.model_validate(store.get_raw(digest))
+    document = db.get(Document, run.document_id)
     return SourceOut(
         fields={
             "artifact_hash": digest,
@@ -65,7 +103,7 @@ def prepared_source(db: Session, store: ArtifactStore, source: SourceIn) -> Sour
         beats=[
             BeatOut(
                 id=t.id,
-                title=f"{t.created_at} · {t.status}",
+                title=f"Audio-Take vom {t.created_at:%d.%m.%Y %H:%M} · {t.status}",
                 word_budget=0,
                 passage_count=0,
             )
@@ -73,6 +111,8 @@ def prepared_source(db: Session, store: ArtifactStore, source: SourceIn) -> Sour
         ],
         source={
             "run_id": run.id,
+            "name": run.name,
+            "document_title": (document.title or document.filename) if document else None,
             "beat_id": take.id,
             "artifact_hash": digest,
             "source_take_id": take.id,
@@ -86,11 +126,11 @@ class AudioGenerationExperiment:
     key: ClassVar[str] = "audio_generation"
     title: ClassVar[str] = "ElevenLabs ausprobieren"
     summary: ClassVar[str] = (
-        "Vorbereitetes Skript mit unveränderten Tags laden und mit anderen Stimmen "
-        "und Einstellungen sprechen. Keine Skriptgenerierung."
+        "Vorbereitetes Skript laden, Abschnitte wählen und bearbeiten, Stimmen anhören "
+        "und mit anderen Einstellungen sprechen. Keine Skriptgenerierung."
     )
     target: ClassVar[str] = "ElevenLabs-Sprachausgabe"
-    version: ClassVar[str] = "1"
+    version: ClassVar[str] = "2"
     Setup: ClassVar[type[BaseModel]] = SynthesisSetup
 
     def defaults(self) -> SynthesisSetup:
@@ -100,15 +140,19 @@ class AudioGenerationExperiment:
         return []
 
     def extras(self) -> dict[str, Any]:
-        return {"models": list(DIALOGUE_MODELS), "stability": [0.0, 0.5, 1.0]}
+        return {
+            "models": list(DIALOGUE_MODELS),
+            "stability": [0.0, 0.5, 1.0],
+            "characters_per_second": CHARACTERS_PER_SECOND,
+            "sample_characters": len(VOICE_SAMPLE_TEXT),
+        }
 
     def load_source(self, session: Session, store: ArtifactStore, source: SourceIn) -> SourceOut:
         return prepared_source(session, store, source)
 
     def validate_setup(self, setup: BaseModel) -> list[str]:
         assert isinstance(setup, SynthesisSetup)
-        provider = speech_provider()
-        if provider is None:
+        if speech_provider() is None:
             return [SETUP_MESSAGE]
         cast = setup.voice_cast
         if cast.model_id not in DIALOGUE_MODELS:
@@ -117,9 +161,6 @@ class AudioGenerationExperiment:
             return ["Dialogue stability must be 0, 0.5 or 1"]
         if cast.language_code is not None:
             return ["Language override is not offered by this experiment"]
-        known = {voice.voice_id for voice in provider.voices()}
-        if not cast.voices or any(v.voice_id not in known for v in cast.voices):
-            return ["Select available ElevenLabs voices"]
         if len({v.speaker.strip().lower() for v in cast.voices}) != len(cast.voices):
             return ["Duplicate speaker assignments"]
         return []
@@ -134,7 +175,15 @@ class AudioGenerationExperiment:
             loaded = prepared_source(db, ctx.store, ctx.source)
             if loaded.source["artifact_hash"] != setup.artifact_hash:
                 raise ValueError("Prepared source changed; load it again")
-            script = AudioScript.model_validate(ctx.store.get_raw(setup.artifact_hash))
+            prepared = AudioScript.model_validate(ctx.store.get_raw(setup.artifact_hash))
+            script = synthesis_script(prepared, setup)
+            # An unchanged selection speaks the prepared artifact itself.
+            spoken_hash = (
+                setup.artifact_hash
+                if script == prepared
+                else ctx.store.put("audio_script", script).hash
+            )
+            originals = {line.segment_id: line.tagged for line in prepared.lines}
             missing = {
                 line.speaker
                 for line in script.lines
@@ -153,9 +202,13 @@ class AudioGenerationExperiment:
                 approved_by=ctx.created_by,
                 approved_at=datetime.now(UTC),
                 script_hash=original.script_hash,
-                request_json={"scope": "full", "prepared_audio_hash": setup.artifact_hash},
+                request_json={
+                    "scope": "full",
+                    "prepared_audio_hash": spoken_hash,
+                    "source_artifact_hash": setup.artifact_hash,
+                },
                 voice_cast_json=setup.voice_cast.model_dump(mode="json"),
-                manifest_json={"bag_hashes": {"audio_script": setup.artifact_hash}},
+                manifest_json={"bag_hashes": {"audio_script": spoken_hash}},
             )
             db.add(take)
             db.flush()
@@ -166,6 +219,10 @@ class AudioGenerationExperiment:
                 "take_id": take_id,
                 "run_id": ctx.source.run_id,
                 "artifact_hash": setup.artifact_hash,
+                "audio_script_hash": spoken_hash,
+                "segments": len(script.lines),
+                "edited": sum(line.tagged != originals[line.segment_id] for line in script.lines),
+                "characters": script.character_count(),
                 "voice_cast": setup.voice_cast.model_dump(mode="json"),
             }
         )

@@ -298,7 +298,11 @@ def create_run(
             errors=exc.errors(include_context=False, include_url=False),
         ) from exc
     if key == "audio_generation":
-        from app.experiments.audio_generation import SynthesisSetup, prepared_source
+        from app.experiments.audio_generation import (
+            SynthesisSetup,
+            prepared_source,
+            synthesis_script,
+        )
         from app.schemas.audio import AudioScript
 
         assert isinstance(setup, SynthesisSetup)
@@ -310,17 +314,29 @@ def create_run(
             raise problem(422, "Prepared source unavailable", str(exc)) from exc
         if loaded.source["artifact_hash"] != setup.artifact_hash:
             raise problem(422, "Source changed", "Reload the prepared source.")
-        script = AudioScript.model_validate(_store().get_raw(setup.artifact_hash))
-        if not script.lines or any(
-            not setup.voice_cast.voice_for(line.speaker) for line in script.lines
-        ):
-            raise problem(422, "Voices missing", "Assign a voice to every prepared speaker.")
+        try:
+            script = synthesis_script(
+                AudioScript.model_validate(_store().get_raw(setup.artifact_hash)), setup
+            )
+        except ValueError as exc:
+            raise problem(422, "Invalid selection", str(exc)) from exc
+        selected_voices = {setup.voice_cast.voice_for(line.speaker) for line in script.lines}
+        if None in selected_voices:
+            raise problem(422, "Voices missing", "Assign a voice to every selected speaker.")
         payload.source_meta = loaded.source
     _check_model(getattr(setup, "settings", None))
     from app.speech.base import SpeechError
 
     try:
         problems = experiment.validate_setup(setup)
+        if not problems and key == "audio_generation":
+            from app.speech.registry import speech_provider
+
+            provider = speech_provider()
+            assert provider is not None
+            known = {voice.voice_id for voice in provider.voices()}
+            if any(voice not in known for voice in selected_voices):
+                problems = ["Select available ElevenLabs voices"]
     except SpeechError as exc:
         raise problem(502, "Voices unavailable", str(exc)) from exc
     if problems:
