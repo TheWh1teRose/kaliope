@@ -6,7 +6,7 @@ so ``None`` is the root and no migration of existing documents is needed.
 
 Deleting a folder never deletes a document. The subtree's documents move up to
 the deleted folder's parent, which is the only outcome that cannot lose work.
-The rules live in ``app.folder_tree``, shared with the Sammlung's folders.
+The shared folder rules live in ``app.folder_tree``.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="Folder extends FolderRow">
 /**
- * The folder sidebar, shared by Dokumente and the Sammlung.
+ * The shared folder sidebar.
  *
  * Drop targets as well as filters: dragging a card onto a folder is the
  * fastest way to file it, and the same rows serve both jobs. The server

@@ -539,12 +539,15 @@ list, filed into folders and subfolders by dragging a card onto a folder, by
 "In Ordner …", or many at once. Each experiment page has a "Sammeln in" folder
 that every "Sammeln" files into.
 
-The **Läufe** overview has a third tree for runs. A standalone run is filed on
-its own; a series is filed as one unit with its planner and every episode, so
-filing an episode files its series. Runs and series can be renamed from their
-row or their page; a blank name falls back to the document or plan title. Runs
-in the trash keep their folder and come back into it, but leave the counts. The
-three trees are separate; all follow the rules in `app/folder_tree.py`.
+The **Läufe** overview has a third tree for runs: drag a row onto a folder or
+use "In Ordner …" to file it, and select a folder in the sidebar to filter the
+list. A standalone run is filed on its own; a series is filed as one unit with
+its planner and every episode, so filing an episode files its series. Folder
+counts count each series once. Runs and series can be renamed from their row
+or their page; a blank name falls back to the document or plan title. Renaming
+a series also retitles its episode runs. Runs in the trash keep their folder
+and come back into it, but leave the counts. The three trees are separate; all
+follow the rules in `app/folder_tree.py`.
 
 A run is also shown as its **flow graph**: every node with the values it
 consumes and the value it publishes, its status, cost, model and timing, and the
