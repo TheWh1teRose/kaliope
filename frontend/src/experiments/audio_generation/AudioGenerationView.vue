@@ -74,6 +74,7 @@ const starting = ref(false)
 const error = ref('')
 const notice = ref('')
 let gone = false
+let refreshFailed = false
 let timer: ReturnType<typeof setTimeout> | undefined
 
 const extras = computed(() => detail.value?.extras ?? {})
@@ -214,18 +215,26 @@ async function adopt(run: ExperimentRun<Setup>): Promise<void> {
 // ------------------------------------------------------------------- runs
 
 async function refresh(): Promise<void> {
-  runs.value = (await listRuns<Setup>(KEY)).map((run) => ({ ...run, setup: normalise(run.setup) }))
-  const runIds = [...new Set(runs.value.map((run) => run.output?.run_id).filter((id): id is string => typeof id === 'string'))]
-  const wanted = new Set(runs.value.map((run) => run.output?.take_id))
-  const results = await Promise.all(runIds.map((id) => audioApi.takes(id)))
-  takes.value = Object.fromEntries(
-    results.flatMap((result) => result.takes).filter((take) => wanted.has(take.id)).map((take) => [take.id, take]),
-  )
+  try {
+    const nextRuns = (await listRuns<Setup>(KEY)).map((run) => ({ ...run, setup: normalise(run.setup) }))
+    const runIds = [...new Set(nextRuns.map((run) => run.output?.run_id).filter((id): id is string => typeof id === 'string'))]
+    const wanted = new Set(nextRuns.map((run) => run.output?.take_id))
+    const results = await Promise.all(runIds.map((id) => audioApi.takes(id)))
+    const nextTakes = Object.fromEntries(
+      results.flatMap((result) => result.takes).filter((take) => wanted.has(take.id)).map((take) => [take.id, take]),
+    )
+    runs.value = nextRuns
+    takes.value = nextTakes
+    refreshFailed = false
+  } catch (exc) {
+    refreshFailed = true
+    throw exc
+  }
 }
 
 function schedule(): void {
   clearTimeout(timer)
-  if (!gone && busy.value) timer = setTimeout(poll, POLL_MS)
+  if (!gone && (busy.value || refreshFailed)) timer = setTimeout(poll, POLL_MS)
 }
 
 async function poll(): Promise<void> {

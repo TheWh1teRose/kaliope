@@ -82,6 +82,7 @@ beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.clearAllMocks()
 })
@@ -244,4 +245,88 @@ describe('ElevenLabs experiment', () => {
     expect(mocks.startRun).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+})
+
+
+const completedRun = {
+  id: 'e1', created_at: '2026-10-06', status: 'completed', total_cost_usd: 0,
+  setup: { artifact_hash: 'hash', voice_cast: { model_id: 'eleven_v4', stability: 0.5, voices: [] } },
+  source: loaded.source, output: { run_id: 'r1', take_id: 'take1' },
+}
+
+function take(status: string) {
+  return {
+    id: 'take1', status, error: null, total_cost_usd: 0,
+    plan: [], chunks: [], resumable: status === 'failed', audio_script: null,
+    mix: status === 'completed' ? {
+      url: '/finished.mp3', download_url: '/finished.mp3?download=1', duration_s: 3,
+      lines: [], chunk_offsets_s: [],
+    } : null,
+  }
+}
+
+async function nextPoll() {
+  await vi.advanceTimersByTimeAsync(1500)
+  await flushPromises()
+}
+
+it.each(['runs', 'takes'])('retries a failed initial %s refresh until audio is available', async (failure) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  mocks.listRuns.mockResolvedValue([completedRun])
+  mocks.takes.mockResolvedValue({ takes: [take('completed')] })
+  if (failure === 'runs') mocks.listRuns.mockRejectedValueOnce(new Error('Unavailable'))
+  else mocks.takes.mockRejectedValueOnce(new Error('Unavailable'))
+  const wrapper = mountView()
+  await flushPromises()
+  expect(wrapper.find('[data-run]').exists()).toBe(false)
+  await nextPoll()
+  expect(wrapper.find('audio').attributes('src')).toBe('/finished.mp3')
+  const calls = mocks.listRuns.mock.calls.length
+  await nextPoll()
+  expect(mocks.listRuns).toHaveBeenCalledTimes(calls)
+  wrapper.unmount()
+})
+
+it('keeps the queued run until its take is fetched after generation', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const wrapper = mountView()
+  await flushPromises()
+  await load(wrapper)
+  await tab(wrapper, 'voices')
+  const selects = wrapper.findAll('select')
+  await selects[0]!.setValue('v1')
+  await selects[1]!.setValue('v2')
+  mocks.listRuns.mockResolvedValue([{ ...completedRun, id: 'experiment1' }])
+  mocks.takes.mockRejectedValueOnce(new Error('Unavailable'))
+  mocks.takes.mockResolvedValue({ takes: [take('completed')] })
+  await wrapper.find('[data-generate]').trigger('click')
+  await flushPromises()
+  expect(wrapper.findComponent({ name: 'TakeResult' }).props('run').status).toBe('queued')
+  expect(wrapper.find('audio').exists()).toBe(false)
+  await nextPoll()
+  expect(wrapper.find('audio').attributes('src')).toBe('/finished.mp3')
+  wrapper.unmount()
+})
+
+it.each(['resume', 'stop'] as const)('retries failed refreshes after %s and stops polling on unmount', async (action) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  mocks.listRuns.mockResolvedValue([completedRun])
+  mocks.takes.mockResolvedValueOnce({ takes: [take(action === 'resume' ? 'failed' : 'running')] })
+  mocks.takes.mockRejectedValueOnce(new Error('Unavailable'))
+  mocks.takes.mockRejectedValueOnce(new Error('Still unavailable'))
+  mocks.takes.mockResolvedValue({ takes: [take('running')] })
+  mocks[action].mockResolvedValue({})
+  const wrapper = mountView()
+  await flushPromises()
+  const result = wrapper.findComponent({ name: 'TakeResult' })
+  result.vm.$emit(action, take(action === 'resume' ? 'failed' : 'running'))
+  await flushPromises()
+  expect(mocks[action]).toHaveBeenCalledWith('take1')
+  await nextPoll()
+  expect(mocks.takes).toHaveBeenCalledTimes(3)
+  await nextPoll()
+  expect(result.props('take').status).toBe('running')
+  wrapper.unmount()
+  await nextPoll()
+  expect(mocks.takes).toHaveBeenCalledTimes(4)
 })
