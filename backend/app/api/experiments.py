@@ -320,7 +320,8 @@ def create_run(
             )
         except ValueError as exc:
             raise problem(422, "Invalid selection", str(exc)) from exc
-        if any(not setup.voice_cast.voice_for(line.speaker) for line in script.lines):
+        selected_voices = {setup.voice_cast.voice_for(line.speaker) for line in script.lines}
+        if None in selected_voices:
             raise problem(422, "Voices missing", "Assign a voice to every selected speaker.")
         payload.source_meta = loaded.source
     _check_model(getattr(setup, "settings", None))
@@ -328,6 +329,14 @@ def create_run(
 
     try:
         problems = experiment.validate_setup(setup)
+        if not problems and key == "audio_generation":
+            from app.speech.registry import speech_provider
+
+            provider = speech_provider()
+            assert provider is not None
+            known = {voice.voice_id for voice in provider.voices()}
+            if any(voice not in known for voice in selected_voices):
+                problems = ["Select available ElevenLabs voices"]
     except SpeechError as exc:
         raise problem(502, "Voices unavailable", str(exc)) from exc
     if problems:

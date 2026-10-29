@@ -330,3 +330,40 @@ it.each(['resume', 'stop'] as const)('retries failed refreshes after %s and stop
   await nextPoll()
   expect(mocks.takes).toHaveBeenCalledTimes(4)
 })
+
+it.each([['resolve', false], ['reject', false], ['resolve', true], ['reject', true]] as const)(
+  'ignores an older poll after a newer generation refresh (%s, newer failed: %s)', async (outcome, newerFailed) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  mocks.listRuns.mockResolvedValue([completedRun])
+  mocks.takes.mockResolvedValue({ takes: [take('running')] })
+  const wrapper = mountView()
+  await flushPromises()
+  await tab(wrapper, 'voices')
+  const selects = wrapper.findAll('select')
+  await selects[0]!.setValue('v1')
+  await selects[1]!.setValue('v2')
+
+  let resolve!: (value: { takes: ReturnType<typeof take>[] }) => void
+  let reject!: (reason: Error) => void
+  mocks.takes.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no }))
+  await nextPoll()
+  const newerRun = { ...completedRun, id: 'experiment1', output: { run_id: 'r1', take_id: 'take2' } }
+  mocks.listRuns.mockResolvedValue([newerRun, completedRun])
+  if (newerFailed) mocks.takes.mockRejectedValueOnce(new Error('Latest refresh unavailable'))
+  mocks.takes.mockResolvedValue({ takes: [{ ...take('running'), id: 'take2' }, take('completed')] })
+  await wrapper.find('[data-generate]').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[data-run="experiment1"]').exists()).toBe(true)
+
+  if (outcome === 'resolve') resolve({ takes: [take('completed')] })
+  else reject(new Error('Stale poll failed'))
+  await flushPromises()
+  expect(wrapper.find('[data-run="experiment1"]').exists()).toBe(true)
+  if (newerFailed) expect(wrapper.find('[role="alert"]').text()).toContain('Latest refresh unavailable')
+  else expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  const calls = mocks.listRuns.mock.calls.length
+  await nextPoll()
+  expect(mocks.listRuns).toHaveBeenCalledTimes(calls + 1)
+  expect(wrapper.find('[data-run="experiment1"]').exists()).toBe(true)
+  wrapper.unmount()
+})

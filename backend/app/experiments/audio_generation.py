@@ -155,8 +155,7 @@ class AudioGenerationExperiment:
 
     def validate_setup(self, setup: BaseModel) -> list[str]:
         assert isinstance(setup, SynthesisSetup)
-        provider = speech_provider()
-        if provider is None:
+        if speech_provider() is None:
             return [SETUP_MESSAGE]
         cast = setup.voice_cast
         if cast.model_id not in DIALOGUE_MODELS:
@@ -165,11 +164,6 @@ class AudioGenerationExperiment:
             return ["Dialogue stability must be 0, 0.5 or 1"]
         if cast.language_code is not None:
             return ["Language override is not offered by this experiment"]
-        known = {voice.voice_id for voice in provider.voices()}
-        # A speaker whose segments are not selected may stay without a voice.
-        assigned = [v for v in cast.voices if v.voice_id.strip()]
-        if not assigned or any(v.voice_id.strip() not in known for v in assigned):
-            return ["Select available ElevenLabs voices"]
         if len({v.speaker.strip().lower() for v in cast.voices}) != len(cast.voices):
             return ["Duplicate speaker assignments"]
         return []

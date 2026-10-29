@@ -217,6 +217,56 @@ def test_selected_and_edited_segments_leave_the_prepared_script_alone(client, ru
     speech_registry.reset_provider()
 
 
+
+def test_only_selected_speakers_need_available_voices(client, run_id):  # noqa: F811
+    speech = StubSpeech()
+    speech_registry.register_provider(speech)
+    try:
+        loaded = client.post(
+            "/api/experiments/audio_generation/source", json={"run_id": run_id}
+        ).json()
+        prepared = json.loads(loaded["fields"]["audio_script"])
+        speaker = prepared["lines"][0]["speaker"]
+        speakers = list(dict.fromkeys(line["speaker"] for line in prepared["lines"]))
+        assert len(speakers) > 1
+        selected = [line for line in prepared["lines"] if line["speaker"] == speaker]
+        cast = [
+            {
+                "speaker": f" {name.upper()} ",
+                "voice_id": " v-mod " if name == speaker else "retired-voice",
+            }
+            for name in speakers
+        ]
+        body = {
+            "source": {"run_id": run_id, "beat_id": loaded["source"]["beat_id"]},
+            "setup": {
+                "artifact_hash": loaded["fields"]["artifact_hash"],
+                "segment_ids": [line["segment_id"] for line in selected],
+                "voice_cast": {"voices": cast},
+            },
+        }
+        invalid = json.loads(json.dumps(body))
+        invalid["setup"]["segment_ids"] = None
+        assert client.post("/api/experiments/audio_generation/runs", json=invalid).status_code == 422
+        invalid = json.loads(json.dumps(body))
+        invalid["setup"]["voice_cast"]["voices"][0]["voice_id"] = ""
+        assert client.post("/api/experiments/audio_generation/runs", json=invalid).status_code == 422
+        assert not speech.requests
+        response = client.post("/api/experiments/audio_generation/runs", json=body)
+        assert response.status_code == 201, response.text
+        experiment = _wait(client, response.json()["id"])
+        assert experiment["status"] == "completed", experiment
+        assert experiment["setup"]["voice_cast"]["voices"] == [
+            {**voice, "voice_name": None} for voice in cast
+        ]
+        take = _take(client, run_id, {"completed", "failed"})
+        assert take["status"] == "completed", take["error"]
+        assert take["audio_script"]["lines"] == selected
+        assert all(item.voice_id == "v-mod" for req in speech.requests for item in req.inputs)
+    finally:
+        speech_registry.reset_provider()
+
+
 def test_voice_sample_is_made_once_on_request(client):
     speech_registry.reset_provider()
     assert (

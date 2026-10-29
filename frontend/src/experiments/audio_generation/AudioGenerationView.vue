@@ -75,6 +75,7 @@ const error = ref('')
 const notice = ref('')
 let gone = false
 let refreshFailed = false
+let refreshVersion = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 
 const extras = computed(() => detail.value?.extras ?? {})
@@ -215,6 +216,7 @@ async function adopt(run: ExperimentRun<Setup>): Promise<void> {
 // ------------------------------------------------------------------- runs
 
 async function refresh(): Promise<void> {
+  const version = ++refreshVersion
   try {
     const nextRuns = (await listRuns<Setup>(KEY)).map((run) => ({ ...run, setup: normalise(run.setup) }))
     const runIds = [...new Set(nextRuns.map((run) => run.output?.run_id).filter((id): id is string => typeof id === 'string'))]
@@ -223,10 +225,12 @@ async function refresh(): Promise<void> {
     const nextTakes = Object.fromEntries(
       results.flatMap((result) => result.takes).filter((take) => wanted.has(take.id)).map((take) => [take.id, take]),
     )
+    if (gone || version !== refreshVersion) return
     runs.value = nextRuns
     takes.value = nextTakes
     refreshFailed = false
   } catch (exc) {
+    if (gone || version !== refreshVersion) return
     refreshFailed = true
     throw exc
   }
