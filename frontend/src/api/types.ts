@@ -301,6 +301,8 @@ export interface RunOut {
   stopped_by?: string | null
   /** Set while the run is in the trash. */
   trashed_at?: string | null
+  /** The run folder it is filed in; a series' runs report their series' folder. */
+  folder_id?: string | null
 }
 
 export interface StopOut {
@@ -997,6 +999,24 @@ export interface OutputPage {
   root_count: number
 }
 
+/** A folder of the runs overview; same shape as `FolderOut`, counting runs and series. */
+export interface RunFolderOut {
+  id: string
+  name: string
+  parent_id: string | null
+  depth: number
+  path: string[]
+  /** Standalone runs plus series, a series counting once; the trash is left out. */
+  run_count: number
+  total_run_count: number
+  created_at: string
+}
+
+export interface RunFolderSummary {
+  total: number
+  root: number
+}
+
 /** A folder of the Sammlung; same shape as `FolderOut` with output counts. */
 export interface OutputFolderOut {
   id: string
@@ -1146,6 +1166,8 @@ export interface SeriesOut {
   stopped_by?: string | null
   /** Set while the series, with all its episodes, is in the trash. */
   trashed_at?: string | null
+  /** The run folder the series is filed in, with all its runs. */
+  folder_id?: string | null
 }
 
 export interface SeriesGraphEpisode {

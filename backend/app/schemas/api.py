@@ -99,6 +99,28 @@ class FolderOut(BaseModel):
     created_at: str
 
 
+class RunFolderOut(BaseModel):
+    id: str
+    name: str
+    parent_id: str | None
+    depth: int
+    path: list[str]
+    #: Standalone runs plus series, a series counting once; the trash is left out.
+    run_count: int
+    #: Including every subfolder.
+    total_run_count: int
+    created_at: str
+
+
+class RunFolderSummary(BaseModel):
+    """The counts of the two fixed rows above the folders."""
+
+    #: Every listed standalone run and series, whatever its folder.
+    total: int
+    #: Those in no folder.
+    root: int
+
+
 class FolderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     parent_id: str | None = None
@@ -117,6 +139,11 @@ class DocumentRename(BaseModel):
     #: Trimmed and length-checked by the endpoint, so an empty or oversized name
     #: gets the same problem+json as every other refusal.
     title: str
+
+
+class FolderAssign(BaseModel):
+    #: ``None`` (or ``root``) takes the item out of every folder.
+    folder_id: str | None = None
 
 
 class DocumentMove(BaseModel):
@@ -232,6 +259,8 @@ class RunOut(BaseModel):
     stopped_by: str | None = None
     #: When the run was moved to the trash; unset while it is listed normally.
     trashed_at: str | None = None
+    #: The run folder it is filed in; a series' runs report their series' folder.
+    folder_id: str | None = None
 
 
 class StopOut(BaseModel):
@@ -533,6 +562,8 @@ class SeriesOut(BaseModel):
     stopped_by: str | None = None
     #: When the series was moved to the trash; unset while it is listed normally.
     trashed_at: str | None = None
+    #: The run folder the series is filed in, with all its runs.
+    folder_id: str | None = None
 
 
 class SeriesGraphEpisodeOut(BaseModel):

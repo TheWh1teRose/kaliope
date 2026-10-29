@@ -32,6 +32,7 @@ from app.api import (
     model_catalogue,
     output_folders,
     review,
+    run_folders,
     runs,
     series,
     sharing,
@@ -137,6 +138,7 @@ def create_app() -> FastAPI:
     app.include_router(audio.router)
     app.include_router(folders.router)
     app.include_router(documents.router)
+    app.include_router(run_folders.router)
     app.include_router(runs.router)
     app.include_router(series.router)
     app.include_router(bundles.router)

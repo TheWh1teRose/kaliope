@@ -13,6 +13,7 @@ import DataBundleButton from '@/components/DataBundleButton.vue'
 import PipelineCanvas from '@/components/PipelineCanvas.vue'
 import SeriesAudio from '@/components/SeriesAudio.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import RenameDialog from '@/components/RenameDialog.vue'
 import ReviewLinkButton from '@/components/ReviewLinkButton.vue'
 import { fill, t } from '@/i18n'
 import { seriesTitle } from '@/titles'
@@ -35,6 +36,7 @@ const selected = ref<PlacedNode | null>(null)
 const io = ref<NodeIOOut | null>(null)
 const ioLoading = ref(false)
 const busy = ref(false)
+const renaming = ref(false)
 const error = ref('')
 /** Why the series could not be loaded; the page offers to try again. */
 const loadError = ref('')
@@ -166,6 +168,11 @@ function follow(): void {
       reload()
     },
   })
+}
+
+/** The new name, and the episodes retitled from it. */
+async function rename(name: string): Promise<void> {
+  series.value = await seriesStore.rename(props.id, name)
 }
 
 async function act(action: () => Promise<SeriesOut>): Promise<void> {
@@ -319,8 +326,20 @@ onUnmounted(() => {
         >
           {{ t.series.resume }}
         </button>
+        <button class="btn btn--sm btn--ghost" type="button" data-rename @click="renaming = true">
+          {{ t.common.rename }}
+        </button>
       </div>
     </header>
+
+    <RenameDialog
+      :open="renaming"
+      :title="t.series.renameTitle"
+      :hint="t.series.nameHint"
+      :current="series.name"
+      :save="rename"
+      @close="renaming = false"
+    />
 
     <div v-if="series.trashed_at" class="notice trashed" data-trashed>
       <span>{{ t.series.trashedDetail }}</span>

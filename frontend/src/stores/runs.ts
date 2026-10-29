@@ -52,11 +52,13 @@ export const useRunsStore = defineStore('runs', () => {
   let stream: StreamHandle | null = null
   let loadEpoch = 0
 
-  async function load(documentId?: string, limit?: number): Promise<void> {
+  /** `folderId` keeps one run folder's runs (`'root'`: those in none); a series' runs go with it. */
+  async function load(documentId?: string, limit?: number, folderId?: string): Promise<void> {
     const ticket = ++loadEpoch
     const params = [
       documentId ? `document_id=${encodeURIComponent(documentId)}` : '',
       limit != null ? `limit=${encodeURIComponent(String(limit))}` : '',
+      folderId ? `folder_id=${encodeURIComponent(folderId)}` : '',
     ].filter((part) => part !== '')
     const query = params.length ? `?${params.join('&')}` : ''
     const next = await api.get<RunOut[]>(`/api/runs${query}`)
@@ -76,6 +78,16 @@ export const useRunsStore = defineStore('runs', () => {
 
   async function restore(id: string): Promise<RunOut> {
     return api.post<RunOut>(`/api/runs/${id}/restore`)
+  }
+
+  /** Change only the display name; blank falls back to the document title. */
+  async function rename(id: string, name: string): Promise<RunOut> {
+    return api.patch<RunOut>(`/api/runs/${id}`, { name })
+  }
+
+  /** File a run into a run folder, `null` for none. An episode moves its whole series. */
+  async function move(id: string, folderId: string | null): Promise<RunOut> {
+    return api.post<RunOut>(`/api/runs/${id}/move`, { folder_id: folderId })
   }
 
   async function get(id: string): Promise<RunOut> {
@@ -179,6 +191,8 @@ export const useRunsStore = defineStore('runs', () => {
     trashed,
     trash,
     restore,
+    rename,
+    move,
     get,
     stop,
     create,

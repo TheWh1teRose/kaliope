@@ -22,6 +22,7 @@ from app.accounts import author_labels
 from app.api.documents import load_parsed_document
 from app.api.introspection import fields_of, is_model, port_for_key, type_name
 from app.api.review import edited_texts, segment_states
+from app.api.run_folders import resolve_run_folder, runs_in_folder
 from app.config import get_settings
 from app.db import get_db
 from app.errors import problem
@@ -46,6 +47,7 @@ from app.schemas.api import (
     FlowGraphOut,
     FlowNodeOut,
     FlowOut,
+    FolderAssign,
     NameUpdate,
     NodeIOOut,
     NodeRunStatus,
@@ -212,6 +214,7 @@ def stop_run(
 @router.get("/runs", response_model=list[RunOut])
 def list_runs(
     document_id: str | None = None,
+    folder_id: str | None = None,
     limit: int = 100,
     trashed: bool = False,
     db: Session = Depends(get_db),
@@ -221,6 +224,8 @@ def list_runs(
 
     ``trashed`` lists standalone runs in the trash, latest first. A trashed
     series is omitted here and listed by ``GET /api/series?trashed=true``.
+    ``folder_id`` keeps the runs filed directly in that folder, the runs of a
+    series wherever the series is; the literal ``root`` keeps those in none.
     """
     statement = (
         select(Run)
@@ -235,6 +240,8 @@ def list_runs(
         statement = statement.where(Run.series_id.is_(None))
     if document_id:
         statement = statement.where(Run.document_id == document_id)
+    if folder_id:
+        statement = statement.where(runs_in_folder(db, folder_id))
     return [_run_out(db, run, detailed=False) for run in db.scalars(statement).all()]
 
 
@@ -257,6 +264,29 @@ def rename_run(
     run.name = clean_name(payload.name)
     db.commit()
     return _run_out(db, run)
+
+
+@router.post("/runs/{run_id}/move", response_model=RunOut)
+def move_run(
+    run_id: str,
+    payload: FolderAssign,
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
+) -> RunOut:
+    """File a run into a run folder, or back to none with ``null``.
+
+    A run of a series is filed with its series, so moving an episode moves the
+    whole series, as the trash does.
+    """
+    run = _require_run(db, run_id)
+    folder_id = resolve_run_folder(db, payload.folder_id)
+    series = db.get(Series, run.series_id) if run.series_id else None
+    if series is not None:
+        series.folder_id = folder_id
+    else:
+        run.folder_id = folder_id
+    db.commit()
+    return _run_out(db, run, detailed=False)
 
 
 @router.post("/runs/{run_id}/trash", response_model=RunOut)
@@ -1185,7 +1215,16 @@ def _run_out(db: Session, run: Run, detailed: bool = True) -> RunOut:
         episode_index=run.episode_index,
         stopped_by=_person(db, config.get("stopped_by")),
         trashed_at=_iso(run.trashed_at),
+        folder_id=_folder_of(db, run),
     )
+
+
+def _folder_of(db: Session, run: Run) -> str | None:
+    """A standalone run's own folder; the runs of a series are filed with it."""
+    if run.series_id is None:
+        return run.folder_id
+    series = db.get(Series, run.series_id)
+    return series.folder_id if series is not None else None
 
 
 def _require_run(db: Session, run_id: str) -> Run:

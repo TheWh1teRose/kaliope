@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.api.documents import load_parsed_document
 from app.api.review import edited_texts
+from app.api.run_folders import resolve_run_folder, series_in_folder
 from app.api.runs import (
     _load_run_output,
     _person,
@@ -48,6 +49,7 @@ from app.pipeline.nodes.series_plan import MAX_EPISODES, MIN_EPISODES
 from app.schemas.api import (
     CreateSeriesRequest,
     DocumentBudgetOut,
+    FolderAssign,
     NameUpdate,
     ReplanRequest,
     RunGraphNodeOut,
@@ -177,12 +179,16 @@ def create_series(
 @router.get("/series", response_model=list[SeriesOut])
 def list_series(
     document_id: str | None = None,
+    folder_id: str | None = None,
     limit: int = 100,
     trashed: bool = False,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[SeriesOut]:
-    """The series, newest first. ``trashed`` lists the trash instead, latest trashed first."""
+    """The series, newest first. ``trashed`` lists the trash instead, latest trashed first.
+
+    ``folder_id`` keeps the series filed in that run folder; ``root`` those in none.
+    """
     statement = (
         select(Series)
         .where(Series.trashed_at.is_not(None) if trashed else Series.trashed_at.is_(None))
@@ -191,6 +197,8 @@ def list_series(
     )
     if document_id:
         statement = statement.where(Series.document_id == document_id)
+    if folder_id:
+        statement = statement.where(series_in_folder(db, folder_id))
     return [_series_out(db, row) for row in db.scalars(statement).all()]
 
 
@@ -212,6 +220,20 @@ def rename_series(
     series = _require_series(db, series_id)
     series.name = clean_name(payload.name)
     apply_episode_names(db, series)
+    db.commit()
+    return _series_out(db, series)
+
+
+@router.post("/series/{series_id}/move", response_model=SeriesOut)
+def move_series(
+    series_id: str,
+    payload: FolderAssign,
+    db: Session = Depends(get_db),
+    _user: User = Depends(current_user),
+) -> SeriesOut:
+    """File a series, with its planner and every episode, into a run folder or none."""
+    series = _require_series(db, series_id)
+    series.folder_id = resolve_run_folder(db, payload.folder_id)
     db.commit()
     return _series_out(db, series)
 
@@ -571,6 +593,7 @@ def _series_out(db: Session, series: Series) -> SeriesOut:
         active=active,
         stopped_by=_person(db, (series.request_json or {}).get("stopped_by")),
         trashed_at=_iso(series.trashed_at),
+        folder_id=series.folder_id,
     )
 
 

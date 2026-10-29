@@ -24,6 +24,7 @@ function runRow(id: string, status: RunStatus) {
     series_id: null as string | null,
     episode_index: null as number | null,
     trashed_at: null as string | null,
+    folder_id: null as string | null,
   }
 }
 
@@ -43,6 +44,7 @@ function seriesRow(id: string, status: string) {
     episodes: [{ index: 1 }, { index: 2 }],
     request: { episodes: 2 },
     trashed_at: null as string | null,
+    folder_id: null as string | null,
   }
 }
 
@@ -53,6 +55,8 @@ const runs = {
   trashed: vi.fn(async () => [] as ReturnType<typeof runRow>[]),
   trash: vi.fn(async (id: string) => ({ ...runRow(id, 'completed'), trashed_at: '2026-10-04T09:00:00Z' })),
   restore: vi.fn(async (id: string) => runRow(id, 'completed')),
+  rename: vi.fn(async (id: string, name: string) => ({ ...runRow(id, 'completed'), name })),
+  move: vi.fn(async (id: string, folderId: string | null) => ({ ...runRow(id, 'completed'), folder_id: folderId })),
 }
 
 const seriesStore = {
@@ -61,10 +65,42 @@ const seriesStore = {
   trash: vi.fn(async (id: string) => ({ ...seriesRow(id, 'stopped'), trashed_at: '2026-10-04T09:00:00Z' })),
   restore: vi.fn(async (id: string) => seriesRow(id, 'stopped')),
   stop: vi.fn(async () => ({ id: 's-live', status: 'stopping', outcome: 'stopping', stopped_by: null })),
+  rename: vi.fn(async (id: string, name: string) => ({ ...seriesRow(id, 'stopped'), name })),
+  move: vi.fn(async (id: string, folderId: string | null) => ({ ...seriesRow(id, 'stopped'), folder_id: folderId })),
 }
+
+function folderRow(id: string, name: string, parent: { id: string; path: string[] } | null = null) {
+  return {
+    id,
+    name,
+    parent_id: parent?.id ?? null,
+    depth: parent ? 1 : 0,
+    path: [...(parent?.path ?? []), name],
+    run_count: 1,
+    total_run_count: 1,
+    created_at: '2026-10-03T10:00:00Z',
+  }
+}
+
+const folders = {
+  items: [] as ReturnType<typeof folderRow>[],
+  load: vi.fn(async () => {}),
+  create: vi.fn(async () => folderRow('f-new', 'Neu')),
+  rename: vi.fn(async () => {}),
+  move: vi.fn(async () => {}),
+  remove: vi.fn(async () => {}),
+  descendants: vi.fn(() => [] as string[]),
+  pathOf: vi.fn((id: string | null) => folders.items.filter((folder) => folder.id === id)),
+}
+const runFolderSummary = vi.fn(async () => ({ total: 5, root: 3 }))
 
 vi.mock('@/stores/runs', () => ({ useRunsStore: () => runs }))
 vi.mock('@/stores/series', () => ({ useSeriesStore: () => seriesStore }))
+vi.mock('@/stores/folders', () => ({
+  ROOT: 'root',
+  useRunFoldersStore: () => folders,
+  runFolderSummary: () => runFolderSummary(),
+}))
 
 function router() {
   return createRouter({
@@ -531,6 +567,174 @@ describe('runs trash', () => {
     await flushPromises()
     expect(seriesStore.restore).toHaveBeenCalledWith('s-old')
     expect(runs.restore).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('runs folders and names', () => {
+  beforeEach(() => {
+    runs.items = [
+      runRow('r-done', 'completed'),
+      { ...runRow('r-ep', 'completed'), series_id: 's-done', episode_index: 1 },
+    ]
+    seriesStore.list.mockResolvedValue([seriesRow('s-done', 'completed')])
+    folders.items = [folderRow('f1', 'Kurs A'), folderRow('f2', 'Modul 1', { id: 'f1', path: ['Kurs A'] })]
+    runs.load.mockClear()
+    seriesStore.list.mockClear()
+    runs.rename.mockClear()
+    runs.move.mockClear()
+    seriesStore.rename.mockClear()
+    seriesStore.move.mockClear()
+    folders.create.mockClear()
+    folders.remove.mockClear()
+  })
+
+  it('shows the run folders with their counts beside the lists', async () => {
+    const wrapper = await mountList()
+    const tree = wrapper.get('nav.tree')
+    expect(tree.text()).toContain(t.run.allRuns)
+    expect(tree.text()).toContain('5')
+    expect(tree.text()).toContain(t.folders.root)
+    expect(tree.text()).toContain('3')
+    expect(tree.text()).toContain('Kurs A')
+    expect(tree.text()).toContain('Modul 1')
+    expect(runs.load).toHaveBeenCalledWith(undefined, undefined, undefined)
+    wrapper.unmount()
+  })
+
+  it('opens a folder from the query and lists only what it holds', async () => {
+    const wrapper = await mountList('/runs?folder=f2')
+    expect(runs.load).toHaveBeenLastCalledWith(undefined, undefined, 'f2')
+    expect(seriesStore.list).toHaveBeenLastCalledWith(undefined, 'f2')
+    expect(wrapper.get('[data-breadcrumb]').text()).toContain('Modul 1')
+    wrapper.unmount()
+  })
+
+  it('switches folders from the sidebar and reloads both lists', async () => {
+    const wrapper = await mountList()
+    const rows = wrapper.findAll('nav.tree .row')
+    await rows.find((row) => row.text().includes('Kurs A'))!.trigger('click')
+    await flushPromises()
+    expect(runs.load).toHaveBeenLastCalledWith(undefined, undefined, 'f1')
+    expect(seriesStore.list).toHaveBeenLastCalledWith(undefined, 'f1')
+    await rows.find((row) => row.text().includes(t.folders.root))!.trigger('click')
+    await flushPromises()
+    expect(runs.load).toHaveBeenLastCalledWith(undefined, undefined, 'root')
+    wrapper.unmount()
+  })
+
+  it('says a folder is empty rather than that no runs exist', async () => {
+    runs.items = []
+    seriesStore.list.mockResolvedValue([])
+    const wrapper = await mountList('/runs?folder=f1')
+    expect(wrapper.get('[data-runs-empty]').text()).toBe(t.folders.empty)
+    wrapper.unmount()
+  })
+
+  it('renames a run from its row and keeps a blank name blank', async () => {
+    const wrapper = await mountList()
+    await wrapper.get('[data-run-row="r-done"] [data-rename]').trigger('click')
+    expect(document.body.textContent).toContain(t.run.renameTitle)
+    const input = document.body.querySelector<HTMLInputElement>('[data-rename-input]')!
+    input.value = '  Probelauf  '
+    input.dispatchEvent(new Event('input'))
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-rename"]')!.click()
+    await flushPromises()
+    expect(runs.rename).toHaveBeenCalledWith('r-done', 'Probelauf')
+    expect(document.body.querySelector('[data-rename-input]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('keeps the rename dialog open with the refusal when saving fails', async () => {
+    runs.rename.mockRejectedValueOnce(new ApiError(422, 'Name too long', 'A name is at most 200 characters.'))
+    const wrapper = await mountList()
+    await wrapper.get('[data-run-row="r-done"] [data-rename]').trigger('click')
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-rename"]')!.click()
+    await flushPromises()
+    expect(document.body.textContent).toContain('A name is at most 200 characters.')
+    expect(document.body.querySelector('[data-rename-input]')).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('renames a series from its row', async () => {
+    const wrapper = await mountList()
+    await wrapper.get('[data-series-row="s-done"] [data-rename-series]').trigger('click')
+    expect(document.body.textContent).toContain(t.series.renameTitle)
+    const input = document.body.querySelector<HTMLInputElement>('[data-rename-input]')!
+    input.value = 'Klimapolitik'
+    input.dispatchEvent(new Event('input'))
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-rename"]')!.click()
+    await flushPromises()
+    expect(seriesStore.rename).toHaveBeenCalledWith('s-done', 'Klimapolitik')
+    wrapper.unmount()
+  })
+
+  it('files a run into a folder from its row', async () => {
+    const wrapper = await mountList()
+    await wrapper.get('[data-run-row="r-done"] [data-file]').trigger('click')
+    expect(document.body.textContent).toContain(t.run.moveLead)
+    const select = document.body.querySelector<HTMLSelectElement>('[data-file-target]')!
+    expect(Array.from(select.options).map((option) => option.text.trim())).toEqual([
+      t.folders.root,
+      'Kurs A',
+      'Kurs A / Modul 1',
+    ])
+    select.selectedIndex = 2
+    select.dispatchEvent(new Event('change'))
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-file"]')!.click()
+    await flushPromises()
+    expect(runs.move).toHaveBeenCalledWith('r-done', 'f2')
+    wrapper.unmount()
+  })
+
+  it('says filing an episode moves its whole series', async () => {
+    const wrapper = await mountList()
+    await wrapper.get('[data-run-row="r-ep"] [data-file]').trigger('click')
+    expect(document.body.textContent).toContain(t.series.moveTitle)
+    expect(document.body.textContent).toContain(t.run.moveEpisodeLead)
+    wrapper.unmount()
+  })
+
+  it('files a dragged series row dropped on a folder', async () => {
+    const wrapper = await mountList()
+    const data = new Map<string, string>()
+    const dataTransfer = {
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? '',
+      effectAllowed: 'none',
+    }
+    await wrapper.get('[data-series-row="s-done"]').trigger('dragstart', { dataTransfer })
+    const target = wrapper.findAll('nav.tree .row').find((row) => row.text().includes('Kurs A'))!
+    await target.trigger('dragover', { dataTransfer })
+    await target.trigger('drop', { dataTransfer })
+    await flushPromises()
+    expect(seriesStore.move).toHaveBeenCalledWith('s-done', 'f1')
+    expect(runs.move).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('creates a folder from the sidebar', async () => {
+    const wrapper = await mountList()
+    await wrapper.get('nav.tree .tree__head button').trigger('click')
+    const input = document.body.querySelector<HTMLInputElement>('[data-folder-name]')!
+    input.value = 'Archiv'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-folder"]')!.click()
+    await flushPromises()
+    expect(folders.create).toHaveBeenCalledWith('Archiv', null)
+    wrapper.unmount()
+  })
+
+  it('deletes a folder and says its runs move up, not away', async () => {
+    const wrapper = await mountList('/runs?folder=f1')
+    const line = wrapper.findAll('nav.tree .rowline').find((row) => row.text().includes('Kurs A'))!
+    await line.get('.icon--danger').trigger('click')
+    expect(document.body.textContent).toContain(t.run.folderDeleteLead)
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-folder"]')!.click()
+    await flushPromises()
+    expect(folders.remove).toHaveBeenCalledWith('f1', true)
+    expect(runs.load).toHaveBeenLastCalledWith(undefined, undefined, undefined)
     wrapper.unmount()
   })
 })
