@@ -5,7 +5,7 @@
  * short sentence spoken once on request. One sample plays at a time, and
  * nothing plays by itself.
  */
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { audioApi } from '@/api/audio'
 import type { SpeechVoice, VoiceCast } from '@/api/types'
@@ -38,6 +38,16 @@ const player = useSamplePlayer()
 const query = ref('')
 const generated = ref<Record<string, string>>({})
 const making = ref<string | null>(null)
+let playRequest = 0
+
+function invalidatePlayback(): void {
+  playRequest++
+  making.value = null
+  player.stop()
+}
+
+onUnmounted(invalidatePlayback)
+watch(() => props.cast.model_id, invalidatePlayback, { flush: 'sync' })
 
 const shown = computed(() => {
   const words = query.value.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -72,21 +82,28 @@ function facts(voice: SpeechVoice): string {
 }
 
 async function play(voice: SpeechVoice): Promise<void> {
+  const request = ++playRequest
+  const model = props.cast.model_id
+  const key = sampleKey(voice)
+  making.value = null
   const url = sampleUrl(voice)
   if (url) {
     player.toggle(voice.voice_id, url)
     return
   }
+  player.stop()
   making.value = voice.voice_id
   try {
-    const made = await audioApi.sample(voice.voice_id, props.cast.model_id)
-    generated.value = { ...generated.value, [sampleKey(voice)]: made.url }
+    const made = await audioApi.sample(voice.voice_id, model)
+    if (request !== playRequest) return
+    generated.value = { ...generated.value, [key]: made.url }
     player.toggle(voice.voice_id, made.url)
   } catch (exc) {
+    if (request !== playRequest) return
     player.fail(voice.voice_id)
     emit('error', exc)
   } finally {
-    making.value = null
+    if (request === playRequest) making.value = null
   }
 }
 

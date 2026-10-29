@@ -2,6 +2,8 @@
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -243,3 +245,36 @@ def test_voice_sample_is_made_once_on_request(client):
     assert reused == {**body, "cost_usd": 0.0}
     assert len(speech.requests) == 1
     speech_registry.reset_provider()
+
+
+def test_concurrent_voice_samples_share_generation(client, monkeypatch, tmp_path):
+    from app.api import audio
+    from app.pipeline.framework.artifacts import ArtifactStore
+
+    speech = StubSpeech()
+    dialogue = speech.dialogue
+
+    def slow_dialogue(request):
+        time.sleep(0.1)
+        return dialogue(request)
+
+    monkeypatch.setattr(speech, "dialogue", slow_dialogue)
+    monkeypatch.setattr(audio, "_store", lambda: ArtifactStore(tmp_path))
+    speech_registry.register_provider(speech)
+    ready = Barrier(4)
+
+    def request_sample():
+        ready.wait(timeout=5)
+        return client.post("/api/audio/voices/v-mod/sample", json={"model_id": "eleven_v4"})
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            responses = list(pool.map(lambda _: request_sample(), range(4)))
+        assert [response.status_code for response in responses] == [200] * 4
+        bodies = [response.json() for response in responses]
+        assert len(speech.requests) == 1
+        assert sum(body["cost_usd"] > 0 for body in bodies) == 1
+        assert len({body["url"] for body in bodies}) == 1
+        assert client.get(bodies[0]["url"]).content
+    finally:
+        speech_registry.reset_provider()

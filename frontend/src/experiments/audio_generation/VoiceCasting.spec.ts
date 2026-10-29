@@ -8,6 +8,13 @@ import VoiceCasting from './VoiceCasting.vue'
 const mocks = vi.hoisted(() => ({ sample: vi.fn() }))
 vi.mock('@/api/audio', () => ({ audioApi: mocks }))
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
 const voices = [
   { voice_id: 'v1', name: 'Jonas', preview_url: 'https://cdn.test/jonas.mp3', category: 'professional', description: 'warm', language: 'de' },
   { voice_id: 'v2', name: 'Mara', preview_url: 'https://cdn.test/mara.mp3', category: null, description: null, language: 'de' },
@@ -102,5 +109,59 @@ it('assigns voices to speakers and marks a needed speaker without one', async ()
 
   await wrapper.find('input[type="search"]').setValue('cloned en')
   expect(wrapper.findAll('[data-voice]').map((row) => row.attributes('data-voice'))).toEqual(['v3'])
+  wrapper.unmount()
+})
+
+it.each(['resolve', 'reject'] as const)('ignores a sample that finishes after unmount (%s)', async (outcome) => {
+  const pending = deferred<{ url: string }>()
+  mocks.sample.mockReturnValueOnce(pending.promise)
+  const wrapper = mountCasting()
+  await button(wrapper, 'v3').trigger('click')
+  wrapper.unmount()
+  if (outcome === 'resolve') pending.resolve({ url: '/late.mp3' })
+  else pending.reject(new Error('late failure'))
+  await flushPromises()
+  expect(play).not.toHaveBeenCalled()
+  expect(wrapper.emitted('error')).toBeUndefined()
+})
+
+it.each(['resolve', 'reject'] as const)('keeps a newer preview when an older sample finishes (%s)', async (outcome) => {
+  const pending = deferred<{ url: string }>()
+  mocks.sample.mockReturnValueOnce(pending.promise)
+  const wrapper = mountCasting()
+  await button(wrapper, 'v3').trigger('click')
+  await button(wrapper, 'v2').trigger('click')
+  if (outcome === 'resolve') pending.resolve({ url: '/late.mp3' })
+  else pending.reject(new Error('late failure'))
+  await flushPromises()
+  expect(sources).toEqual(['https://cdn.test/mara.mp3'])
+  expect(button(wrapper, 'v2').attributes('aria-pressed')).toBe('true')
+  expect(button(wrapper, 'v3').attributes('disabled')).toBeUndefined()
+  expect(wrapper.emitted('error')).toBeUndefined()
+  wrapper.unmount()
+})
+
+it('keeps newer generation busy and does not cache an old model under the new model', async () => {
+  const older = deferred<{ url: string }>()
+  const newer = deferred<{ url: string }>()
+  mocks.sample.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+  const wrapper = mountCasting()
+  await button(wrapper, 'v3').trigger('click')
+  await wrapper.setProps({ cast: { ...cast, model_id: 'eleven_v3' } })
+  await button(wrapper, 'v3').trigger('click')
+  older.resolve({ url: '/old-model.mp3' })
+  await flushPromises()
+  expect(sources).toEqual([])
+  expect(button(wrapper, 'v3').attributes('disabled')).toBeDefined()
+  expect(mocks.sample.mock.calls).toEqual([['v3', 'eleven_v4'], ['v3', 'eleven_v3']])
+  newer.resolve({ url: '/new-model.mp3' })
+  await flushPromises()
+  expect(sources).toEqual(['http://localhost:3000/new-model.mp3'])
+  expect(button(wrapper, 'v3').attributes('disabled')).toBeUndefined()
+  await button(wrapper, 'v3').trigger('click')
+  await button(wrapper, 'v3').trigger('click')
+  await flushPromises()
+  expect(mocks.sample).toHaveBeenCalledTimes(2)
+  expect(sources.at(-1)).toBe('http://localhost:3000/new-model.mp3')
   wrapper.unmount()
 })

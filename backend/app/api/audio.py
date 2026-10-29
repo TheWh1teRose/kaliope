@@ -9,7 +9,9 @@ message, never with a server error.
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -62,6 +64,7 @@ DEFAULT_AUDIO_FLOW = "elevenlabs_dialog_v0"
 #: Run states that have a script to speak.
 SPOKEN_STATES = frozenset({"completed", "in_review", "reviewed"})
 ACTIVE_STATES = frozenset({"queued", "running"})
+_sample_locks: defaultdict[str, Lock] = defaultdict(Lock)
 
 
 def _store() -> ArtifactStore:
@@ -237,22 +240,23 @@ def make_voice_sample(
     store = _store()
     key = _sample_key(voice_id, payload.model_id)
     cost = 0.0
-    if _sample(store, key) is None:
-        try:
-            if voice_id not in {voice.voice_id for voice in provider.voices()}:
-                raise problem(404, "No such voice", f"Voice '{voice_id}' is not available.")
-            client = SpeechClient(provider)
-            result = client.dialogue(
-                DialogueRequest(
-                    inputs=[DialogueInput(text=VOICE_SAMPLE_TEXT, voice_id=voice_id)],
-                    model_id=payload.model_id,
+    with _sample_locks[key]:
+        if _sample(store, key) is None:
+            try:
+                if voice_id not in {voice.voice_id for voice in provider.voices()}:
+                    raise problem(404, "No such voice", f"Voice '{voice_id}' is not available.")
+                client = SpeechClient(provider)
+                result = client.dialogue(
+                    DialogueRequest(
+                        inputs=[DialogueInput(text=VOICE_SAMPLE_TEXT, voice_id=voice_id)],
+                        model_id=payload.model_id,
+                    )
                 )
-            )
-        except SpeechError as exc:
-            raise problem(502, "Sample failed", str(exc)) from exc
-        blob = store.put_blob(result.audio, ".mp3")
-        store.put_step(key, store.put_raw("voice_sample", {"blob": blob, "suffix": ".mp3"}).hash)
-        cost = client.total_cost_usd
+            except SpeechError as exc:
+                raise problem(502, "Sample failed", str(exc)) from exc
+            blob = store.put_blob(result.audio, ".mp3")
+            store.put_step(key, store.put_raw("voice_sample", {"blob": blob, "suffix": ".mp3"}).hash)
+            cost = client.total_cost_usd
     return VoiceSampleOut(
         url=f"/api/audio/voices/{voice_id}/sample?model_id={payload.model_id}",
         characters=len(VOICE_SAMPLE_TEXT),
