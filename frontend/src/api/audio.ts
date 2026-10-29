@@ -10,11 +10,17 @@ import type {
   SpeechVoice,
   StopOut,
   VoiceCast,
+  VoiceSample,
 } from '@/api/types'
 
 export const audioApi = {
   status: () => api.get<AudioStatus>('/api/audio/status'),
   voices: () => api.get<SpeechVoice[]>('/api/audio/voices'),
+  /** A short sample for a voice without a preview; made once, then reused. */
+  sample: (voiceId: string, modelId: string) =>
+    api.post<VoiceSample>(`/api/audio/voices/${encodeURIComponent(voiceId)}/sample`, {
+      model_id: modelId,
+    }),
   formatVoices: (formatId: string) =>
     api.get<FormatVoices>(`/api/formats/${encodeURIComponent(formatId)}/voices`),
   saveFormatVoices: (formatId: string, cast: VoiceCast) =>

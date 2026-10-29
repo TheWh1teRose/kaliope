@@ -24,6 +24,8 @@ const props = defineProps<{
   sampleLabel?: string
   selectionLabel?: string
   resetLabel?: string
+  /** Overrides "Felder füllen" for experiments that load something other than fields. */
+  applyLabel?: string
   hideWordBudget?: boolean
 }>()
 const emit = defineEmits<{
@@ -142,7 +144,7 @@ async function applyPicked(): Promise<void> {
       <span class="grow" />
       <button class="btn" @click="picking = false">{{ t.common.cancel }}</button>
       <button class="btn btn--primary" :disabled="!pickedSource || pickBusy" @click="applyPicked">
-        {{ labels.fillFields }}
+        {{ applyLabel ?? labels.fillFields }}
       </button>
     </div>
   </ModalDialog>

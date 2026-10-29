@@ -29,7 +29,7 @@ from app.pipeline import catalogue
 from app.pipeline.audio_chunks import cached_chunk, plan_requests, select_lines
 from app.pipeline.catalogue import CatalogueError
 from app.pipeline.feedback import last_row_for_key, pause_from_manifest
-from app.pipeline.framework.artifacts import ArtifactStore
+from app.pipeline.framework.artifacts import ArtifactStore, hash_payload
 from app.pipeline.framework.registry import flow_purpose
 from app.schemas.api import StopOut
 from app.schemas.audio import (
@@ -42,7 +42,16 @@ from app.schemas.audio import (
 )
 from app.schemas.pipeline import FormatSpec, Script
 from app.security import current_user
-from app.speech.base import DIALOGUE_MODELS, USD_PER_1K_CHARACTERS, SpeechError, Voice
+from app.speech.base import (
+    DIALOGUE_MODELS,
+    USD_PER_1K_CHARACTERS,
+    VOICE_SAMPLE_TEXT,
+    DialogueInput,
+    DialogueRequest,
+    SpeechClient,
+    SpeechError,
+    Voice,
+)
 from app.speech.registry import SETUP_MESSAGE, speech_configured, speech_provider
 from app.worker import worker
 
@@ -202,6 +211,64 @@ def list_voices(_user: User = Depends(current_user)) -> list[Voice]:
         return provider.voices()
     except SpeechError as exc:
         raise problem(502, "Voices unavailable", str(exc)) from exc
+
+
+class VoiceSampleIn(BaseModel):
+    model_id: str = DIALOGUE_MODELS[0]
+
+
+class VoiceSampleOut(BaseModel):
+    url: str
+    characters: int
+    #: What making the sample cost; 0 when it was made before.
+    cost_usd: float
+
+
+@router.post("/audio/voices/{voice_id}/sample", response_model=VoiceSampleOut)
+def make_voice_sample(
+    voice_id: str, payload: VoiceSampleIn, _user: User = Depends(current_user)
+) -> VoiceSampleOut:
+    """Speak a short sentence with a voice that has no preview; made once, then reused."""
+    provider = speech_provider()
+    if provider is None:
+        raise problem(409, "ElevenLabs is not set up", SETUP_MESSAGE)
+    if payload.model_id not in DIALOGUE_MODELS:
+        raise problem(422, "Unsupported model", f"'{payload.model_id}' is not a dialogue model.")
+    store = _store()
+    key = _sample_key(voice_id, payload.model_id)
+    cost = 0.0
+    if _sample(store, key) is None:
+        try:
+            if voice_id not in {voice.voice_id for voice in provider.voices()}:
+                raise problem(404, "No such voice", f"Voice '{voice_id}' is not available.")
+            client = SpeechClient(provider)
+            result = client.dialogue(
+                DialogueRequest(
+                    inputs=[DialogueInput(text=VOICE_SAMPLE_TEXT, voice_id=voice_id)],
+                    model_id=payload.model_id,
+                )
+            )
+        except SpeechError as exc:
+            raise problem(502, "Sample failed", str(exc)) from exc
+        blob = store.put_blob(result.audio, ".mp3")
+        store.put_step(key, store.put_raw("voice_sample", {"blob": blob, "suffix": ".mp3"}).hash)
+        cost = client.total_cost_usd
+    return VoiceSampleOut(
+        url=f"/api/audio/voices/{voice_id}/sample?model_id={payload.model_id}",
+        characters=len(VOICE_SAMPLE_TEXT),
+        cost_usd=cost,
+    )
+
+
+@router.get("/audio/voices/{voice_id}/sample")
+def voice_sample(
+    voice_id: str, model_id: str = DIALOGUE_MODELS[0], _user: User = Depends(current_user)
+) -> FileResponse:
+    """A sample made earlier; never speaks anything itself."""
+    path = _sample(_store(), _sample_key(voice_id, model_id))
+    if path is None:
+        raise problem(404, "No sample yet", "Make the sample for this voice first.")
+    return FileResponse(path, media_type="audio/mpeg")
 
 
 # ------------------------------------------------------------ format voices
@@ -698,6 +765,20 @@ def _spoken_script(db: Session, run: Run, store: ArtifactStore) -> Script:
             ]
         }
     )
+
+
+def _sample_key(voice_id: str, model_id: str) -> str:
+    return hash_payload({"voice_sample": voice_id, "model": model_id, "text": VOICE_SAMPLE_TEXT})
+
+
+def _sample(store: ArtifactStore, key: str) -> Any:
+    """The file of a voice sample made under this key, if it is still there."""
+    digest = store.get_step(key)
+    if digest is None:
+        return None
+    sample = store.get_raw(digest)
+    path = store.blob_path(sample["blob"], sample["suffix"])
+    return path if path.exists() else None
 
 
 def _bag(take: AudioTake) -> dict[str, str]:

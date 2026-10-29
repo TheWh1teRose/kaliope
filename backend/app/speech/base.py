@@ -26,6 +26,8 @@ DEFAULT_RATE = 0.08
 
 #: The models offered for dialogue, best first.
 DIALOGUE_MODELS: tuple[str, ...] = ("eleven_v4", "eleven_v3")
+#: What a generated voice sample says, for a voice ElevenLabs has no preview of.
+VOICE_SAMPLE_TEXT = "Hallo! So klinge ich, wenn ich eine Folge für Kalliope spreche."
 
 
 def cost_usd(model_id: str, characters: int) -> float:

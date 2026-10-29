@@ -89,6 +89,8 @@ def test_import_and_explicit_synthesis(client, run_id, provider):  # noqa: F811
     assert experiment["source"]["artifact_hash"] == setup["artifact_hash"]
     assert experiment["setup"] == {
         **setup,
+        "segment_ids": None,
+        "edits": {},
         "voice_cast": {
             **setup["voice_cast"],
             "language_code": None,
@@ -131,4 +133,113 @@ def test_import_and_explicit_synthesis(client, run_id, provider):  # noqa: F811
     assert resumed.status_code == 200
     take = _take(client, run_id, {"completed"})
     assert take["mix"]
+    speech_registry.reset_provider()
+
+
+def _wait(client, experiment_id):
+    for _ in range(300):
+        experiment = client.get(f"/api/experiments/runs/{experiment_id}").json()
+        if experiment["status"] in {"completed", "failed"}:
+            return experiment
+        time.sleep(0.02)
+    raise AssertionError(experiment)
+
+
+def test_selected_and_edited_segments_leave_the_prepared_script_alone(client, run_id):  # noqa: F811
+    speech = StubSpeech()
+    speech_registry.register_provider(speech)
+    loaded = client.post("/api/experiments/audio_generation/source", json={"run_id": run_id})
+    assert loaded.status_code == 200, loaded.text
+    prepared = json.loads(loaded.json()["fields"]["audio_script"])
+    digest = loaded.json()["fields"]["artifact_hash"]
+    first, second = prepared["lines"][0], prepared["lines"][1]
+    edited = "[excited] Ganz neu formuliert."
+    setup = {
+        "artifact_hash": digest,
+        # Order follows the script, not the list.
+        "segment_ids": [second["segment_id"], first["segment_id"]],
+        "edits": {first["segment_id"]: edited},
+        "voice_cast": {
+            "model_id": "eleven_v4",
+            "stability": 0.5,
+            # Only the selected speakers need a voice.
+            "voices": [
+                {"speaker": first["speaker"], "voice_id": "v-mod"},
+                {"speaker": second["speaker"], "voice_id": "v-exp"},
+                {"speaker": "Niemand", "voice_id": ""},
+            ],
+        },
+    }
+    source = {"run_id": run_id, "beat_id": loaded.json()["source"]["beat_id"]}
+
+    def post(changes):
+        body = json.loads(json.dumps({"setup": setup, "source": source}))
+        body["setup"].update(changes)
+        return client.post("/api/experiments/audio_generation/runs", json=body)
+
+    for changes, message in [
+        ({"segment_ids": []}, "at least one"),
+        ({"segment_ids": ["nope"]}, "Unknown segments"),
+        ({"edits": {"nope": "x"}}, "Unknown segments"),
+        ({"edits": {first["segment_id"]: "   "}}, "no text"),
+    ]:
+        refused = post(changes)
+        assert refused.status_code == 422 and message in refused.json()["detail"], refused.text
+    assert not speech.requests
+
+    response = post({})
+    assert response.status_code == 201, response.text
+    experiment = _wait(client, response.json()["id"])
+    assert experiment["status"] == "completed", experiment
+    output = experiment["output"]
+    assert output["segments"] == 2 and output["edited"] == 1
+    assert output["characters"] == len(edited) + len(second["tagged"])
+    assert output["audio_script_hash"] != digest
+
+    take = _take(client, run_id, {"completed", "failed"})
+    assert take["status"] == "completed", take["error"]
+    spoken = take["audio_script"]["lines"]
+    assert [line["segment_id"] for line in spoken] == [first["segment_id"], second["segment_id"]]
+    assert spoken[0]["tagged"] == edited and spoken[0]["speaker"] == first["speaker"]
+    assert spoken[0]["spoken"] == "Ganz neu formuliert." and spoken[0]["tags"] == ["[excited]"]
+    assert spoken[1] == second
+    sent = [item.text for request in speech.requests for item in request.inputs]
+    assert edited in sent and first["tagged"] not in sent
+    assert take["mix"]
+
+    # The prepared artifact is unchanged, and the experiment's take is not offered as a source.
+    again = client.post("/api/experiments/audio_generation/source", json={"run_id": run_id}).json()
+    assert again["fields"]["artifact_hash"] == digest
+    assert json.loads(again["fields"]["audio_script"]) == prepared
+    assert take["id"] not in {beat["id"] for beat in again["beats"]}
+    speech_registry.reset_provider()
+
+
+def test_voice_sample_is_made_once_on_request(client):
+    speech_registry.reset_provider()
+    assert (
+        client.post("/api/audio/voices/v-mod/sample", json={"model_id": "eleven_v4"}).status_code
+        == 409
+    )
+    speech = StubSpeech()
+    speech_registry.register_provider(speech)
+    assert client.get("/api/audio/voices/v-mod/sample").status_code == 404
+    assert client.post("/api/audio/voices/unknown/sample", json={}).status_code == 404
+    assert client.post("/api/audio/voices/v-mod/sample", json={"model_id": "x"}).status_code == 422
+    assert not speech.requests
+
+    made = client.post("/api/audio/voices/v-mod/sample", json={"model_id": "eleven_v4"})
+    assert made.status_code == 200, made.text
+    body = made.json()
+    assert body["cost_usd"] > 0 and body["characters"] > 0
+    assert [(r.model_id, [i.voice_id for i in r.inputs]) for r in speech.requests] == [
+        ("eleven_v4", ["v-mod"])
+    ]
+    audio = client.get(body["url"])
+    assert audio.status_code == 200 and audio.headers["content-type"] == "audio/mpeg"
+    assert audio.content
+
+    reused = client.post("/api/audio/voices/v-mod/sample", json={"model_id": "eleven_v4"}).json()
+    assert reused == {**body, "cost_usd": 0.0}
+    assert len(speech.requests) == 1
     speech_registry.reset_provider()
