@@ -209,11 +209,27 @@ def test_selected_and_edited_segments_leave_the_prepared_script_alone(client, ru
     assert edited in sent and first["tagged"] not in sent
     assert take["mix"]
 
-    # The prepared artifact is unchanged, and the experiment's take is not offered as a source.
-    again = client.post("/api/experiments/audio_generation/source", json={"run_id": run_id}).json()
+    again = client.post("/api/experiments/audio_generation/source", json=source).json()
     assert again["fields"]["artifact_hash"] == digest
     assert json.loads(again["fields"]["audio_script"]) == prepared
-    assert take["id"] not in {beat["id"] for beat in again["beats"]}
+    assert take["id"] in {beat["id"] for beat in again["beats"]}
+    for selection in ({"run_id": run_id}, {"run_id": run_id, "beat_id": take["id"]}):
+        retained = client.post("/api/experiments/audio_generation/source", json=selection)
+        assert retained.status_code == 200, retained.text
+        retained = retained.json()
+        assert retained["source"]["beat_id"] == take["id"]
+        assert retained["fields"]["artifact_hash"] == output["audio_script_hash"]
+        assert json.loads(retained["fields"]["audio_script"])["lines"] == spoken
+    reused_setup = {**setup, "artifact_hash": output["audio_script_hash"]}
+    rerun = client.post(
+        "/api/experiments/audio_generation/runs",
+        json={"setup": reused_setup, "source": {"run_id": run_id, "beat_id": take["id"]}},
+    )
+    assert rerun.status_code == 201, rerun.text
+    assert _wait(client, rerun.json()["id"])["status"] == "completed"
+    reused_take = _take(client, run_id, {"completed", "failed"})
+    assert reused_take["status"] == "completed", reused_take["error"]
+    assert reused_take["audio_script"]["lines"] == spoken
     speech_registry.reset_provider()
 
 

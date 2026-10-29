@@ -82,9 +82,6 @@ def prepared_source(db: Session, store: ArtifactStore, source: SourceIn) -> Sour
 
     available: list[tuple[AudioTake, str]] = []
     for take in takes:
-        # This experiment's own takes speak a selection of a prepared script, not one.
-        if (take.request_json or {}).get("prepared_audio_hash"):
-            continue
         digest = _bag(take).get("audio_script")
         if digest and store.exists(digest):
             available.append((take, digest))

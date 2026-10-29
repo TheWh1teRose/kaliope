@@ -74,7 +74,7 @@ const starting = ref(false)
 const error = ref('')
 const notice = ref('')
 let gone = false
-let refreshFailed = false
+let refreshNeeded = false
 let refreshVersion = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -228,17 +228,17 @@ async function refresh(): Promise<void> {
     if (gone || version !== refreshVersion) return
     runs.value = nextRuns
     takes.value = nextTakes
-    refreshFailed = false
+    refreshNeeded = false
   } catch (exc) {
     if (gone || version !== refreshVersion) return
-    refreshFailed = true
+    refreshNeeded = true
     throw exc
   }
 }
 
 function schedule(): void {
   clearTimeout(timer)
-  if (!gone && (busy.value || refreshFailed)) timer = setTimeout(poll, POLL_MS)
+  if (!gone && (busy.value || refreshNeeded)) timer = setTimeout(poll, POLL_MS)
 }
 
 async function poll(): Promise<void> {
@@ -256,6 +256,8 @@ async function generate(): Promise<void> {
   error.value = ''
   try {
     const run = await startRun<Setup>(KEY, payload(lines.value, setup.value), source.value)
+    refreshVersion++
+    refreshNeeded = true
     runs.value = [{ ...run, setup: normalise(run.setup) }, ...runs.value]
     shown.value = run.id
     await waitForRun(run.id, () => gone)

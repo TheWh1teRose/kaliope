@@ -202,9 +202,10 @@ going through a review pipeline; a changed selection is stored as its own
 `audio_script` artifact for the take. The experiment stores the source take,
 immutable artifact hash, selection, edits, pipeline version and chosen
 configuration with each attempt. Attempts reuse the existing chunk cache,
-progress, error, stop/resume, playback and download interfaces; they are not
-offered as prepared sources themselves. Saved attempts can reload the same
-script, selection, edits and settings for another test.
+progress, error, stop/resume, playback and download interfaces. Any take with a
+retained prepared script, including an experiment take, can be loaded as a
+source. Saved attempts can reload the same script, selection, edits and
+settings for another test.
 
 A take is a **one-minute sample** (whole lines up to about 1,000 characters,
 about $0.08) or the **whole episode** (about 14,000 characters for 15 minutes,

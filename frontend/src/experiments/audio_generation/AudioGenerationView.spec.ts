@@ -367,3 +367,49 @@ it.each([['resolve', false], ['reject', false], ['resolve', true], ['reject', tr
   expect(wrapper.find('[data-run="experiment1"]').exists()).toBe(true)
   wrapper.unmount()
 })
+
+it.each([['resolve', 'queued'], ['reject', 'queued'], ['resolve', 'completed'], ['reject', 'completed']] as const)(
+  'ignores an older poll (%s) after inserting a %s run whose wait fails', async (outcome, status) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    mocks.listRuns.mockResolvedValue([completedRun])
+    mocks.takes.mockResolvedValue({ takes: [take('running')] })
+    const wrapper = mountView()
+    await flushPromises()
+    await tab(wrapper, 'voices')
+    const selects = wrapper.findAll('select')
+    await selects[0]!.setValue('v1')
+    await selects[1]!.setValue('v2')
+
+    let resolve!: (value: { takes: ReturnType<typeof take>[] }) => void
+    let reject!: (reason: Error) => void
+    mocks.takes.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no }))
+    await nextPoll()
+    mocks.startRun.mockResolvedValue({
+      id: 'experiment1', status, created_at: '2026-10-06', total_cost_usd: 0,
+      setup: {}, source: null, output: null,
+    })
+    mocks.waitForRun.mockRejectedValueOnce(new Error('Wait temporarily unavailable'))
+    await wrapper.find('[data-generate]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-run="experiment1"]').exists()).toBe(true)
+
+    if (outcome === 'resolve') resolve({ takes: [take('completed')] })
+    else reject(new Error('Stale poll failed'))
+    await flushPromises()
+    expect(wrapper.find('[data-run="experiment1"]').exists()).toBe(true)
+    expect(wrapper.find('[role="alert"]').text()).toContain('Wait temporarily unavailable')
+
+    mocks.listRuns.mockResolvedValue([
+      { ...completedRun, id: 'experiment1', output: { run_id: 'r1', take_id: 'take2' } },
+      completedRun,
+    ])
+    mocks.takes.mockResolvedValue({ takes: [{ ...take('completed'), id: 'take2' }, take('completed')] })
+    const calls = mocks.listRuns.mock.calls.length
+    await nextPoll()
+    expect(mocks.listRuns).toHaveBeenCalledTimes(calls + 1)
+    expect(wrapper.find('[data-run="experiment1"] audio').attributes('src')).toBe('/finished.mp3')
+    await nextPoll()
+    expect(mocks.listRuns).toHaveBeenCalledTimes(calls + 1)
+    wrapper.unmount()
+  },
+)
