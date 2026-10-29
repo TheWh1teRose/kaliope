@@ -1,4 +1,4 @@
-"""Folder trees: the rules Dokumente and the Sammlung share (§11).
+"""Folder trees: the rules Dokumente, the Sammlung and the Läufe share (§11).
 
 Folders are filing, not policy: they carry no permissions, no inheritance and
 no effect on what they hold. An item's folder is a single nullable column, so
@@ -6,9 +6,10 @@ no effect on what they hold. An item's folder is a single nullable column, so
 items move up to the deleted folder's parent, the only outcome that cannot
 lose work.
 
-Each tree has its own table (``folders``, ``output_folders``) and its own item
-column (``documents.folder_id``, ``experiment_outputs.folder_id``); one
-``FolderTree`` per pair holds the rules, so both trees behave the same.
+Each tree has its own table (``folders``, ``output_folders``, ``run_folders``)
+and its own item column (``documents.folder_id``, ``experiment_outputs.folder_id``;
+the runs' tree files ``runs`` and ``series``); one ``FolderTree`` per tree holds
+the rules, so every tree behaves the same.
 """
 
 from __future__ import annotations
@@ -97,12 +98,7 @@ class FolderTree:
     def rows(self, db: Session) -> list[TreeRow]:
         """Every folder, depth-first in display order, each with its counts."""
         by_id, children = self._children_map(db)
-        direct: dict[str | None, int] = {
-            folder_id: count
-            for folder_id, count in db.execute(
-                select(self.item_folder, func.count()).group_by(self.item_folder)
-            ).all()
-        }
+        direct = self.direct_counts(db)
 
         out: list[TreeRow] = []
 
@@ -216,16 +212,15 @@ class FolderTree:
     def delete(self, db: Session, folder_id: str, cascade: bool) -> DeleteResult:
         folder = self.require(db, folder_id)
         subtree = [folder.id, *self.descendants(db, folder.id)]
-        items: list[Any] = list(
-            db.scalars(select(self.item_model).where(self.item_folder.in_(subtree))).all()
-        )
+        items = self.items_in(db, subtree)
+        held = self.count_items(items)
         children = [f for f in self._all(db) if f.parent_id == folder.id]
 
         if (items or children) and not cascade:
             raise problem(
                 409,
                 "Folder is not empty",
-                f"It holds {len(items)} {self.item_noun[:-1]}(s) and {len(children)} "
+                f"It holds {held} {self.item_noun[:-1]}(s) and {len(children)} "
                 "subfolder(s). Repeat with cascade=true to delete the subfolder(s); the "
                 f"{self.item_noun} move up to the parent folder and are never deleted.",
             )
@@ -243,8 +238,31 @@ class FolderTree:
         db.execute(sa_delete(self.folder_model).where(self.folder_model.id.in_(subtree)))
         db.commit()
         return DeleteResult(
-            deleted_folders=len(subtree), moved_items=len(items), moved_to=folder.parent_id
+            deleted_folders=len(subtree), moved_items=held, moved_to=folder.parent_id
         )
+
+    # ------------------------------------------------------------- items
+    # A tree whose items live in more than one table, or whose counts leave
+    # some rows out, overrides these three.
+
+    def direct_counts(self, db: Session) -> dict[str | None, int]:
+        """Items directly in each folder; the ``None`` key is the root."""
+        return {
+            folder_id: count
+            for folder_id, count in db.execute(
+                select(self.item_folder, func.count()).group_by(self.item_folder)
+            ).all()
+        }
+
+    def items_in(self, db: Session, folder_ids: list[str]) -> list[Any]:
+        """Every row filed in one of ``folder_ids``, each with a ``folder_id`` to re-file."""
+        return list(
+            db.scalars(select(self.item_model).where(self.item_folder.in_(folder_ids))).all()
+        )
+
+    def count_items(self, items: list[Any]) -> int:
+        """How many of ``items`` the messages and counts call an item."""
+        return len(items)
 
     # ------------------------------------------------------------ helpers
 

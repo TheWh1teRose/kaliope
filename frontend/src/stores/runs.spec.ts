@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRunsStore } from './runs'
 
-const api = vi.hoisted(() => ({ get: vi.fn() }))
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn() }))
 
 vi.mock('@/api/client', async (original) => ({
   ...(await original<typeof import('@/api/client')>()),
@@ -67,5 +67,23 @@ describe('runs store', () => {
     expect(api.get).toHaveBeenNthCalledWith(1, '/api/runs')
     expect(api.get).toHaveBeenNthCalledWith(2, '/api/runs?document_id=doc%201')
     expect(api.get).toHaveBeenNthCalledWith(3, '/api/runs?limit=500')
+  })
+
+  it('loads one run folder, or the runs in none', async () => {
+    const store = useRunsStore()
+    await store.load(undefined, undefined, 'f 1')
+    await store.load(undefined, undefined, 'root')
+    expect(api.get).toHaveBeenNthCalledWith(1, '/api/runs?folder_id=f%201')
+    expect(api.get).toHaveBeenNthCalledWith(2, '/api/runs?folder_id=root')
+  })
+
+  it('renames a run and files it into a folder or back out', async () => {
+    const store = useRunsStore()
+    await store.rename('r1', 'Probelauf')
+    await store.move('r1', 'f1')
+    await store.move('r1', null)
+    expect(api.patch).toHaveBeenCalledWith('/api/runs/r1', { name: 'Probelauf' })
+    expect(api.post).toHaveBeenNthCalledWith(1, '/api/runs/r1/move', { folder_id: 'f1' })
+    expect(api.post).toHaveBeenNthCalledWith(2, '/api/runs/r1/move', { folder_id: null })
   })
 })

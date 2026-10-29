@@ -551,8 +551,17 @@ Collected experiment outputs get the same kind of tree in the **Sammlung**, a
 tab of the Experimente page: every collected output of every experiment in one
 list, filed into folders and subfolders by dragging a card onto a folder, by
 "In Ordner …", or many at once. Each experiment page has a "Sammeln in" folder
-that every "Sammeln" files into. The two trees are separate; both follow the
-rules in `app/folder_tree.py`.
+that every "Sammeln" files into.
+
+The **Läufe** overview has a third tree for runs: drag a row onto a folder or
+use "In Ordner …" to file it, and select a folder in the sidebar to filter the
+list. A standalone run is filed on its own; a series is filed as one unit with
+its planner and every episode, so filing an episode files its series. Folder
+counts count each series once. Runs and series can be renamed from their row
+or their page; a blank name falls back to the document or plan title. Renaming
+a series also retitles its episode runs. Runs in the trash keep their folder
+and come back into it, but leave the counts. The three trees are separate; all
+follow the rules in `app/folder_tree.py`.
 
 A run is also shown as its **flow graph**: every node with the values it
 consumes and the value it publishes, its status, cost, model and timing, and the
@@ -661,6 +670,10 @@ POST /api/series/{id}/trash             # the series with its episodes to the tr
 POST /api/series/{id}/restore           # all of it back; GET /api/series?trashed=true lists it
 GET /api/folders                        # the folder tree, with rolled-up counts
 GET /api/experiment-folders             # the Sammlung's folder tree, same rules
+GET /api/run-folders                    # the runs' folder tree; /summary counts all and none
+POST /api/runs/{id}/move                # file a run; an episode files its whole series
+POST /api/series/{id}/move              # file a series with all its episodes
+PATCH /api/runs/{id}, /api/series/{id}  # rename; a blank name clears it
 GET /api/experiments/outputs            # every collected output; folder, experiment, q filters
 POST /api/experiments/outputs/move      # file one or many outputs into a folder
 ```

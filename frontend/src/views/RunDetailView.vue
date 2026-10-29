@@ -13,6 +13,7 @@ import LoadingState from '@/components/LoadingState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NodeInspector from '@/components/NodeInspector.vue'
 import NotesEditor from '@/components/NotesEditor.vue'
+import RenameDialog from '@/components/RenameDialog.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { fill, t } from '@/i18n'
 import { type ProgressLine, useRunsStore } from '@/stores/runs'
@@ -57,6 +58,7 @@ const stoppedNotice = computed(() => {
 const restoring = ref(false)
 const restoreError = ref('')
 const confirmStop = ref(false)
+const renaming = ref(false)
 const stopping = ref(false)
 const stopError = ref('')
 
@@ -105,6 +107,12 @@ function onLiveEvent(line: ProgressLine): void {
 function follow(): void {
   if (live.value) runs.watch(props.id, reload, onLiveEvent)
   else runs.stopWatching()
+}
+
+/** Keep the rest of the page as it is: only the title changes. */
+async function rename(name: string): Promise<void> {
+  const renamed = await runs.rename(props.id, name)
+  if (run.value) run.value = { ...run.value, name: renamed.name }
 }
 
 async function restore(): Promise<void> {
@@ -260,8 +268,21 @@ onUnmounted(() => {
         <RouterLink class="btn btn--sm" :to="{ name: 'bench', query: { run: run.id } }">
           {{ t.bench.openInBench }}
         </RouterLink>
+        <button class="btn btn--sm btn--ghost" type="button" data-rename @click="renaming = true">
+          {{ t.common.rename }}
+        </button>
       </div>
     </header>
+
+    <RenameDialog
+      :open="renaming"
+      :title="t.run.renameTitle"
+      :lead="t.run.renameLead"
+      :hint="t.run.nameHint"
+      :current="run.name"
+      :save="rename"
+      @close="renaming = false"
+    />
 
     <nav class="tabs pipeline-tabs" :aria-label="t.run.title">
       <button class="tab" :class="{ 'tab--on': activeTab === 'run' }" :aria-pressed="activeTab === 'run'" @click="activeTab = 'run'">{{ t.run.title }}</button>

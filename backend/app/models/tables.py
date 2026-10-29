@@ -223,6 +223,11 @@ class Series(Base):
     #: When the series went to the trash. Its runs carry the same mark, so the
     #: series, its planner and its episodes leave the lists and come back as one.
     trashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: ``None`` is "Ohne Ordner". The series is filed as one unit: its runs
+    #: carry no folder of their own and are listed under this one.
+    folder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("run_folders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     document: Mapped[Document] = relationship()
 
@@ -260,6 +265,11 @@ class Run(Base):
     #: When the run was moved to the trash. Unset means it is listed normally;
     #: nothing of a trashed run is removed, so restoring only clears this.
     trashed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: ``None`` is "Ohne Ordner". Only a standalone run uses it; the runs of a
+    #: series are filed with their series (``Series.folder_id``).
+    folder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("run_folders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     document: Mapped[Document] = relationship()
 
@@ -514,6 +524,25 @@ class OutputFolder(Base):
     name: Mapped[str] = mapped_column(String(200))
     parent_id: Mapped[str | None] = mapped_column(
         ForeignKey("output_folders.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RunFolder(Base):
+    """A folder in the runs overview, the runs' counterpart of ``Folder``.
+
+    Holds standalone runs and whole series. Its own table, so a document can
+    never be filed into a run folder. Sibling names are kept unique by the API
+    for the same reason as ``Folder``.
+    """
+
+    __tablename__ = "run_folders"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200))
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("run_folders.id", ondelete="CASCADE"), nullable=True, index=True
     )
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -60,9 +60,24 @@ export const useSeriesStore = defineStore('series', () => {
     return api.get<SeriesOut>(`/api/series/${id}`)
   }
 
-  async function list(documentId?: string): Promise<SeriesOut[]> {
-    const query = documentId ? `?document_id=${encodeURIComponent(documentId)}` : ''
+  /** `folderId` keeps one run folder's series (`'root'`: those in none). */
+  async function list(documentId?: string, folderId?: string): Promise<SeriesOut[]> {
+    const params = [
+      documentId ? `document_id=${encodeURIComponent(documentId)}` : '',
+      folderId ? `folder_id=${encodeURIComponent(folderId)}` : '',
+    ].filter((part) => part !== '')
+    const query = params.length ? `?${params.join('&')}` : ''
     return api.get<SeriesOut[]>(`/api/series${query}`)
+  }
+
+  /** Change only the display name; the episodes are retitled from it. Blank clears it. */
+  async function rename(id: string, name: string): Promise<SeriesOut> {
+    return api.patch<SeriesOut>(`/api/series/${id}`, { name })
+  }
+
+  /** File a series, with its planner and every episode, into a run folder; `null` for none. */
+  async function move(id: string, folderId: string | null): Promise<SeriesOut> {
+    return api.post<SeriesOut>(`/api/series/${id}/move`, { folder_id: folderId })
   }
 
   /** The series in the trash, latest trashed first. */
@@ -151,6 +166,8 @@ export const useSeriesStore = defineStore('series', () => {
     create,
     get,
     list,
+    rename,
+    move,
     trashed,
     trash,
     restore,

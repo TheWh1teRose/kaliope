@@ -88,6 +88,7 @@ const store = {
   replan: vi.fn(async () => series('queued')),
   resume: vi.fn(async () => series('queued')),
   restore: vi.fn(async () => series('stopped')),
+  rename: vi.fn(async (_id: string, name: string) => ({ ...series('planned'), name })),
   stop: vi.fn(async () => ({ id: 's1', status: 'stopped', outcome: 'stopped', stopped_by: null })),
   watch: vi.fn(),
   stopWatching: vi.fn(),
@@ -134,6 +135,25 @@ describe('series view', () => {
     const wrapper = mount(SeriesView, { props: { id: 's1' }, global: { plugins: [router()] } })
     await flushPromises()
     expect(wrapper.find('h1').text()).toBe('Klimaserie')
+  })
+
+  it('renames the series from its page', async () => {
+    const wrapper = mount(SeriesView, {
+      props: { id: 's1' },
+      attachTo: document.body,
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    await wrapper.get('.head [data-rename]').trigger('click')
+    expect(document.body.textContent).toContain(t.series.renameTitle)
+    const input = document.body.querySelector<HTMLInputElement>('[data-rename-input]')!
+    input.value = 'Klimaserie'
+    input.dispatchEvent(new Event('input'))
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-rename"]')!.click()
+    await flushPromises()
+    expect(store.rename).toHaveBeenCalledWith('s1', 'Klimaserie')
+    expect(wrapper.find('h1').text()).toBe('Klimaserie')
+    wrapper.unmount()
   })
 
   it('plans again with another count', async () => {

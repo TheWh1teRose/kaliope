@@ -338,6 +338,16 @@ export default {
     namePlaceholder: 'Optional',
     nameHint: 'Leer lassen, dann gilt der Dokumenttitel.',
     seriesBadge: 'Serie · Folge {n}',
+    renameTitle: 'Lauf umbenennen',
+    renameLead:
+      'Nur der angezeigte Name ändert sich. Skript, Audio und Freigabelinks bleiben unberührt.',
+    allRuns: 'Alle Läufe',
+    moveTitle: 'Lauf einsortieren',
+    moveLead: 'Wählen Sie den Ordner, in den dieser Lauf gehört.',
+    moveEpisodeLead:
+      'Eine Folge gehört zu ihrer Serie: Die ganze Serie wandert mit allen Folgen in den gewählten Ordner.',
+    folderDeleteLead:
+      'Unterordner werden mitgelöscht. Enthaltene Läufe und Serien wandern in den übergeordneten Ordner und bleiben erhalten.',
     reconnecting: 'Verbindung unterbrochen, verbinde neu …',
     nodes: 'Knoten',
     node: 'Knoten',
@@ -418,6 +428,9 @@ export default {
     name: 'Name der Serie',
     namePlaceholder: 'Optional',
     nameHint: 'Die Folgen heißen dann „Name Teil 1“, „Name Teil 2“, …. Leer lassen behält den bisherigen Titel.',
+    renameTitle: 'Serie umbenennen',
+    moveTitle: 'Serie einsortieren',
+    moveLead: 'Die Serie wandert mit Planer und allen Folgen in den gewählten Ordner.',
     flowPerEpisode: 'Flow je Folge',
     planner: 'Planer',
     count: 'Anzahl Folgen',

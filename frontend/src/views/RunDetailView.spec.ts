@@ -48,6 +48,7 @@ const store = {
     stopped_by: 'reviewer@kalliope.test',
   })),
   restore: vi.fn(async () => run('completed')),
+  rename: vi.fn(async (_id: string, name: string) => ({ ...run('completed'), name: name || null })),
   progress: [] as { type: string; at: string }[],
   reconnecting: false,
 }
@@ -113,6 +114,28 @@ describe('run detail', () => {
     expect(wrapper.find('[data-feedback-tab]').exists()).toBe(true)
     wrapper.unmount()
     vi.restoreAllMocks()
+  })
+
+  it('renames the run from its page and falls back to the document title when cleared', async () => {
+    store.get.mockImplementation(async () => ({ ...run('completed'), name: 'Probelauf' }))
+    const wrapper = mount(RunDetailView, {
+      props: { id: 'r1' },
+      attachTo: document.body,
+      global: { plugins: [router()] },
+    })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('Probelauf')
+    await wrapper.get('.head [data-rename]').trigger('click')
+    const input = document.body.querySelector<HTMLInputElement>('[data-rename-input]')!
+    expect(input.value).toBe('Probelauf')
+    input.value = ''
+    input.dispatchEvent(new Event('input'))
+    document.body.querySelector<HTMLButtonElement>('[data-action="confirm-rename"]')!.click()
+    await flushPromises()
+    expect(store.rename).toHaveBeenCalledWith('r1', '')
+    expect(wrapper.get('h1').text()).toBe('Physiologie')
+    expect(document.body.querySelector('[data-rename-input]')).toBeNull()
+    wrapper.unmount()
   })
 
   it('asks in the page before stopping a running run', async () => {

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, type Ref } from 'vue'
 
 import { api } from '@/api/client'
-import type { FolderOut, OutputFolderOut } from '@/api/types'
+import type { FolderOut, OutputFolderOut, RunFolderOut, RunFolderSummary } from '@/api/types'
 
 /** The literal the API uses for "items in no folder". */
 export const ROOT = 'root'
@@ -19,8 +19,8 @@ export interface FolderRow {
 /**
  * A folder tree store. The server returns the tree already in display order
  * with each folder's depth and rolled-up counts, so nothing here rebuilds the
- * hierarchy — the ordering rule lives in one place. Dokumente and the
- * Sammlung each get one, against their own endpoint.
+ * hierarchy — the ordering rule lives in one place. Dokumente, the Sammlung
+ * and the Läufe each get one, against their own endpoint.
  */
 export function makeFolderStore<Folder extends FolderRow>(id: string, base: string) {
   return defineStore(id, () => {
@@ -99,3 +99,11 @@ export const useOutputFoldersStore = makeFolderStore<OutputFolderOut>(
   'output-folders',
   '/api/experiment-folders',
 )
+
+/** The Läufe's folders: standalone runs and whole series. */
+export const useRunFoldersStore = makeFolderStore<RunFolderOut>('run-folders', '/api/run-folders')
+
+/** How many runs and series are listed at all, and how many in no folder. */
+export async function runFolderSummary(): Promise<RunFolderSummary> {
+  return api.get<RunFolderSummary>('/api/run-folders/summary')
+}
